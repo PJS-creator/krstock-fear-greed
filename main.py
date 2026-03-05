@@ -18,8 +18,13 @@ from zoneinfo import ZoneInfo
 # =========================
 KST = ZoneInfo("Asia/Seoul")
 
-BASE_LIST_URL = "https://gall.dcinside.com/mgallery/board/lists/"
 BOARD_ID = os.getenv("BOARD_ID", "krstock")
+
+# ✅ 게시판 타입(일반갤/마이너갤)에 따라 워크플로우에서 바꿀 수 있게
+BASE_LIST_URL = os.getenv("BASE_LIST_URL", "https://gall.dcinside.com/mgallery/board/lists/")
+
+# ✅ 파일명 접두어(기본은 BOARD_ID)
+OUT_PREFIX = os.getenv("OUT_PREFIX", BOARD_ID)
 
 # 수집 시간대 (KST)
 START_TIME_STR = os.getenv("START_TIME", "08:50")
@@ -574,10 +579,10 @@ def main():
     # 3) 스크랩할 날짜가 하나도 없으면(전부 개설일 이전) 빈 CSV만 생성하고 종료
     if not target_dates:
         for d in requested_dates:
-            out_path = os.path.join(OUT_DIR, f"krstock_{d.isoformat()}.csv")
+            out_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_{d.isoformat()}.csv")
             write_csv(out_path, [])
         # 합본도 생성
-        combined_path = os.path.join(OUT_DIR, "krstock_all.csv")
+        combined_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_all.csv")
         with open(combined_path, "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f)
             w.writerow(["작성시간(KST)", "날짜", "제목", "URL"])
@@ -599,11 +604,11 @@ def main():
 
     # 6) 날짜별 CSV 저장(요청된 날짜는 모두 생성)
     for d in requested_dates:
-        out_path = os.path.join(OUT_DIR, f"krstock_{d.isoformat()}.csv")
+        out_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}{d.isoformat()}.csv")
         write_csv(out_path, all_results_by_date.get(d, []))
 
     # 7) 합본 CSV도 생성
-    combined_path = os.path.join(OUT_DIR, "krstock_all.csv")
+    combined_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_all.csv")
     combined_rows: List[Tuple[datetime, str, str, str]] = []
     for d in requested_dates:
         for dt, title, url in all_results_by_date.get(d, []):
