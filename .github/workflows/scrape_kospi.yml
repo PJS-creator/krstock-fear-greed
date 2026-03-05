@@ -38,15 +38,22 @@ jobs:
           BOARD_ID: "kospi"
           OUT_DIR: "outputs_kospi"
           OUT_PREFIX: "kospi"
+
           TARGET_DATE: ${{ inputs.target_date }}
           START_TIME: ${{ inputs.start_time }}
           END_TIME: ${{ inputs.end_time }}
+
           LIST_NUM: "100"
-          # 필요하면 속도/차단 조절
           SLEEP_LIST: "0.9"
           SLEEP_POST: "0.6"
           MAX_RETRIES: "5"
-        run: python main.py
+
+          # 디버그 로그 보고 싶으면 1
+          DEBUG: "1"
+
+        run: |
+          python main.py
+          ls -al outputs_kospi || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
