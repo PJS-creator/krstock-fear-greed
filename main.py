@@ -1,12 +1,12 @@
+# main.py
 import os
 import re
 import csv
 import time
 import random
-import hashlib
 from dataclasses import dataclass
 from datetime import datetime, date, time as dtime
-from typing import Optional, Tuple, List, Dict, Iterable
+from typing import Optional, Tuple, List, Dict
 from urllib.parse import urlsplit, urlunsplit, parse_qs, urlencode, urljoin
 
 import requests
@@ -18,77 +18,49 @@ from zoneinfo import ZoneInfo
 # =========================
 KST = ZoneInfo("Asia/Seoul")
 
-BOARD_ID = os.getenv("BOARD_ID", "krstock").strip()
+BASE_LIST_URL = "https://gall.dcinside.com/mgallery/board/lists/"
+BOARD_ID = os.getenv("BOARD_ID", "krstock")
 
-# BASE_LIST_URL을 워크플로우에서 강제해도 되지만,
-# 잘못 들어오면 자동으로 다른 후보를 시도해서 정상 동작하도록 함.
-ENV_BASE_LIST_URL = os.getenv("BASE_LIST_URL", "").strip()
+# 수집 시간대 (KST)
+START_TIME_STR = os.getenv("START_TIME", "08:50")
+END_TIME_STR = os.getenv("END_TIME", "15:40")
 
-OUT_PREFIX = os.getenv("OUT_PREFIX", BOARD_ID).strip()
-OUT_DIR = os.getenv("OUT_DIR", "outputs").strip()
-
-START_TIME_STR = os.getenv("START_TIME", "08:50").strip()
-END_TIME_STR = os.getenv("END_TIME", "15:40").strip()
-
+# 특정 날짜만 단일 실행하고 싶으면 (YYYY-MM-DD). 비우면 date.txt 전체 실행
 TARGET_DATE_STR = os.getenv("TARGET_DATE", "").strip()
-DATES_FILE = os.getenv("DATES_FILE", "date.txt").strip()
 
-LIST_NUM = int(os.getenv("LIST_NUM", "100"))
-MAX_PAGE_LIMIT = int(os.getenv("MAX_PAGE_LIMIT", "20000"))
+# 날짜 파일 (각 줄 첫 토큰이 YYYY-MM-DD 라면 OK)
+DATES_FILE = os.getenv("DATES_FILE", "date.txt")
 
-REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "25"))
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", "6"))
+# 페이지/부하 제어
+LIST_NUM = int(os.getenv("LIST_NUM", "100"))  # 30/50/100 중 하나(기본 100 추천)
+MAX_PAGE_LIMIT = int(os.getenv("MAX_PAGE_LIMIT", "20000"))  # 안전 상한
 
-SLEEP_LIST = float(os.getenv("SLEEP_LIST", "0.9"))
-SLEEP_POST = float(os.getenv("SLEEP_POST", "0.6"))
+REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "20"))
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", "5"))
+SLEEP_LIST = float(os.getenv("SLEEP_LIST", "0.8"))  # list 페이지 간 sleep
+SLEEP_POST = float(os.getenv("SLEEP_POST", "0.5"))  # 상세 페이지 간 sleep
 
-DEBUG = os.getenv("DEBUG", "0").strip() == "1"
+OUT_DIR = os.getenv("OUT_DIR", "outputs")
 
-# requests로 막히면 playwright로 우회할지 선택
-# - requests: requests만 사용(막히면 실패)
-# - playwright: playwright만 사용(코스피 같은 강한 차단 대응)
-# - auto: requests 시도 -> 막히면 playwright로 1회 자동 폴백
-FETCH_MODE = os.getenv("FETCH_MODE", "requests").strip().lower()
-
-# 차단 페이지를 파일로 남길지
-SAVE_BLOCK_HTML = os.getenv("SAVE_BLOCK_HTML", "1").strip() == "1"
-DEBUG_DIR = os.getenv("DEBUG_DIR", "debug_html").strip()
-
+# User-Agent (봇 차단 완화에 도움)
 USER_AGENT = os.getenv(
     "USER_AGENT",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-).strip()
+    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+)
 
-# 가능하면 실제 크롬에 가깝게 헤더를 채움(차단 완화에 도움될 때가 있음)
 DEFAULT_HEADERS = {
     "User-Agent": USER_AGENT,
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Cache-Control": "max-age=0",
-    "DNT": "1",
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
-    # sec-fetch 계열은 requests에서 의미가 없을 수도 있지만,
-    # 일부 사이트/방화벽에서 단순 헤더 존재 여부만 보는 경우가 있어 포함
-    "Sec-Fetch-Dest": "document",
-    "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
 }
 
-BASE_LIST_URL_CANDIDATES = [
-    "https://gall.dcinside.com/mgallery/board/lists/",
-    "https://gall.dcinside.com/board/lists/",
-]
 
 # =========================
-# 예외 / 데이터 구조
+# 데이터 구조
 # =========================
-class BlockedBySiteError(RuntimeError):
-    """요청은 성공(HTTP 200 등)했지만, 내용이 차단/보안문자 페이지일 때"""
-
-
 @dataclass(frozen=True)
 class PostRow:
     post_no: int
@@ -117,78 +89,15 @@ def ensure_dir(path: str) -> None:
 
 def clean_title(s: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
-    s = re.sub(r"\[\d+\]\s*$", "", s).strip()  # 댓글수 [12] 제거
+    s = re.sub(r"\[\d+\]\s*$", "", s).strip()  # 제목 끝 댓글수 [12] 제거
     return s
 
 
-def uniq_keep_order(items: Iterable[str]) -> List[str]:
-    seen = set()
-    out = []
-    for x in items:
-        x = (x or "").strip()
-        if not x:
-            continue
-        if x in seen:
-            continue
-        seen.add(x)
-        out.append(x)
-    return out
-
-
-def sha1(s: str) -> str:
-    return hashlib.sha1(s.encode("utf-8", errors="ignore")).hexdigest()
-
-
-def dump_debug_html(tag: str, url: str, html: str) -> None:
-    if not SAVE_BLOCK_HTML:
-        return
-    try:
-        ensure_dir(DEBUG_DIR)
-        fname = f"{tag}_{BOARD_ID}_{sha1(url)[:10]}.html"
-        path = os.path.join(DEBUG_DIR, fname)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(html)
-        print(f"[DEBUG] HTML 저장: {path}")
-    except Exception as e:
-        print(f"[DEBUG] HTML 저장 실패: {e}")
-
-
-def looks_like_blocked(html: str) -> bool:
+def build_list_url(page: int) -> str:
     """
-    디시 차단/보안문자/비정상 접근 페이지에 자주 등장하는 문구 기반 휴리스틱.
-    (환경에 따라 문구가 조금씩 다를 수 있어 넉넉히 잡음)
+    DCInside mgallery list URL 생성: id/page/list_num
     """
-    if not html:
-        return True
-
-    text = re.sub(r"\s+", " ", html).lower()
-
-    keywords = [
-        "보안문자",
-        "자동입력 방지",
-        "자동 등록 방지",
-        "비정상",
-        "정상적인 접근",
-        "접근이 제한",
-        "접근 제한",
-        "잠시 후 다시",
-        "차단",
-        "blocked",
-        "access denied",
-        "captcha",
-        "security check",
-    ]
-
-    hit = sum(1 for k in keywords if k in text)
-    # 너무 공격적으로 잡으면 오탐이 날 수 있어 2개 이상 일 때 차단으로 판단
-    return hit >= 2
-
-
-# =========================
-# URL 빌더
-# =========================
-def build_list_url(page: int, base_list_url: str) -> str:
-    parts = urlsplit(base_list_url)
+    parts = urlsplit(BASE_LIST_URL)
     qs = parse_qs(parts.query)
     qs["id"] = [BOARD_ID]
     qs["page"] = [str(page)]
@@ -197,167 +106,47 @@ def build_list_url(page: int, base_list_url: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
 
 
-# =========================
-# Fetcher (requests / playwright)
-# =========================
-class Fetcher:
-    def get(self, url: str, referer: Optional[str] = None) -> str:
-        raise NotImplementedError
-
-    def close(self) -> None:
-        pass
+def make_session() -> requests.Session:
+    sess = requests.Session()
+    sess.headers.update(DEFAULT_HEADERS)
+    return sess
 
 
-class RequestsFetcher(Fetcher):
-    def __init__(self):
-        self.session = requests.Session()
-        self.session.headers.update(DEFAULT_HEADERS)
-
-    def warmup(self) -> None:
-        # 쿠키/세션을 조금이라도 자연스럽게 만들기 위해 루트 1회 방문
-        # (효과 없을 수도 있지만 비용이 작아서 넣어둠)
+def fetch_html(session: requests.Session, url: str, referer: Optional[str] = None) -> str:
+    """
+    재시도 + 백오프 fetch
+    """
+    last_err: Optional[Exception] = None
+    for attempt in range(1, MAX_RETRIES + 1):
         try:
-            self.session.get("https://www.dcinside.com", timeout=REQUEST_TIMEOUT)
-        except Exception:
-            pass
+            headers = {}
+            if referer:
+                headers["Referer"] = referer
 
-    def get(self, url: str, referer: Optional[str] = None) -> str:
-        last_err: Optional[Exception] = None
+            resp = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+            if resp.status_code == 200 and resp.text:
+                return resp.text
 
-        for attempt in range(1, MAX_RETRIES + 1):
-            try:
-                headers = {}
-                if referer:
-                    headers["Referer"] = referer
-
-                resp = self.session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
-
-                if resp.status_code == 200 and resp.text:
-                    html = resp.text
-                    if looks_like_blocked(html):
-                        dump_debug_html("blocked", url, html)
-                        raise BlockedBySiteError("blocked(html)")
-                    return html
-
-                if resp.status_code in (403, 429, 500, 502, 503, 504):
-                    last_err = RuntimeError(f"HTTP {resp.status_code}")
-                    jitter_sleep(1.2 * attempt)
-                    continue
-
+            # 차단/레이트리밋 가능 코드들
+            if resp.status_code in (403, 429, 500, 502, 503, 504):
                 last_err = RuntimeError(f"HTTP {resp.status_code}")
-                jitter_sleep(0.8 * attempt)
-
-            except BlockedBySiteError as e:
-                # 차단은 재시도해도 같은 경우가 많아 즉시 종료(상위에서 playwright 폴백 가능)
-                raise e
-            except Exception as e:
-                last_err = e
                 jitter_sleep(1.2 * attempt)
+                continue
 
-        raise RuntimeError(f"요청 실패: {url} / 마지막 에러: {last_err}")
+            last_err = RuntimeError(f"HTTP {resp.status_code}")
+            jitter_sleep(0.8 * attempt)
 
+        except Exception as e:
+            last_err = e
+            jitter_sleep(1.2 * attempt)
 
-class PlaywrightFetcher(Fetcher):
-    """
-    Playwright(Chromium)로 HTML을 가져옴.
-    - 디시가 requests(User-Agent만 바꾼 봇) 접근을 막는 환경에서 유효할 때가 있음
-    - 단, playwright 설치 + 브라우저 설치가 필요(워크플로우 수정 필요)
-    """
-
-    def __init__(self):
-        # 지연 import (krstock처럼 playwright 불필요한 워크플로우에서 의존성 강제하지 않기)
-        from playwright.sync_api import sync_playwright  # type: ignore
-
-        self._sync_playwright = sync_playwright
-        self._pw = None
-        self._browser = None
-        self._context = None
-
-    def _ensure(self):
-        if self._pw is not None:
-            return
-
-        self._pw = self._sync_playwright().start()
-        self._browser = self._pw.chromium.launch(headless=True)
-
-        # locale/timezone/user_agent는 약간이라도 브라우저처럼 보이게
-        self._context = self._browser.new_context(
-            user_agent=USER_AGENT,
-            locale="ko-KR",
-            timezone_id="Asia/Seoul",
-        )
-
-        # 불필요 리소스 차단(속도/부하 개선)
-        def _route_handler(route, request):
-            if request.resource_type in ("image", "media", "font", "stylesheet"):
-                return route.abort()
-            return route.continue_()
-
-        try:
-            self._context.route("**/*", _route_handler)
-        except Exception:
-            pass
-
-    def get(self, url: str, referer: Optional[str] = None) -> str:
-        self._ensure()
-
-        last_err: Optional[Exception] = None
-        for attempt in range(1, MAX_RETRIES + 1):
-            page = None
-            try:
-                page = self._context.new_page()
-                # referer는 goto 옵션으로
-                page.goto(url, wait_until="domcontentloaded", referer=referer, timeout=REQUEST_TIMEOUT * 1000)
-
-                # table이 나타날 때까지 아주 짧게만 대기
-                try:
-                    page.wait_for_timeout(300)  # 0.3s
-                except Exception:
-                    pass
-
-                html = page.content() or ""
-                if looks_like_blocked(html):
-                    dump_debug_html("blocked_pw", url, html)
-                    raise BlockedBySiteError("blocked(playwright)")
-
-                return html
-
-            except BlockedBySiteError as e:
-                raise e
-            except Exception as e:
-                last_err = e
-                jitter_sleep(1.0 * attempt)
-            finally:
-                try:
-                    if page is not None:
-                        page.close()
-                except Exception:
-                    pass
-
-        raise RuntimeError(f"요청 실패: {url} / 마지막 에러: {last_err}")
-
-    def close(self) -> None:
-        try:
-            if self._context is not None:
-                self._context.close()
-        except Exception:
-            pass
-        try:
-            if self._browser is not None:
-                self._browser.close()
-        except Exception:
-            pass
-        try:
-            if self._pw is not None:
-                self._pw.stop()
-        except Exception:
-            pass
+    raise RuntimeError(f"요청 실패: {url} / 마지막 에러: {last_err}")
 
 
-# =========================
-# HTML 파싱
-# =========================
 def extract_open_date_from_list(html: str) -> Optional[date]:
+    """
+    리스트 페이지 텍스트에서 '개설일 2025-05-19' 추출
+    """
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
     m = re.search(r"개설일\s*(\d{4}-\d{2}-\d{2})", text)
@@ -370,81 +159,29 @@ def extract_open_date_from_list(html: str) -> Optional[date]:
 
 
 def _pick_main_table(soup: BeautifulSoup):
-    # table.gall_list가 있으면 그게 최우선
-    t = soup.select_one("table.gall_list")
-    if t:
-        return t
+    """
+    '제목/글쓴이/작성일' 키워드를 가진 table을 우선 선택 (구조 변경에도 어느정도 견딤)
+    """
+    tables = soup.find_all("table")
+    for t in tables:
+        thead_text = ""
+        thead = t.find("thead")
+        if thead:
+            thead_text = thead.get_text(" ", strip=True)
+        else:
+            thead_text = t.get_text(" ", strip=True)[:200]
 
-    # fallback: thead에 제목/작성일/글쓴이 포함 table 찾기
-    for tb in soup.find_all("table"):
-        thead = tb.find("thead")
-        thead_text = thead.get_text(" ", strip=True) if thead else ""
         if ("제목" in thead_text) and ("작성일" in thead_text) and ("글쓴이" in thead_text):
-            return tb
-
-    return None
-
-
-def _find_date_td(tr) -> Optional[BeautifulSoup]:
-    date_td = tr.select_one("td.gall_date")
-    if date_td:
-        return date_td
-
-    # fallback: td들 중 날짜/시간 패턴을 찾기
-    tds = tr.find_all("td")
-    for td in reversed(tds):
-        txt = td.get_text(" ", strip=True)
-
-        if re.fullmatch(r"\d{1,2}:\d{2}", txt):
-            return td
-        if re.fullmatch(r"\d{2}\.\d{2}", txt):
-            return td
-        if re.fullmatch(r"\d{2}[./-]\d{2}[./-]\d{2}", txt):
-            return td
-        if re.fullmatch(r"\d{4}[./-]\d{2}[./-]\d{2}", txt):
-            return td
-
-        if td.has_attr("title"):
-            t = str(td.get("title", "")).strip()
-            if re.search(r"\d{4}[./-]\d{2}[./-]\d{2}\s+[0-2]\d:[0-5]\d", t):
-                return td
-
-        child = td.find(attrs={"title": True})
-        if child:
-            t = str(child.get("title", "")).strip()
-            if re.search(r"\d{4}[./-]\d{2}[./-]\d{2}\s+[0-2]\d:[0-5]\d", t):
-                return td
-
-    return None
-
-
-def _pick_best_view_anchor(tr) -> Optional[BeautifulSoup]:
-    """
-    리스트 한 줄(tr) 안에서 진짜 '게시글 보기' 링크를 최대한 정확히 고른다.
-    광고/설문/갤로그 링크 등 섞여 있어도 견딜 수 있게.
-    """
-    anchors = tr.find_all("a", href=True)
-    if not anchors:
-        return None
-
-    # 1순위: board/view 링크
-    candidates = [a for a in anchors if "board/view" in a["href"]]
-    if candidates:
-        candidates.sort(key=lambda a: len(a.get_text(" ", strip=True)), reverse=True)
-        return candidates[0]
-
-    # 2순위: no= 파라미터가 있는 링크 (view일 가능성)
-    candidates = [a for a in anchors if re.search(r"[?&]no=\d+", a["href"])]
-    if candidates:
-        candidates.sort(key=lambda a: len(a.get_text(" ", strip=True)), reverse=True)
-        return candidates[0]
-
-    # 3순위: 텍스트가 가장 긴 링크
-    anchors.sort(key=lambda a: len(a.get_text(" ", strip=True)), reverse=True)
-    return anchors[0]
+            return t
+    return tables[0] if tables else None
 
 
 def extract_rows(html: str, page_url: str) -> List[PostRow]:
+    """
+    리스트 페이지에서:
+    - 글 번호(숫자)인 행만 추출 (AD/설문은 '-'라서 자연스럽게 제외)
+    - 제목/링크/작성일 텍스트(+가능하면 title attr의 전체 timestamp)
+    """
     soup = BeautifulSoup(html, "lxml")
     table = _pick_main_table(soup)
     if not table:
@@ -455,34 +192,38 @@ def extract_rows(html: str, page_url: str) -> List[PostRow]:
     rows: List[PostRow] = []
 
     for tr in trs:
-        # 글 번호
-        num_td = tr.select_one("td.gall_num") or (tr.find_all("td")[0] if tr.find_all("td") else None)
-        if not num_td:
+        tds = tr.find_all("td")
+        if len(tds) < 6:
             continue
-        num_text = num_td.get_text(strip=True)
+
+        num_text = tds[0].get_text(strip=True)
         if not num_text.isdigit():
             continue
+
         post_no = int(num_text)
 
-        # 말머리(없을 수도)
-        head_td = tr.select_one("td.gall_subject")
-        head = head_td.get_text(" ", strip=True) if head_td else ""
+        head = tds[1].get_text(" ", strip=True)
         is_notice = head.strip() == "공지"
 
-        # ✅ 제목/링크: tr 전체에서 view 링크를 직접 찾는다
-        a = _pick_best_view_anchor(tr)
+        title_td = tds[2]
+        a = None
+        for cand in title_td.find_all("a", href=True):
+            if "board/view" in cand["href"]:
+                a = cand
+                break
+        if a is None:
+            a = title_td.find("a", href=True)
+
         if not a or not a.get("href"):
             continue
 
         title = clean_title(a.get_text(" ", strip=True))
         if not title:
             continue
+
         url = urljoin(page_url, a["href"])
 
-        # 작성일
-        date_td = _find_date_td(tr)
-        if not date_td:
-            continue
+        date_td = tds[4]
         date_text = date_td.get_text(" ", strip=True)
 
         date_attr = None
@@ -508,13 +249,16 @@ def extract_rows(html: str, page_url: str) -> List[PostRow]:
     return rows
 
 
-# =========================
-# 날짜/시간 파싱
-# =========================
 def parse_full_datetime(s: str) -> Optional[datetime]:
+    """
+    DCInside에서 흔히 보이는 전체 timestamp 파싱:
+    - 2026.02.28 07:55:28
+    - 2026-02-28 07:55:28
+    - 2026-02-28 07:55
+    """
     s = s.strip()
     m = re.fullmatch(
-        r"(\d{4})[.\-/](\d{2})[.\-/](\d{2})\s+([0-2]\d):([0-5]\d)(?::([0-5]\d))?",
+        r"(\d{4})[.\-](\d{2})[.\-](\d{2})\s+([0-2]\d):([0-5]\d)(?::([0-5]\d))?",
         s,
     )
     if not m:
@@ -530,6 +274,12 @@ def parse_full_datetime(s: str) -> Optional[datetime]:
 def parse_list_date_or_datetime(
     date_text: str, date_attr: Optional[str], now_kst: datetime
 ) -> Tuple[Optional[datetime], Optional[date]]:
+    """
+    (dt, d) 반환:
+    - dt: 시간까지 확정된 경우 (오늘 HH:MM, 혹은 attr로 전체 timestamp 확보)
+    - d : 날짜만 아는 경우 (YY.MM.DD 또는 MM.DD 등)
+    """
+    # 1) attr에 전체 timestamp가 있으면 최우선
     if date_attr:
         dt = parse_full_datetime(date_attr)
         if dt:
@@ -537,63 +287,66 @@ def parse_list_date_or_datetime(
 
     s = re.sub(r"\s+", " ", date_text.strip())
 
-    # HH:MM -> 오늘로 결합
+    # 2) HH:MM -> 오늘 날짜로 결합
     if re.fullmatch(r"\d{1,2}:\d{2}", s):
         h, m = map(int, s.split(":"))
         return datetime.combine(now_kst.date(), dtime(h, m), tzinfo=KST), None
 
-    # YY.MM.DD / YY/MM/DD / YY-MM-DD
-    m = re.fullmatch(r"(\d{2})[.\-/](\d{2})[.\-/](\d{2})", s)
-    if m:
-        yy, mo, dd = map(int, m.groups())
-        return None, date(2000 + yy, mo, dd)
+    # 3) YY.MM.DD
+    if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", s):
+        yy, mo, d = map(int, s.split("."))
+        return None, date(2000 + yy, mo, d)
 
-    # YYYY.MM.DD / YYYY/MM/DD / YYYY-MM-DD
-    m = re.fullmatch(r"(\d{4})[.\-/](\d{2})[.\-/](\d{2})", s)
-    if m:
-        y, mo, dd = map(int, m.groups())
+    # 4) YYYY.MM.DD (드물게 등장 가능)
+    if re.fullmatch(r"\d{4}\.\d{2}\.\d{2}", s):
         try:
-            return None, date(y, mo, dd)
+            return None, datetime.strptime(s, "%Y.%m.%d").date()
         except ValueError:
             return None, None
 
-    # MM.DD -> 올해 기준(미래면 전년도)
+    # 5) MM.DD (일부 환경에서 나올 수 있음) -> 올해 기준 + 롤오버 보정
     if re.fullmatch(r"\d{2}\.\d{2}", s):
-        mo, dd = map(int, s.split("."))
+        mo, d = map(int, s.split("."))
         y = now_kst.year
-        candidate = date(y, mo, dd)
+        candidate = date(y, mo, d)
         if candidate > now_kst.date():
-            candidate = date(y - 1, mo, dd)
+            candidate = date(y - 1, mo, d)
         return None, candidate
 
     return None, None
 
 
 def parse_datetime_from_post(html: str) -> Optional[datetime]:
+    """
+    글 상세에서 'YYYY.MM.DD HH:MM:SS' 패턴을 텍스트 기반으로 추출
+    """
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
 
-    # YYYY.MM.DD HH:MM:SS (or - /)
-    m = re.search(r"(\d{4}[.\-/]\d{2}[.\-/]\d{2})\s+([0-2]\d:[0-5]\d:[0-5]\d)", text)
+    m = re.search(r"(\d{4}\.\d{2}\.\d{2})\s+([0-2]\d:[0-5]\d:[0-5]\d)", text)
     if m:
-        dt = parse_full_datetime(f"{m.group(1)} {m.group(2)}")
-        if dt:
-            return dt
+        try:
+            dt = datetime.strptime(f"{m.group(1)} {m.group(2)}", "%Y.%m.%d %H:%M:%S")
+            return dt.replace(tzinfo=KST)
+        except ValueError:
+            pass
 
-    # YYYY.MM.DD HH:MM
-    m = re.search(r"(\d{4}[.\-/]\d{2}[.\-/]\d{2})\s+([0-2]\d:[0-5]\d)", text)
+    m = re.search(r"(\d{4}\.\d{2}\.\d{2})\s+([0-2]\d:[0-5]\d)", text)
     if m:
-        dt = parse_full_datetime(f"{m.group(1)} {m.group(2)}:00")
-        if dt:
-            return dt
+        try:
+            dt = datetime.strptime(f"{m.group(1)} {m.group(2)}", "%Y.%m.%d %H:%M")
+            return dt.replace(tzinfo=KST)
+        except ValueError:
+            pass
 
     return None
 
 
-# =========================
-# 입출력
-# =========================
 def load_dates_from_file(path: str) -> List[date]:
+    """
+    date.txt에서 각 줄 첫 토큰이 YYYY-MM-DD인 것만 읽음
+    (BOM 제거를 위해 utf-8-sig 사용)
+    """
     dates: List[date] = []
     if not os.path.exists(path):
         raise FileNotFoundError(f"날짜 파일을 찾지 못했습니다: {path}")
@@ -615,6 +368,9 @@ def load_dates_from_file(path: str) -> List[date]:
 
 
 def write_csv(out_path: str, rows: List[Tuple[datetime, str, str]]) -> None:
+    """
+    rows: (작성시간(KST), 제목, URL)
+    """
     rows_sorted = sorted(rows, key=lambda x: x[0])
     with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
@@ -623,60 +379,20 @@ def write_csv(out_path: str, rows: List[Tuple[datetime, str, str]]) -> None:
             w.writerow([dt.strftime("%Y-%m-%d %H:%M:%S"), title, url])
 
 
-# =========================
-# 페이지 탐색(이진탐색 + break)
-# =========================
-def choose_base_list_url(fetcher: Fetcher) -> Tuple[str, str]:
-    candidates = uniq_keep_order([ENV_BASE_LIST_URL] + BASE_LIST_URL_CANDIDATES)
-
-    blocked_exc: Optional[Exception] = None
-
-    for base in candidates:
-        try:
-            test_url = build_list_url(1, base)
-            html = fetcher.get(test_url)
-            rows = extract_rows(html, test_url)
-
-            valid = [r for r in rows if f"id={BOARD_ID}" in r.url]
-            if DEBUG:
-                print(f"[DEBUG] base 후보: {base} -> rows={len(rows)}, valid_id_rows={len(valid)}")
-                if valid:
-                    s = valid[0]
-                    print(f"[DEBUG] sample row: no={s.post_no}, date='{s.date_text}', title='{s.title[:40]}'")
-            if valid:
-                return base, html
-
-        except BlockedBySiteError as e:
-            blocked_exc = e
-            if DEBUG:
-                print(f"[DEBUG] base 후보 차단: {base} / {e}")
-            continue
-        except Exception as e:
-            if DEBUG:
-                print(f"[DEBUG] base 후보 실패: {base} / {e}")
-            continue
-
-    if blocked_exc is not None:
-        raise BlockedBySiteError(
-            "리스트 페이지가 차단(보안문자/비정상 접근)으로 보입니다. "
-            "GitHub-hosted runner에서는 코스피 갤이 특히 잘 막힙니다."
-        )
-
-    raise RuntimeError(f"유효한 리스트 페이지를 찾지 못했습니다. BOARD_ID='{BOARD_ID}'")
-
-
 def get_page_date_range(
-    fetcher: Fetcher,
-    base_list_url: str,
+    session: requests.Session,
     page: int,
     now_kst: datetime,
     cache: Dict[int, Tuple[Optional[date], Optional[date]]],
 ) -> Tuple[Optional[date], Optional[date]]:
+    """
+    페이지의 (첫 글 날짜, 마지막 글 날짜)만 뽑아서 반환 (이진탐색용)
+    """
     if page in cache:
         return cache[page]
 
-    url = build_list_url(page, base_list_url)
-    html = fetcher.get(url)
+    url = build_list_url(page)
+    html = fetch_html(session, url)
     rows = extract_rows(html, url)
 
     d_list: List[date] = []
@@ -697,13 +413,16 @@ def get_page_date_range(
 
 
 def find_upper_bound_for_min_date(
-    fetcher: Fetcher, base_list_url: str, min_date: date, now_kst: datetime
+    session: requests.Session, min_date: date, now_kst: datetime
 ) -> Tuple[int, Dict[int, Tuple[Optional[date], Optional[date]]]]:
+    """
+    min_date(가장 과거 목표 날짜)까지 도달 가능한 hi 페이지를 지수적으로 탐색
+    """
     cache: Dict[int, Tuple[Optional[date], Optional[date]]] = {}
 
     hi = 1
     while hi <= MAX_PAGE_LIMIT:
-        _first_d, last_d = get_page_date_range(fetcher, base_list_url, hi, now_kst, cache)
+        _first_d, last_d = get_page_date_range(session, hi, now_kst, cache)
         if last_d is None:
             return hi, cache
         if last_d <= min_date:
@@ -714,20 +433,22 @@ def find_upper_bound_for_min_date(
 
 
 def find_start_page_for_date(
-    fetcher: Fetcher,
-    base_list_url: str,
+    session: requests.Session,
     target: date,
     now_kst: datetime,
     hi: int,
     cache: Dict[int, Tuple[Optional[date], Optional[date]]],
 ) -> int:
+    """
+    last_date(page) <= target 를 만족하는 가장 작은 page를 이진탐색
+    """
     lo = 1
     r = hi
     ans = hi
 
     while lo <= r:
         mid = (lo + r) // 2
-        _first, last_d = get_page_date_range(fetcher, base_list_url, mid, now_kst, cache)
+        _first, last_d = get_page_date_range(session, mid, now_kst, cache)
 
         if last_d is None:
             ans = mid
@@ -744,22 +465,26 @@ def find_start_page_for_date(
 
 
 def scrape_one_date(
-    fetcher: Fetcher,
-    base_list_url: str,
+    session: requests.Session,
     target: date,
     start_t: dtime,
     end_t: dtime,
     now_kst: datetime,
     start_page: int,
 ) -> List[Tuple[datetime, str, str]]:
+    """
+    start_page부터 순차 탐색.
+    - target 날짜인 글만 상세 시간 확인(필요할 때)
+    - target 날짜에서 작성시간이 start_t보다 이전이면 즉시 break
+    """
     results: List[Tuple[datetime, str, str]] = []
     done = False
     post_dt_cache: Dict[str, datetime] = {}
 
     page = start_page
     while page <= MAX_PAGE_LIMIT:
-        page_url = build_list_url(page, base_list_url)
-        html = fetcher.get(page_url)
+        page_url = build_list_url(page)
+        html = fetch_html(session, page_url)
         rows = extract_rows(html, page_url)
         if not rows:
             break
@@ -780,13 +505,13 @@ def scrape_one_date(
                 done = True
                 break
 
-            # row_date == target -> 시간 확정 필요
+            # row_date == target
             if dt_guess is None:
                 if r.url in post_dt_cache:
                     dt = post_dt_cache[r.url]
                 else:
                     jitter_sleep(SLEEP_POST)
-                    post_html = fetcher.get(r.url, referer=page_url)
+                    post_html = fetch_html(session, r.url, referer=page_url)
                     dt = parse_datetime_from_post(post_html)
                     if dt is None:
                         continue
@@ -794,9 +519,10 @@ def scrape_one_date(
             else:
                 dt = dt_guess
 
+            # tz-aware time 비교 문제 피하려고 tz 제거한 time으로 비교
             t = dt.timetz().replace(tzinfo=None)
 
-            # ✅ 08:50 이전으로 내려가면 즉시 중단
+            # ✅ 핵심 break: 08:50 이전으로 내려가면 더 볼 필요 없음
             if t < start_t:
                 done = True
                 break
@@ -813,77 +539,76 @@ def scrape_one_date(
     return results
 
 
-def run_once(fetcher: Fetcher) -> None:
+def main():
     now_kst = datetime.now(KST)
     start_t = parse_hhmm(START_TIME_STR)
     end_t = parse_hhmm(END_TIME_STR)
     ensure_dir(OUT_DIR)
 
-    print("=== DCInside Backtest Scraper ===")
-    print(f"BOARD_ID   = {BOARD_ID}")
-    print(f"FETCH_MODE = {FETCH_MODE}")
-    print(f"OUT_PREFIX = {OUT_PREFIX}")
-    print(f"OUT_DIR    = {OUT_DIR}")
-    print(f"TIME       = {START_TIME_STR} ~ {END_TIME_STR} (KST)")
-    print("=================================")
-
-    # ✅ base 자동 선택
-    base_list_url, first_page_html = choose_base_list_url(fetcher)
-    print(f"[INFO] 선택된 BASE_LIST_URL = {base_list_url}")
-
-    # 날짜 확정
+    # 1) 대상 날짜 확정
     if TARGET_DATE_STR:
-        requested_dates = [date.fromisoformat(TARGET_DATE_STR)]
-        target_dates = requested_dates[:]
+        target_dates = [date.fromisoformat(TARGET_DATE_STR)]
+        requested_dates = target_dates[:]
     else:
         requested_dates = load_dates_from_file(DATES_FILE)
         target_dates = requested_dates[:]
 
     if not requested_dates:
-        print("대상 날짜가 없습니다. date.txt / TARGET_DATE를 확인하세요.")
+        print("대상 날짜가 없습니다. (date.txt를 확인하세요)")
         return
 
-    # 개설일 이전 스킵
+    # 2) 갤러리 개설일 확인 후, 개설일 이전 날짜는 자동 스킵(빈 CSV 생성)
+    session = make_session()
+    first_page_html = fetch_html(session, build_list_url(1))
     open_date = extract_open_date_from_list(first_page_html)
+
     if open_date:
         target_dates = [d for d in target_dates if d >= open_date]
+        skipped = sorted(set(requested_dates) - set(target_dates))
+        if skipped:
+            print(f"[INFO] 갤러리 개설일({open_date}) 이전 날짜는 글이 없으므로 빈 CSV로 처리합니다. 예: {skipped[:5]}")
 
+    # 결과 딕셔너리(요청된 날짜는 모두 키로 보장)
     all_results_by_date: Dict[date, List[Tuple[datetime, str, str]]] = {d: [] for d in requested_dates}
 
+    # 3) 스크랩할 날짜가 하나도 없으면(전부 개설일 이전) 빈 CSV만 생성하고 종료
     if not target_dates:
-        # 전부 개설일 이전 -> 빈 파일 생성
         for d in requested_dates:
-            out_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_{d.isoformat()}.csv")
+            out_path = os.path.join(OUT_DIR, f"krstock_{d.isoformat()}.csv")
             write_csv(out_path, [])
-        combined_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_all.csv")
+        # 합본도 생성
+        combined_path = os.path.join(OUT_DIR, "krstock_all.csv")
         with open(combined_path, "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f)
             w.writerow(["작성시간(KST)", "날짜", "제목", "URL"])
         print("[DONE] 모든 날짜가 개설일 이전이라 빈 CSV만 생성했습니다.")
         return
 
+    # 4) 가장 과거 목표 날짜까지 도달하는 페이지 hi를 1번만 잡고, 각 날짜는 이진탐색
     min_date = min(target_dates)
-    hi, cache = find_upper_bound_for_min_date(fetcher, base_list_url, min_date, now_kst)
+    hi, cache = find_upper_bound_for_min_date(session, min_date, now_kst)
     print(f"[INFO] 페이지 상한(hi) 추정: {hi} (min_target_date={min_date})")
 
+    # 5) 날짜별 수집(신규→과거 순)
     for target in sorted(target_dates, reverse=True):
-        start_page = find_start_page_for_date(fetcher, base_list_url, target, now_kst, hi, cache)
+        start_page = find_start_page_for_date(session, target, now_kst, hi, cache)
         print(f"\n=== {target} 시작 페이지: {start_page} ===")
-        rows = scrape_one_date(fetcher, base_list_url, target, start_t, end_t, now_kst, start_page)
+        rows = scrape_one_date(session, target, start_t, end_t, now_kst, start_page)
         all_results_by_date[target] = rows
         print(f"[OK] {target} 수집 {len(rows)}건")
 
-    # 날짜별 CSV
+    # 6) 날짜별 CSV 저장(요청된 날짜는 모두 생성)
     for d in requested_dates:
-        out_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_{d.isoformat()}.csv")
+        out_path = os.path.join(OUT_DIR, f"krstock_{d.isoformat()}.csv")
         write_csv(out_path, all_results_by_date.get(d, []))
 
-    # 합본 CSV
-    combined_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_all.csv")
+    # 7) 합본 CSV도 생성
+    combined_path = os.path.join(OUT_DIR, "krstock_all.csv")
     combined_rows: List[Tuple[datetime, str, str, str]] = []
     for d in requested_dates:
         for dt, title, url in all_results_by_date.get(d, []):
             combined_rows.append((dt, d.isoformat(), title, url))
+
     combined_rows.sort(key=lambda x: x[0])
 
     with open(combined_path, "w", newline="", encoding="utf-8-sig") as f:
@@ -895,57 +620,6 @@ def run_once(fetcher: Fetcher) -> None:
     print("\n[DONE] CSV 생성 완료")
     print(f"- 폴더: {OUT_DIR}")
     print(f"- 합본: {combined_path}")
-
-
-def main():
-    # auto 모드면 requests 먼저, 막히면 playwright로 1회 재시도
-    mode = FETCH_MODE
-
-    if mode not in ("requests", "playwright", "auto"):
-        print(f"[WARN] FETCH_MODE='{mode}' 는 지원하지 않습니다. requests로 실행합니다.")
-        mode = "requests"
-
-    tried_playwright = False
-
-    def _run_with(fetcher: Fetcher):
-        try:
-            run_once(fetcher)
-        finally:
-            try:
-                fetcher.close()
-            except Exception:
-                pass
-
-    if mode in ("requests", "auto"):
-        fetcher = RequestsFetcher()
-        fetcher.warmup()
-        try:
-            _run_with(fetcher)
-            return
-        except BlockedBySiteError as e:
-            print(f"[WARN] requests 접근이 차단된 것으로 보입니다: {e}")
-            if mode != "auto":
-                raise
-            tried_playwright = True
-        except RuntimeError as e:
-            msg = str(e)
-            if "blocked" in msg.lower() and mode == "auto":
-                print(f"[WARN] requests가 차단된 것으로 보입니다: {e}")
-                tried_playwright = True
-            else:
-                raise
-
-    if mode == "playwright" or tried_playwright:
-        try:
-            fetcher = PlaywrightFetcher()
-        except Exception as e:
-            raise RuntimeError(
-                "Playwright 모드로 전환하려 했지만 playwright가 설치되어 있지 않거나 초기화 실패했습니다. "
-                "워크플로우에서 playwright 설치/브라우저 설치 단계를 추가하세요."
-            ) from e
-
-        _run_with(fetcher)
-        return
 
 
 if __name__ == "__main__":
