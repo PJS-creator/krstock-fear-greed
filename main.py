@@ -1,4 +1,3 @@
-# main.py
 import os
 import re
 import csv
@@ -6,7 +5,7 @@ import time
 import random
 from dataclasses import dataclass
 from datetime import datetime, date, time as dtime
-from typing import Optional, Tuple, List, Dict
+from typing import Optional, Tuple, List, Dict, Iterable
 from urllib.parse import urlsplit, urlunsplit, parse_qs, urlencode, urljoin
 
 import requests
@@ -18,23 +17,24 @@ from zoneinfo import ZoneInfo
 # =========================
 KST = ZoneInfo("Asia/Seoul")
 
-BOARD_ID = os.getenv("BOARD_ID", "krstock")
+BOARD_ID = os.getenv("BOARD_ID", "krstock").strip()
 
-# ✅ 게시판 타입(일반갤/마이너갤)에 따라 워크플로우에서 바꿀 수 있게
-BASE_LIST_URL = os.getenv("BASE_LIST_URL", "https://gall.dcinside.com/mgallery/board/lists/")
+# (선택) 사용자가 강제로 지정하고 싶으면 BASE_LIST_URL을 세팅 가능
+# 없으면 자동 탐지: mgallery -> board 순
+ENV_BASE_LIST_URL = os.getenv("BASE_LIST_URL", "").strip()
 
-# ✅ 파일명 접두어(기본은 BOARD_ID)
-OUT_PREFIX = os.getenv("OUT_PREFIX", BOARD_ID)
+# 파일명 접두어(기본은 BOARD_ID)
+OUT_PREFIX = os.getenv("OUT_PREFIX", BOARD_ID).strip()
 
 # 수집 시간대 (KST)
-START_TIME_STR = os.getenv("START_TIME", "08:50")
-END_TIME_STR = os.getenv("END_TIME", "15:40")
+START_TIME_STR = os.getenv("START_TIME", "08:50").strip()
+END_TIME_STR = os.getenv("END_TIME", "15:40").strip()
 
 # 특정 날짜만 단일 실행하고 싶으면 (YYYY-MM-DD). 비우면 date.txt 전체 실행
 TARGET_DATE_STR = os.getenv("TARGET_DATE", "").strip()
 
 # 날짜 파일 (각 줄 첫 토큰이 YYYY-MM-DD 라면 OK)
-DATES_FILE = os.getenv("DATES_FILE", "date.txt")
+DATES_FILE = os.getenv("DATES_FILE", "date.txt").strip()
 
 # 페이지/부하 제어
 LIST_NUM = int(os.getenv("LIST_NUM", "100"))  # 30/50/100 중 하나(기본 100 추천)
@@ -45,14 +45,14 @@ MAX_RETRIES = int(os.getenv("MAX_RETRIES", "5"))
 SLEEP_LIST = float(os.getenv("SLEEP_LIST", "0.8"))  # list 페이지 간 sleep
 SLEEP_POST = float(os.getenv("SLEEP_POST", "0.5"))  # 상세 페이지 간 sleep
 
-OUT_DIR = os.getenv("OUT_DIR", "outputs")
+OUT_DIR = os.getenv("OUT_DIR", "outputs").strip()
 
 # User-Agent (봇 차단 완화에 도움)
 USER_AGENT = os.getenv(
     "USER_AGENT",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-)
+    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+).strip()
 
 DEFAULT_HEADERS = {
     "User-Agent": USER_AGENT,
@@ -61,6 +61,12 @@ DEFAULT_HEADERS = {
     "Connection": "keep-alive",
     "Upgrade-Insecure-Requests": "1",
 }
+
+# 후보 리스트 URL (자동 탐지용)
+BASE_LIST_URL_CANDIDATES = [
+    "https://gall.dcinside.com/mgallery/board/lists/",
+    "https://gall.dcinside.com/board/lists/",
+]
 
 
 # =========================
@@ -98,11 +104,27 @@ def clean_title(s: str) -> str:
     return s
 
 
-def build_list_url(page: int) -> str:
+def uniq_keep_order(items: Iterable[str]) -> List[str]:
+    seen = set()
+    out = []
+    for x in items:
+        if not x:
+            continue
+        if x in seen:
+            continue
+        seen.add(x)
+        out.append(x)
+    return out
+
+
+def build_list_url(page: int, base_list_url: str) -> str:
     """
-    DCInside mgallery list URL 생성: id/page/list_num
+    DCInside list URL 생성: ?id=...&page=...&list_num=...
+    base_list_url:
+      - https://gall.dcinside.com/mgallery/board/lists/
+      - https://gall.dcinside.com/board/lists/
     """
-    parts = urlsplit(BASE_LIST_URL)
+    parts = urlsplit(base_list_url)
     qs = parse_qs(parts.query)
     qs["id"] = [BOARD_ID]
     qs["page"] = [str(page)]
@@ -129,6 +151,7 @@ def fetch_html(session: requests.Session, url: str, referer: Optional[str] = Non
                 headers["Referer"] = referer
 
             resp = session.get(url, headers=headers, timeout=REQUEST_TIMEOUT)
+
             if resp.status_code == 200 and resp.text:
                 return resp.text
 
@@ -151,6 +174,7 @@ def fetch_html(session: requests.Session, url: str, referer: Optional[str] = Non
 def extract_open_date_from_list(html: str) -> Optional[date]:
     """
     리스트 페이지 텍스트에서 '개설일 2025-05-19' 추출
+    (일반갤/마이너갤 모두 페이지에 표시되는 편)
     """
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
@@ -165,11 +189,10 @@ def extract_open_date_from_list(html: str) -> Optional[date]:
 
 def _pick_main_table(soup: BeautifulSoup):
     """
-    '제목/글쓴이/작성일' 키워드를 가진 table을 우선 선택 (구조 변경에도 어느정도 견딤)
+    '제목/작성일/글쓴이' 키워드를 가진 table을 우선 선택 (구조 변경에도 어느정도 견딤)
     """
     tables = soup.find_all("table")
     for t in tables:
-        thead_text = ""
         thead = t.find("thead")
         if thead:
             thead_text = thead.get_text(" ", strip=True)
@@ -181,11 +204,41 @@ def _pick_main_table(soup: BeautifulSoup):
     return tables[0] if tables else None
 
 
+def _find_date_td(tr) -> Optional[BeautifulSoup]:
+    # 1) 표준 클래스
+    date_td = tr.select_one("td.gall_date")
+    if date_td:
+        return date_td
+
+    # 2) fallback: td 중에서 date/time 패턴이나 title=timestamp가 보이는 td 탐색
+    tds = tr.find_all("td")
+    for td in reversed(tds):
+        txt = td.get_text(" ", strip=True)
+        if re.fullmatch(r"\d{1,2}:\d{2}", txt):
+            return td
+        if re.fullmatch(r"\d{2}\.\d{2}", txt):
+            return td
+        if re.fullmatch(r"\d{2}[./-]\d{2}[./-]\d{2}", txt):
+            return td
+        if re.fullmatch(r"\d{4}[./-]\d{2}[./-]\d{2}", txt):
+            return td
+        if td.has_attr("title"):
+            t = str(td.get("title", "")).strip()
+            if re.search(r"\d{4}[./-]\d{2}[./-]\d{2}\s+[0-2]\d:[0-5]\d", t):
+                return td
+        child = td.find(attrs={"title": True})
+        if child:
+            t = str(child.get("title", "")).strip()
+            if re.search(r"\d{4}[./-]\d{2}[./-]\d{2}\s+[0-2]\d:[0-5]\d", t):
+                return td
+    return None
+
+
 def extract_rows(html: str, page_url: str) -> List[PostRow]:
     """
-    리스트 페이지에서:
-    - 글 번호(숫자)인 행만 추출 (AD/설문은 '-'라서 자연스럽게 제외)
-    - 제목/링크/작성일 텍스트(+가능하면 title attr의 전체 timestamp)
+    ✅ (중요) 컬럼 인덱스 고정 X
+    - 행(tr)에서 board/view 링크를 직접 찾아 제목/URL 추출
+    - 작성일은 td.gall_date 우선 + 패턴 fallback
     """
     soup = BeautifulSoup(html, "lxml")
     table = _pick_main_table(soup)
@@ -197,38 +250,33 @@ def extract_rows(html: str, page_url: str) -> List[PostRow]:
     rows: List[PostRow] = []
 
     for tr in trs:
-        tds = tr.find_all("td")
-        if len(tds) < 6:
+        # 글 번호
+        num_td = tr.select_one("td.gall_num") or (tr.find_all("td")[0] if tr.find_all("td") else None)
+        if not num_td:
             continue
-
-        num_text = tds[0].get_text(strip=True)
+        num_text = num_td.get_text(strip=True)
         if not num_text.isdigit():
             continue
-
         post_no = int(num_text)
 
-        head = tds[1].get_text(" ", strip=True)
+        # 말머리(없을 수도 있음)
+        head_td = tr.select_one("td.gall_subject")
+        head = head_td.get_text(" ", strip=True) if head_td else ""
         is_notice = head.strip() == "공지"
 
-        title_td = tds[2]
-        a = None
-        for cand in title_td.find_all("a", href=True):
-            if "board/view" in cand["href"]:
-                a = cand
-                break
-        if a is None:
-            a = title_td.find("a", href=True)
-
+        # 제목 링크(행 전체에서 검색)
+        a = tr.select_one("a[href*='board/view']") or tr.find("a", href=True)
         if not a or not a.get("href"):
             continue
-
         title = clean_title(a.get_text(" ", strip=True))
         if not title:
             continue
-
         url = urljoin(page_url, a["href"])
 
-        date_td = tds[4]
+        # 작성일
+        date_td = _find_date_td(tr)
+        if not date_td:
+            continue
         date_text = date_td.get_text(" ", strip=True)
 
         date_attr = None
@@ -256,18 +304,20 @@ def extract_rows(html: str, page_url: str) -> List[PostRow]:
 
 def parse_full_datetime(s: str) -> Optional[datetime]:
     """
-    DCInside에서 흔히 보이는 전체 timestamp 파싱:
     - 2026.02.28 07:55:28
     - 2026-02-28 07:55:28
+    - 2026/02/28 07:55:28
     - 2026-02-28 07:55
     """
     s = s.strip()
+
     m = re.fullmatch(
-        r"(\d{4})[.\-](\d{2})[.\-](\d{2})\s+([0-2]\d):([0-5]\d)(?::([0-5]\d))?",
+        r"(\d{4})[.\-/](\d{2})[.\-/](\d{2})\s+([0-2]\d):([0-5]\d)(?::([0-5]\d))?",
         s,
     )
     if not m:
         return None
+
     y, mo, d, hh, mm, ss = m.groups()
     sec = int(ss) if ss is not None else 0
     try:
@@ -282,7 +332,7 @@ def parse_list_date_or_datetime(
     """
     (dt, d) 반환:
     - dt: 시간까지 확정된 경우 (오늘 HH:MM, 혹은 attr로 전체 timestamp 확보)
-    - d : 날짜만 아는 경우 (YY.MM.DD 또는 MM.DD 등)
+    - d : 날짜만 아는 경우 (YY.MM.DD / MM.DD / YYYY-MM-DD 등)
     """
     # 1) attr에 전체 timestamp가 있으면 최우선
     if date_attr:
@@ -297,25 +347,28 @@ def parse_list_date_or_datetime(
         h, m = map(int, s.split(":"))
         return datetime.combine(now_kst.date(), dtime(h, m), tzinfo=KST), None
 
-    # 3) YY.MM.DD
-    if re.fullmatch(r"\d{2}\.\d{2}\.\d{2}", s):
-        yy, mo, d = map(int, s.split("."))
-        return None, date(2000 + yy, mo, d)
+    # 3) YY.MM.DD or YY/MM/DD or YY-MM-DD
+    m = re.fullmatch(r"(\d{2})[.\-/](\d{2})[.\-/](\d{2})", s)
+    if m:
+        yy, mo, dd = map(int, m.groups())
+        return None, date(2000 + yy, mo, dd)
 
-    # 4) YYYY.MM.DD (드물게 등장 가능)
-    if re.fullmatch(r"\d{4}\.\d{2}\.\d{2}", s):
+    # 4) YYYY.MM.DD or YYYY/MM/DD or YYYY-MM-DD
+    m = re.fullmatch(r"(\d{4})[.\-/](\d{2})[.\-/](\d{2})", s)
+    if m:
+        y, mo, dd = map(int, m.groups())
         try:
-            return None, datetime.strptime(s, "%Y.%m.%d").date()
+            return None, date(y, mo, dd)
         except ValueError:
             return None, None
 
-    # 5) MM.DD (일부 환경에서 나올 수 있음) -> 올해 기준 + 롤오버 보정
+    # 5) MM.DD -> 올해 기준 + 롤오버 보정
     if re.fullmatch(r"\d{2}\.\d{2}", s):
-        mo, d = map(int, s.split("."))
+        mo, dd = map(int, s.split("."))
         y = now_kst.year
-        candidate = date(y, mo, d)
+        candidate = date(y, mo, dd)
         if candidate > now_kst.date():
-            candidate = date(y - 1, mo, d)
+            candidate = date(y - 1, mo, dd)
         return None, candidate
 
     return None, None
@@ -323,35 +376,30 @@ def parse_list_date_or_datetime(
 
 def parse_datetime_from_post(html: str) -> Optional[datetime]:
     """
-    글 상세에서 'YYYY.MM.DD HH:MM:SS' 패턴을 텍스트 기반으로 추출
+    글 상세에서 datetime 추출
+    - 2026.03.03 10:12:34
+    - 2026-03-03 10:12:34
+    - 2026/03/03 10:12:34
     """
     soup = BeautifulSoup(html, "lxml")
     text = soup.get_text(" ", strip=True)
 
-    m = re.search(r"(\d{4}\.\d{2}\.\d{2})\s+([0-2]\d:[0-5]\d:[0-5]\d)", text)
+    m = re.search(r"(\d{4}[.\-/]\d{2}[.\-/]\d{2})\s+([0-2]\d:[0-5]\d:[0-5]\d)", text)
     if m:
-        try:
-            dt = datetime.strptime(f"{m.group(1)} {m.group(2)}", "%Y.%m.%d %H:%M:%S")
-            return dt.replace(tzinfo=KST)
-        except ValueError:
-            pass
+        dt = parse_full_datetime(f"{m.group(1)} {m.group(2)}")
+        if dt:
+            return dt
 
-    m = re.search(r"(\d{4}\.\d{2}\.\d{2})\s+([0-2]\d:[0-5]\d)", text)
+    m = re.search(r"(\d{4}[.\-/]\d{2}[.\-/]\d{2})\s+([0-2]\d:[0-5]\d)", text)
     if m:
-        try:
-            dt = datetime.strptime(f"{m.group(1)} {m.group(2)}", "%Y.%m.%d %H:%M")
-            return dt.replace(tzinfo=KST)
-        except ValueError:
-            pass
+        dt = parse_full_datetime(f"{m.group(1)} {m.group(2)}:00")
+        if dt:
+            return dt
 
     return None
 
 
 def load_dates_from_file(path: str) -> List[date]:
-    """
-    date.txt에서 각 줄 첫 토큰이 YYYY-MM-DD인 것만 읽음
-    (BOM 제거를 위해 utf-8-sig 사용)
-    """
     dates: List[date] = []
     if not os.path.exists(path):
         raise FileNotFoundError(f"날짜 파일을 찾지 못했습니다: {path}")
@@ -373,9 +421,6 @@ def load_dates_from_file(path: str) -> List[date]:
 
 
 def write_csv(out_path: str, rows: List[Tuple[datetime, str, str]]) -> None:
-    """
-    rows: (작성시간(KST), 제목, URL)
-    """
     rows_sorted = sorted(rows, key=lambda x: x[0])
     with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
@@ -384,19 +429,49 @@ def write_csv(out_path: str, rows: List[Tuple[datetime, str, str]]) -> None:
             w.writerow([dt.strftime("%Y-%m-%d %H:%M:%S"), title, url])
 
 
+def choose_base_list_url(session: requests.Session) -> Tuple[str, str]:
+    """
+    BASE_LIST_URL 자동 탐지:
+    - ENV_BASE_LIST_URL (지정된 경우 우선 시도)
+    - mgallery -> board 순으로 시도
+    """
+    candidates = uniq_keep_order([ENV_BASE_LIST_URL] + BASE_LIST_URL_CANDIDATES)
+
+    for base in candidates:
+        try:
+            test_url = build_list_url(1, base)
+            html = fetch_html(session, test_url)
+            rows = extract_rows(html, test_url)
+
+            # id=BOARD_ID가 포함된 view 링크가 실제로 잡히는지 확인
+            valid = [r for r in rows if f"id={BOARD_ID}" in r.url]
+            print(f"[DEBUG] base 후보: {base} -> rows={len(rows)}, valid_id_rows={len(valid)}")
+            if valid:
+                sample = valid[0]
+                print(
+                    f"[DEBUG] sample: no={sample.post_no}, date_text='{sample.date_text}', "
+                    f"date_attr='{sample.date_attr}', title='{sample.title[:40]}'"
+                )
+                return base, html
+        except Exception as e:
+            print(f"[DEBUG] base 후보 실패: {base} / {e}")
+
+    raise RuntimeError(
+        f"유효한 리스트 페이지를 찾지 못했습니다. BOARD_ID='{BOARD_ID}' / BASE_LIST_URL를 확인하세요."
+    )
+
+
 def get_page_date_range(
     session: requests.Session,
+    base_list_url: str,
     page: int,
     now_kst: datetime,
     cache: Dict[int, Tuple[Optional[date], Optional[date]]],
 ) -> Tuple[Optional[date], Optional[date]]:
-    """
-    페이지의 (첫 글 날짜, 마지막 글 날짜)만 뽑아서 반환 (이진탐색용)
-    """
     if page in cache:
         return cache[page]
 
-    url = build_list_url(page)
+    url = build_list_url(page, base_list_url)
     html = fetch_html(session, url)
     rows = extract_rows(html, url)
 
@@ -418,16 +493,13 @@ def get_page_date_range(
 
 
 def find_upper_bound_for_min_date(
-    session: requests.Session, min_date: date, now_kst: datetime
+    session: requests.Session, base_list_url: str, min_date: date, now_kst: datetime
 ) -> Tuple[int, Dict[int, Tuple[Optional[date], Optional[date]]]]:
-    """
-    min_date(가장 과거 목표 날짜)까지 도달 가능한 hi 페이지를 지수적으로 탐색
-    """
     cache: Dict[int, Tuple[Optional[date], Optional[date]]] = {}
 
     hi = 1
     while hi <= MAX_PAGE_LIMIT:
-        _first_d, last_d = get_page_date_range(session, hi, now_kst, cache)
+        _first_d, last_d = get_page_date_range(session, base_list_url, hi, now_kst, cache)
         if last_d is None:
             return hi, cache
         if last_d <= min_date:
@@ -439,21 +511,19 @@ def find_upper_bound_for_min_date(
 
 def find_start_page_for_date(
     session: requests.Session,
+    base_list_url: str,
     target: date,
     now_kst: datetime,
     hi: int,
     cache: Dict[int, Tuple[Optional[date], Optional[date]]],
 ) -> int:
-    """
-    last_date(page) <= target 를 만족하는 가장 작은 page를 이진탐색
-    """
     lo = 1
     r = hi
     ans = hi
 
     while lo <= r:
         mid = (lo + r) // 2
-        _first, last_d = get_page_date_range(session, mid, now_kst, cache)
+        _first, last_d = get_page_date_range(session, base_list_url, mid, now_kst, cache)
 
         if last_d is None:
             ans = mid
@@ -471,24 +541,20 @@ def find_start_page_for_date(
 
 def scrape_one_date(
     session: requests.Session,
+    base_list_url: str,
     target: date,
     start_t: dtime,
     end_t: dtime,
     now_kst: datetime,
     start_page: int,
 ) -> List[Tuple[datetime, str, str]]:
-    """
-    start_page부터 순차 탐색.
-    - target 날짜인 글만 상세 시간 확인(필요할 때)
-    - target 날짜에서 작성시간이 start_t보다 이전이면 즉시 break
-    """
     results: List[Tuple[datetime, str, str]] = []
     done = False
     post_dt_cache: Dict[str, datetime] = {}
 
     page = start_page
     while page <= MAX_PAGE_LIMIT:
-        page_url = build_list_url(page)
+        page_url = build_list_url(page, base_list_url)
         html = fetch_html(session, page_url)
         rows = extract_rows(html, page_url)
         if not rows:
@@ -524,7 +590,6 @@ def scrape_one_date(
             else:
                 dt = dt_guess
 
-            # tz-aware time 비교 문제 피하려고 tz 제거한 time으로 비교
             t = dt.timetz().replace(tzinfo=None)
 
             # ✅ 핵심 break: 08:50 이전으로 내려가면 더 볼 필요 없음
@@ -550,10 +615,22 @@ def main():
     end_t = parse_hhmm(END_TIME_STR)
     ensure_dir(OUT_DIR)
 
-    # 1) 대상 날짜 확정
+    print("=== DCInside Backtest Scraper ===")
+    print(f"BOARD_ID      = {BOARD_ID}")
+    print(f"OUT_PREFIX    = {OUT_PREFIX}")
+    print(f"TIME_RANGE    = {START_TIME_STR} ~ {END_TIME_STR} (KST)")
+    print(f"NOW(KST)      = {now_kst.strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=================================")
+
+    # 1) 세션 생성 + BASE_LIST_URL 자동 탐지
+    session = make_session()
+    base_list_url, first_page_html = choose_base_list_url(session)
+    print(f"[INFO] 선택된 BASE_LIST_URL = {base_list_url}")
+
+    # 2) 대상 날짜 확정
     if TARGET_DATE_STR:
-        target_dates = [date.fromisoformat(TARGET_DATE_STR)]
-        requested_dates = target_dates[:]
+        requested_dates = [date.fromisoformat(TARGET_DATE_STR)]
+        target_dates = requested_dates[:]
     else:
         requested_dates = load_dates_from_file(DATES_FILE)
         target_dates = requested_dates[:]
@@ -562,26 +639,18 @@ def main():
         print("대상 날짜가 없습니다. (date.txt를 확인하세요)")
         return
 
-    # 2) 갤러리 개설일 확인 후, 개설일 이전 날짜는 자동 스킵(빈 CSV 생성)
-    session = make_session()
-    first_page_html = fetch_html(session, build_list_url(1))
+    # 3) 갤러리 개설일 확인 후, 개설일 이전 날짜는 자동 스킵(빈 CSV 생성)
     open_date = extract_open_date_from_list(first_page_html)
-
     if open_date:
         target_dates = [d for d in target_dates if d >= open_date]
-        skipped = sorted(set(requested_dates) - set(target_dates))
-        if skipped:
-            print(f"[INFO] 갤러리 개설일({open_date}) 이전 날짜는 글이 없으므로 빈 CSV로 처리합니다. 예: {skipped[:5]}")
 
-    # 결과 딕셔너리(요청된 날짜는 모두 키로 보장)
     all_results_by_date: Dict[date, List[Tuple[datetime, str, str]]] = {d: [] for d in requested_dates}
 
-    # 3) 스크랩할 날짜가 하나도 없으면(전부 개설일 이전) 빈 CSV만 생성하고 종료
+    # 4) 전부 스킵이면 빈 파일만 생성
     if not target_dates:
         for d in requested_dates:
             out_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_{d.isoformat()}.csv")
             write_csv(out_path, [])
-        # 합본도 생성
         combined_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_all.csv")
         with open(combined_path, "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f)
@@ -589,22 +658,21 @@ def main():
         print("[DONE] 모든 날짜가 개설일 이전이라 빈 CSV만 생성했습니다.")
         return
 
-    # 4) 가장 과거 목표 날짜까지 도달하는 페이지 hi를 1번만 잡고, 각 날짜는 이진탐색
+    # 5) 페이지 hi 추정 + 날짜별 이진탐색
     min_date = min(target_dates)
-    hi, cache = find_upper_bound_for_min_date(session, min_date, now_kst)
+    hi, cache = find_upper_bound_for_min_date(session, base_list_url, min_date, now_kst)
     print(f"[INFO] 페이지 상한(hi) 추정: {hi} (min_target_date={min_date})")
 
-    # 5) 날짜별 수집(신규→과거 순)
     for target in sorted(target_dates, reverse=True):
-        start_page = find_start_page_for_date(session, target, now_kst, hi, cache)
+        start_page = find_start_page_for_date(session, base_list_url, target, now_kst, hi, cache)
         print(f"\n=== {target} 시작 페이지: {start_page} ===")
-        rows = scrape_one_date(session, target, start_t, end_t, now_kst, start_page)
+        rows = scrape_one_date(session, base_list_url, target, start_t, end_t, now_kst, start_page)
         all_results_by_date[target] = rows
         print(f"[OK] {target} 수집 {len(rows)}건")
 
     # 6) 날짜별 CSV 저장(요청된 날짜는 모두 생성)
     for d in requested_dates:
-        out_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}{d.isoformat()}.csv")
+        out_path = os.path.join(OUT_DIR, f"{OUT_PREFIX}_{d.isoformat()}.csv")
         write_csv(out_path, all_results_by_date.get(d, []))
 
     # 7) 합본 CSV도 생성
