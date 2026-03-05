@@ -19,6 +19,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,32 +34,50 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run scraper
+          # ✅ kospi는 requests가 막히는 경우가 많아서 playwright를 추가
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Run scraper (kospi)
         env:
           BOARD_ID: "kospi"
-          OUT_DIR: "outputs_kospi"
-          OUT_PREFIX: "kospi"
 
-          # 마이너 갤러리 강제(원하면 제거 가능: 코드가 자동 선택도 함)
+          # ✅ 코스피 마이너 갤 리스트
           BASE_LIST_URL: "https://gall.dcinside.com/mgallery/board/lists/"
+
+          # ✅ requests -> 막히면 playwright 자동 폴백
+          FETCH_MODE: "auto"
+          # 원하면 아래처럼 고정도 가능
+          # FETCH_MODE: "playwright"
 
           DATES_FILE: "date.txt"
           TARGET_DATE: ${{ inputs.target_date }}
           START_TIME: ${{ inputs.start_time }}
           END_TIME: ${{ inputs.end_time }}
 
+          OUT_DIR: "outputs_kospi"
+          OUT_PREFIX: "kospi"
+
           LIST_NUM: "100"
-          SLEEP_LIST: "1.0"
-          SLEEP_POST: "0.8"
+          SLEEP_LIST: "0.9"
+          SLEEP_POST: "0.6"
           MAX_RETRIES: "6"
+          REQUEST_TIMEOUT: "25"
+
+          # ✅ 디버그
           DEBUG: "1"
+          SAVE_BLOCK_HTML: "1"
+          DEBUG_DIR: "debug_html_kospi"
 
         run: |
           python main.py
           ls -al outputs_kospi || true
+          ls -al debug_html_kospi || true
 
-      - name: Upload CSV artifacts
+      - name: Upload artifacts (csv + debug_html)
         uses: actions/upload-artifact@v4
         with:
-          name: kospi_csv_outputs
-          path: outputs_kospi/
+          name: kospi_outputs
+          path: |
+            outputs_kospi/
+            debug_html_kospi/
