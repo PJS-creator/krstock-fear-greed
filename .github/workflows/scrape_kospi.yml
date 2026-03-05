@@ -17,7 +17,7 @@ on:
         default: "15:40"
 
 jobs:
-  run:
+  scrape:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -28,42 +28,27 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install requests beautifulsoup4 lxml
 
       - name: Run scraper (kospi)
         env:
-          # ✅ 코스피 게시판
           BOARD_ID: "kospi"
-
-          # ✅ /kospi 는 board/lists/?id=kospi 로 리다이렉트라 일반갤 base 사용
-          BASE_LIST_URL: "https://gall.dcinside.com/board/lists/"
-
-          # ✅ 날짜 파일(첨부 date.txt) 그대로
-          DATES_FILE: "date.txt"
-
-          # ✅ 워크플로우 입력값
+          OUT_DIR: "outputs_kospi"
+          OUT_PREFIX: "kospi"
           TARGET_DATE: ${{ inputs.target_date }}
           START_TIME: ${{ inputs.start_time }}
           END_TIME: ${{ inputs.end_time }}
-
-          # ✅ 출력 폴더/파일명 접두어 (krstock과 충돌 방지)
-          OUT_DIR: "outputs_kospi"
-          OUT_PREFIX: "kospi"
-
-          # ✅ 크롤링 튜닝(차단/부하 완화)
           LIST_NUM: "100"
+          # 필요하면 속도/차단 조절
           SLEEP_LIST: "0.9"
           SLEEP_POST: "0.6"
           MAX_RETRIES: "5"
+        run: python main.py
 
-        run: |
-          python main.py
-          ls -al outputs_kospi || true
-
-      - name: Upload CSV artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: kospi_csv_outputs
