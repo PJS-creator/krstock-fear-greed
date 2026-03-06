@@ -41,11 +41,15 @@ jobs:
           START_TIME: ${{ inputs.start_time }}
           END_TIME: ${{ inputs.end_time }}
           LIST_NUM: "100"
-          SLEEP_LIST: "0.9"
-          SLEEP_POST: "0.6"
+          SLEEP_LIST: "0.7"
+          SLEEP_POST: "0.5"
           MAX_RETRIES: "5"
           PAGE_EDGE_BAND: "12"
           START_PAGE_VERIFY_RADIUS: "120"
+          DAY_WINDOW_RADIUS: "60"
+          ZERO_RESULT_FALLBACK_RADIUS: "140"
+          MIN_VALID_LIST_ROWS: "15"
+          PAGE_FETCH_RETRIES: "3"
         run: |
           python main.py
           ls -al outputs || true
