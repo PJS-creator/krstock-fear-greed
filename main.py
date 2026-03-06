@@ -44,6 +44,10 @@ SLEEP_POST = float(os.getenv("SLEEP_POST", "0.5"))  # 상세 페이지 간 sleep
 # 시작 페이지 탐색 보정
 PAGE_EDGE_BAND = int(os.getenv("PAGE_EDGE_BAND", "12"))
 START_PAGE_VERIFY_RADIUS = int(os.getenv("START_PAGE_VERIFY_RADIUS", "80"))
+DAY_WINDOW_RADIUS = int(os.getenv("DAY_WINDOW_RADIUS", "60"))
+ZERO_RESULT_FALLBACK_RADIUS = int(os.getenv("ZERO_RESULT_FALLBACK_RADIUS", "120"))
+MIN_VALID_LIST_ROWS = int(os.getenv("MIN_VALID_LIST_ROWS", "15"))
+PAGE_FETCH_RETRIES = int(os.getenv("PAGE_FETCH_RETRIES", "3"))
 
 OUT_DIR = os.getenv("OUT_DIR", "outputs")
 
@@ -321,30 +325,60 @@ def parse_list_date_or_datetime(
     return None, None
 
 
-def parse_datetime_from_post(html: str) -> Optional[datetime]:
+def parse_datetime_candidates_from_post(html: str) -> List[datetime]:
     """
-    글 상세에서 'YYYY.MM.DD HH:MM:SS' 패턴을 텍스트 기반으로 추출
+    글 상세에서 가능한 timestamp 후보를 모두 추출한다.
+    - 특정 selector에 있는 날짜를 우선 수집
+    - 전체 텍스트에서 YYYY.MM.DD HH:MM(:SS)? 패턴도 보조적으로 수집
     """
     soup = BeautifulSoup(html, "lxml")
+    candidates: List[datetime] = []
+    seen = set()
+
+    selector_candidates = [
+        ".gall_date",
+        "span.gall_date",
+        ".title_head .gall_date",
+        ".fl .gall_date",
+        ".write_div .gall_date",
+        "span.date_time",
+    ]
+
+    for sel in selector_candidates:
+        for node in soup.select(sel):
+            raw = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+            if not raw:
+                continue
+            for m in re.finditer(r"(\d{4}[.\-]\d{2}[.\-]\d{2})\s+([0-2]\d:[0-5]\d(?::[0-5]\d)?)", raw):
+                dt = parse_full_datetime(f"{m.group(1)} {m.group(2)}")
+                if dt and dt not in seen:
+                    seen.add(dt)
+                    candidates.append(dt)
+
     text = soup.get_text(" ", strip=True)
+    for m in re.finditer(r"(\d{4}[.\-]\d{2}[.\-]\d{2})\s+([0-2]\d:[0-5]\d(?::[0-5]\d)?)", text):
+        dt = parse_full_datetime(f"{m.group(1)} {m.group(2)}")
+        if dt and dt not in seen:
+            seen.add(dt)
+            candidates.append(dt)
 
-    m = re.search(r"(\d{4}\.\d{2}\.\d{2})\s+([0-2]\d:[0-5]\d:[0-5]\d)", text)
-    if m:
-        try:
-            dt = datetime.strptime(f"{m.group(1)} {m.group(2)}", "%Y.%m.%d %H:%M:%S")
-            return dt.replace(tzinfo=KST)
-        except ValueError:
-            pass
+    return candidates
 
-    m = re.search(r"(\d{4}\.\d{2}\.\d{2})\s+([0-2]\d:[0-5]\d)", text)
-    if m:
-        try:
-            dt = datetime.strptime(f"{m.group(1)} {m.group(2)}", "%Y.%m.%d %H:%M")
-            return dt.replace(tzinfo=KST)
-        except ValueError:
-            pass
 
-    return None
+def parse_datetime_from_post(html: str, target: Optional[date] = None) -> Optional[datetime]:
+    """
+    상세 페이지에서 작성시각을 추출. target 날짜가 주어지면 해당 날짜와 일치하는 값을 우선 선택한다.
+    """
+    cands = parse_datetime_candidates_from_post(html)
+    if not cands:
+        return None
+
+    if target is not None:
+        for dt in cands:
+            if dt.date() == target:
+                return dt
+
+    return cands[0]
 
 
 def load_dates_from_file(path: str) -> List[date]:
@@ -388,15 +422,35 @@ def fetch_page_rows(
     session: requests.Session,
     page: int,
     row_cache: Dict[int, List[PostRow]],
+    force_refresh: bool = False,
 ) -> List[PostRow]:
-    if page in row_cache:
+    if (not force_refresh) and page in row_cache:
         return row_cache[page]
 
     page_url = build_list_url(page)
-    html = fetch_html(session, page_url)
-    rows = extract_rows(html, page_url)
-    row_cache[page] = rows
-    return rows
+    best_rows: List[PostRow] = []
+
+    for attempt in range(1, PAGE_FETCH_RETRIES + 1):
+        html = fetch_html(session, page_url)
+        rows = extract_rows(html, page_url)
+        non_notice_count = sum(1 for r in rows if not r.is_notice)
+
+        if non_notice_count >= MIN_VALID_LIST_ROWS:
+            row_cache[page] = rows
+            return rows
+
+        if len(rows) > len(best_rows):
+            best_rows = rows
+
+        if attempt < PAGE_FETCH_RETRIES:
+            jitter_sleep(0.4 * attempt)
+
+    if best_rows:
+        row_cache[page] = best_rows
+        return best_rows
+
+    # 빈/깨진 페이지는 캐시에 고정하지 않는다.
+    return []
 
 
 def collect_row_dates(rows: List[PostRow], now_kst: datetime) -> List[date]:
@@ -534,95 +588,86 @@ def find_start_page_for_date(
     date_cache: Dict[int, Tuple[Optional[date], Optional[date]]],
 ) -> Tuple[int, int]:
     """
-    1) representative bottom date 기반으로 candidate 이진탐색
-    2) candidate 주변 실제 페이지를 검증해서 target 날짜가 있는 가장 이른 page를 반환
+    candidate 페이지를 찾고, 주변에서 target 날짜가 실제로 보이는 anchor 페이지를 찾는다.
 
-    반환값: (candidate_page, verified_start_page)
+    반환값: (candidate_page, anchor_page)
     """
     candidate = find_candidate_start_page(session, target, now_kst, hi, row_cache, date_cache)
 
-    found: Optional[int] = None
-
-    # 보통 candidate가 너무 늦게 잡히는 경우가 많아서 뒤(더 오래된 page)보다 앞(더 새로운 page) 쪽을 먼저 탐색
     left = max(1, candidate - START_PAGE_VERIFY_RADIUS)
-    for p in range(candidate, left - 1, -1):
-        if page_contains_target(session, p, target, now_kst, row_cache):
-            found = p
+    right = min(MAX_PAGE_LIMIT, candidate + START_PAGE_VERIFY_RADIUS)
+
+    anchor: Optional[int] = None
+    for dist in range(0, START_PAGE_VERIFY_RADIUS + 1):
+        probes = []
+        p1 = candidate - dist
+        p2 = candidate + dist
+        if left <= p1 <= right:
+            probes.append(p1)
+        if p2 != p1 and left <= p2 <= right:
+            probes.append(p2)
+
+        for p in probes:
+            if page_contains_target(session, p, target, now_kst, row_cache):
+                anchor = p
+                break
+        if anchor is not None:
             break
 
-    if found is None:
-        right = min(MAX_PAGE_LIMIT, candidate + START_PAGE_VERIFY_RADIUS)
-        for p in range(candidate + 1, right + 1):
-            if page_contains_target(session, p, target, now_kst, row_cache):
-                found = p
-                break
-
-    if found is None:
-        # 검증 실패 시에도 candidate 그대로 쓰되, scrape 단계에서 seen_target 전에는 조기 중단하지 않도록 방어한다.
+    if anchor is None:
         return candidate, candidate
 
-    # target 날짜가 걸치는 가장 앞 page까지 당겨준다.
-    while found > 1 and page_contains_target(session, found - 1, target, now_kst, row_cache):
-        found -= 1
-
-    return candidate, found
+    return candidate, anchor
 
 
-def scrape_one_date(
+def _dedupe_results(rows: List[Tuple[datetime, str, str]]) -> List[Tuple[datetime, str, str]]:
+    seen = set()
+    out: List[Tuple[datetime, str, str]] = []
+    for dt, title, url in sorted(rows, key=lambda x: (x[0], x[2])):
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append((dt, title, url))
+    return out
+
+
+def scrape_window_for_date(
     session: requests.Session,
     target: date,
     start_t: dtime,
     end_t: dtime,
     now_kst: datetime,
-    start_page: int,
+    anchor_page: int,
     row_cache: Dict[int, List[PostRow]],
-    date_cache: Dict[int, Tuple[Optional[date], Optional[date]]],
+    window_radius: int,
+    force_refresh: bool = False,
 ) -> List[Tuple[datetime, str, str]]:
     """
-    verified start_page부터 순차 탐색.
+    anchor 주변의 고정 window를 훑으며 target 날짜 글만 상세 datetime으로 확정한다.
 
-    핵심 방어:
-    - start page가 잘못 잡혀도, target 날짜를 실제로 보기 전에는 row_date < target 에서 중단하지 않음
-    - page 내 outlier 하나 때문에 중단하지 않도록 row 단위의 날짜 break는 제거하고,
-      target을 이미 본 뒤에 '페이지 전체 대표 최신일이 target보다 과거'일 때 종료
-    - 같은 날짜에서 start_t보다 이전 시간대를 만나면 종료
+    기존처럼 잘못 잡힌 start_page / 조기 break를 믿지 않고,
+    bounded window 안에서 target 날짜를 전부 수집하는 방식이라 특정 날짜 누락에 강하다.
     """
+    start_page = max(1, anchor_page - window_radius)
+    end_page = min(MAX_PAGE_LIMIT, anchor_page + window_radius)
+
     results: List[Tuple[datetime, str, str]] = []
-    done = False
-    seen_target_anywhere = False
     post_dt_cache: Dict[str, datetime] = {}
 
-    page = max(1, start_page)
-    while page <= MAX_PAGE_LIMIT:
-        rows = fetch_page_rows(session, page, row_cache)
+    for page in range(start_page, end_page + 1):
+        rows = fetch_page_rows(session, page, row_cache, force_refresh=force_refresh)
         if not rows:
-            break
+            continue
 
-        page_had_target = False
         page_url = build_list_url(page)
-
         for r in rows:
             if r.is_notice:
                 continue
 
             dt_guess, d_guess = parse_list_date_or_datetime(r.date_text, r.date_attr, now_kst)
             row_date = dt_guess.date() if dt_guess else d_guess
-            if row_date is None:
+            if row_date != target:
                 continue
-
-            if row_date > target:
-                continue
-
-            if row_date < target:
-                # target 날짜를 실제로 만나기 전에는 page miss 가능성이 있으므로 무시
-                if not seen_target_anywhere:
-                    continue
-                # target을 이미 본 뒤라면 page-level 판단에 맡긴다.
-                continue
-
-            # row_date == target
-            page_had_target = True
-            seen_target_anywhere = True
 
             if dt_guess is None:
                 if r.url in post_dt_cache:
@@ -630,35 +675,24 @@ def scrape_one_date(
                 else:
                     jitter_sleep(SLEEP_POST)
                     post_html = fetch_html(session, r.url, referer=page_url)
-                    dt = parse_datetime_from_post(post_html)
+                    dt = parse_datetime_from_post(post_html, target=target)
                     if dt is None:
                         continue
                     post_dt_cache[r.url] = dt
             else:
                 dt = dt_guess
 
+            # 상세에서 뽑힌 날짜가 target과 다르면 오탐으로 간주하고 버린다.
+            if dt.date() != target:
+                continue
+
             t = dt.timetz().replace(tzinfo=None)
-
-            # 같은 날짜 내에서 수집 하한 이전으로 내려가면 이후는 더 이르다고 보고 종료
-            if t < start_t:
-                done = True
-                break
-
             if start_t <= t <= end_t:
                 results.append((dt, r.title, r.url))
 
-        if done:
-            break
-
-        if seen_target_anywhere:
-            page_top_d, _page_bottom_d = get_page_date_range(session, page, now_kst, row_cache, date_cache)
-            if (not page_had_target) and page_top_d is not None and page_top_d < target:
-                break
-
         jitter_sleep(SLEEP_LIST)
-        page += 1
 
-    return results
+    return _dedupe_results(results)
 
 
 def main():
@@ -714,20 +748,42 @@ def main():
 
     # 5) 날짜별 수집(신규→과거 순)
     for target in sorted(target_dates, reverse=True):
-        candidate_page, start_page = find_start_page_for_date(
+        candidate_page, anchor_page = find_start_page_for_date(
             session, target, now_kst, hi, row_cache, date_cache
         )
-        print(f"\n=== {target} 시작 페이지: candidate={candidate_page}, verified={start_page} ===")
-        rows = scrape_one_date(
+        print(f"\n=== {target} anchor 탐색: candidate={candidate_page}, anchor={anchor_page}, window=±{DAY_WINDOW_RADIUS} ===")
+        rows = scrape_window_for_date(
             session,
             target,
             start_t,
             end_t,
             now_kst,
-            start_page,
+            anchor_page,
             row_cache,
-            date_cache,
+            DAY_WINDOW_RADIUS,
+            force_refresh=False,
         )
+
+        if not rows and ZERO_RESULT_FALLBACK_RADIUS > DAY_WINDOW_RADIUS:
+            print(f"[WARN] {target} 1차 수집 0건 -> fallback window=±{ZERO_RESULT_FALLBACK_RADIUS} 재시도")
+            for p in range(
+                max(1, anchor_page - ZERO_RESULT_FALLBACK_RADIUS),
+                min(MAX_PAGE_LIMIT, anchor_page + ZERO_RESULT_FALLBACK_RADIUS) + 1,
+            ):
+                row_cache.pop(p, None)
+                date_cache.pop(p, None)
+            rows = scrape_window_for_date(
+                session,
+                target,
+                start_t,
+                end_t,
+                now_kst,
+                anchor_page,
+                row_cache,
+                ZERO_RESULT_FALLBACK_RADIUS,
+                force_refresh=True,
+            )
+
         all_results_by_date[target] = rows
         print(f"[OK] {target} 수집 {len(rows)}건")
 
