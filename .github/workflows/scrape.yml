@@ -44,6 +44,8 @@ jobs:
           SLEEP_LIST: "0.9"
           SLEEP_POST: "0.6"
           MAX_RETRIES: "5"
+          PAGE_EDGE_BAND: "12"
+          START_PAGE_VERIFY_RADIUS: "120"
         run: |
           python main.py
           ls -al outputs || true
