@@ -46,6 +46,9 @@ PAGE_EDGE_BAND = int(os.getenv("PAGE_EDGE_BAND", "12"))
 START_PAGE_VERIFY_RADIUS = int(os.getenv("START_PAGE_VERIFY_RADIUS", "80"))
 DAY_WINDOW_RADIUS = int(os.getenv("DAY_WINDOW_RADIUS", "60"))
 ZERO_RESULT_FALLBACK_RADIUS = int(os.getenv("ZERO_RESULT_FALLBACK_RADIUS", "120"))
+# target 날짜 페이지 대역을 고정 window가 아니라 동적으로 확장한다.
+BAND_MISS_LIMIT = int(os.getenv("BAND_MISS_LIMIT", "3"))
+BAND_EXPAND_MAX_PAGES = int(os.getenv("BAND_EXPAND_MAX_PAGES", "800"))
 MIN_VALID_LIST_ROWS = int(os.getenv("MIN_VALID_LIST_ROWS", "15"))
 PAGE_FETCH_RETRIES = int(os.getenv("PAGE_FETCH_RETRIES", "3"))
 
@@ -505,14 +508,7 @@ def get_page_date_range(
     return top_rep, bottom_rep
 
 
-def page_contains_target(
-    session: requests.Session,
-    page: int,
-    target: date,
-    now_kst: datetime,
-    row_cache: Dict[int, List[PostRow]],
-) -> bool:
-    rows = fetch_page_rows(session, page, row_cache)
+def rows_contain_target(rows: List[PostRow], target: date, now_kst: datetime) -> bool:
     for r in rows:
         if r.is_notice:
             continue
@@ -521,6 +517,79 @@ def page_contains_target(
         if row_date == target:
             return True
     return False
+
+
+def page_contains_target(
+    session: requests.Session,
+    page: int,
+    target: date,
+    now_kst: datetime,
+    row_cache: Dict[int, List[PostRow]],
+) -> bool:
+    rows = fetch_page_rows(session, page, row_cache)
+    if rows_contain_target(rows, target, now_kst):
+        return True
+
+    # 경계 페이지에서 부분 응답/깨진 캐시로 target을 놓치는 경우를 줄이기 위해
+    # 한 번 강제 새로고침으로 재확인한다.
+    rows = fetch_page_rows(session, page, row_cache, force_refresh=True)
+    return rows_contain_target(rows, target, now_kst)
+
+
+def expand_target_page_band(
+    session: requests.Session,
+    target: date,
+    now_kst: datetime,
+    anchor_page: int,
+    row_cache: Dict[int, List[PostRow]],
+    miss_limit: int = BAND_MISS_LIMIT,
+    max_expand_pages: int = BAND_EXPAND_MAX_PAGES,
+) -> Tuple[int, int, int, int]:
+    """
+    anchor 페이지에서 시작해 target 날짜가 보이는 연속 page band를 좌우로 확장한다.
+
+    고정 ±window 방식은 글이 매우 많은 날(하루가 수십~수백 페이지에 걸치는 날)
+    앞쪽 시간대가 잘리는 문제가 있어서, miss_limit 연속으로 target이 안 보일 때까지
+    좌우 확장하는 방식으로 바꾼다.
+
+    반환값: (left_page, right_page, left_misses, right_misses)
+    """
+    left = anchor_page
+    right = anchor_page
+
+    # newer 방향(작은 page 번호) 확장
+    misses = 0
+    steps = 0
+    p = anchor_page - 1
+    while p >= 1 and steps < max_expand_pages:
+        if page_contains_target(session, p, target, now_kst, row_cache):
+            left = p
+            misses = 0
+        else:
+            misses += 1
+            if misses >= miss_limit:
+                break
+        p -= 1
+        steps += 1
+    left_misses = misses
+
+    # older 방향(큰 page 번호) 확장
+    misses = 0
+    steps = 0
+    p = anchor_page + 1
+    while p <= MAX_PAGE_LIMIT and steps < max_expand_pages:
+        if page_contains_target(session, p, target, now_kst, row_cache):
+            right = p
+            misses = 0
+        else:
+            misses += 1
+            if misses >= miss_limit:
+                break
+        p += 1
+        steps += 1
+    right_misses = misses
+
+    return left, right, left_misses, right_misses
 
 
 def find_upper_bound_for_min_date(
@@ -631,26 +700,20 @@ def _dedupe_results(rows: List[Tuple[datetime, str, str]]) -> List[Tuple[datetim
     return out
 
 
-def scrape_window_for_date(
+def scrape_page_band_for_date(
     session: requests.Session,
     target: date,
     start_t: dtime,
     end_t: dtime,
     now_kst: datetime,
-    anchor_page: int,
+    start_page: int,
+    end_page: int,
     row_cache: Dict[int, List[PostRow]],
-    window_radius: int,
     force_refresh: bool = False,
 ) -> List[Tuple[datetime, str, str]]:
     """
-    anchor 주변의 고정 window를 훑으며 target 날짜 글만 상세 datetime으로 확정한다.
-
-    기존처럼 잘못 잡힌 start_page / 조기 break를 믿지 않고,
-    bounded window 안에서 target 날짜를 전부 수집하는 방식이라 특정 날짜 누락에 강하다.
+    target 날짜가 걸친 page band 전체를 훑으며 상세 datetime으로 확정한다.
     """
-    start_page = max(1, anchor_page - window_radius)
-    end_page = min(MAX_PAGE_LIMIT, anchor_page + window_radius)
-
     results: List[Tuple[datetime, str, str]] = []
     post_dt_cache: Dict[str, datetime] = {}
 
@@ -682,7 +745,6 @@ def scrape_window_for_date(
             else:
                 dt = dt_guess
 
-            # 상세에서 뽑힌 날짜가 target과 다르면 오탐으로 간주하고 버린다.
             if dt.date() != target:
                 continue
 
@@ -741,7 +803,8 @@ def main():
 
     row_cache: Dict[int, List[PostRow]] = {}
 
-    # 4) 가장 과거 목표 날짜까지 도달하는 페이지 hi를 1번만 잡고, 각 날짜는 candidate→verified 보정
+    # 4) 가장 과거 목표 날짜까지 도달하는 페이지 hi를 1번만 잡고, 각 날짜는 candidate→anchor 탐색 후
+    #    실제 target 날짜가 보이는 연속 page band를 동적으로 확장한다.
     min_date = min(target_dates)
     hi, date_cache = find_upper_bound_for_min_date(session, min_date, now_kst, row_cache)
     print(f"[INFO] 페이지 상한(hi) 추정: {hi} (min_target_date={min_date})")
@@ -751,36 +814,46 @@ def main():
         candidate_page, anchor_page = find_start_page_for_date(
             session, target, now_kst, hi, row_cache, date_cache
         )
-        print(f"\n=== {target} anchor 탐색: candidate={candidate_page}, anchor={anchor_page}, window=±{DAY_WINDOW_RADIUS} ===")
-        rows = scrape_window_for_date(
+        left_page, right_page, left_misses, right_misses = expand_target_page_band(
+            session, target, now_kst, anchor_page, row_cache
+        )
+        print(
+            f"\n=== {target} anchor 탐색: candidate={candidate_page}, anchor={anchor_page}, "
+            f"band={left_page}..{right_page} (pages={right_page - left_page + 1}, "
+            f"misses L/R={left_misses}/{right_misses}) ==="
+        )
+
+        rows = scrape_page_band_for_date(
             session,
             target,
             start_t,
             end_t,
             now_kst,
-            anchor_page,
+            left_page,
+            right_page,
             row_cache,
-            DAY_WINDOW_RADIUS,
             force_refresh=False,
         )
 
-        if not rows and ZERO_RESULT_FALLBACK_RADIUS > DAY_WINDOW_RADIUS:
-            print(f"[WARN] {target} 1차 수집 0건 -> fallback window=±{ZERO_RESULT_FALLBACK_RADIUS} 재시도")
-            for p in range(
-                max(1, anchor_page - ZERO_RESULT_FALLBACK_RADIUS),
-                min(MAX_PAGE_LIMIT, anchor_page + ZERO_RESULT_FALLBACK_RADIUS) + 1,
-            ):
+        if not rows:
+            fallback_left = max(1, left_page - ZERO_RESULT_FALLBACK_RADIUS)
+            fallback_right = min(MAX_PAGE_LIMIT, right_page + ZERO_RESULT_FALLBACK_RADIUS)
+            print(
+                f"[WARN] {target} 1차 수집 0건 -> fallback band={fallback_left}..{fallback_right} "
+                f"(+/- {ZERO_RESULT_FALLBACK_RADIUS} pages) 재시도"
+            )
+            for p in range(fallback_left, fallback_right + 1):
                 row_cache.pop(p, None)
                 date_cache.pop(p, None)
-            rows = scrape_window_for_date(
+            rows = scrape_page_band_for_date(
                 session,
                 target,
                 start_t,
                 end_t,
                 now_kst,
-                anchor_page,
+                fallback_left,
+                fallback_right,
                 row_cache,
-                ZERO_RESULT_FALLBACK_RADIUS,
                 force_refresh=True,
             )
 
