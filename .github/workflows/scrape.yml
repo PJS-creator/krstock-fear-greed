@@ -46,8 +46,9 @@ jobs:
           MAX_RETRIES: "5"
           PAGE_EDGE_BAND: "12"
           START_PAGE_VERIFY_RADIUS: "120"
-          DAY_WINDOW_RADIUS: "60"
           ZERO_RESULT_FALLBACK_RADIUS: "140"
+          BAND_MISS_LIMIT: "3"
+          BAND_EXPAND_MAX_PAGES: "800"
           MIN_VALID_LIST_ROWS: "15"
           PAGE_FETCH_RETRIES: "3"
         run: |
