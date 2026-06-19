@@ -1,0 +1,109 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - work
+
+jobs:
+  scraper-runtime:
+    name: Scraper runtime check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install scraper runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile scraper entrypoint
+        run: python -m py_compile main.py
+
+  portfolio-tests:
+    name: Portfolio tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install scraper runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: Compile dashboard and portfolio modules
+        run: python -m compileall app portfolio scripts
+
+  dashboard-dependencies:
+    name: Dashboard deps and smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install scraper runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Verify Streamlit Cloud requirements mirror
+        run: cmp -s requirements-dashboard.txt app/requirements.txt
+
+      - name: Install Streamlit Cloud dashboard dependencies
+        run: python -m pip install -r app/requirements.txt
+
+      - name: Verify dashboard imports
+        run: python -c "import streamlit, pandas; print('dashboard deps ok')"
+
+      - name: Smoke test simple dashboard
+        run: |
+          python app/simple_dashboard.py > /tmp/simple_dashboard.log 2>&1 &
+          DASHBOARD_PID=$!
+          trap 'kill "$DASHBOARD_PID" 2>/dev/null || true' EXIT
+          python - <<'PY'
+          from time import sleep
+          from urllib.request import urlopen
+
+          last_error = None
+          for _ in range(20):
+              try:
+                  html = urlopen('http://127.0.0.1:8501', timeout=2).read().decode('utf-8')
+                  assert 'Personal Portfolio Control Panel' in html
+                  assert '₩6,266,200' in html
+                  print('simple dashboard ok')
+                  break
+              except Exception as exc:
+                  last_error = exc
+                  sleep(0.5)
+          else:
+              raise SystemExit(f'simple dashboard smoke test failed: {last_error}')
+          PY
