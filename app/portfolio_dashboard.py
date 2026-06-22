@@ -19,6 +19,14 @@ import pandas as pd
 import streamlit as st
 
 from portfolio.analytics import build_portfolio_snapshot
+from portfolio.auth import (
+    AppSecurityConfig,
+    config_from_secrets,
+    should_disable_price_update,
+    should_lock_entire_app,
+    should_lock_manual_mode,
+    verify_password,
+)
 from portfolio.manual_input import (
     PORTFOLIO_CSV_COLUMNS,
     csv_template,
@@ -34,6 +42,8 @@ from portfolio.sample_data import sample_portfolio
 
 SAMPLE_MODE = "샘플 포트폴리오 사용"
 MANUAL_MODE = "내 포트폴리오 직접 입력"
+AUTHENTICATED_KEY = "is_authenticated"
+UNPROTECTED_WARNING = "공개 앱에서 API key quota 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 
 
 def krw(value: float) -> str:
@@ -44,19 +54,54 @@ def pct(value: float) -> str:
     return f"{value * 100:,.2f}%"
 
 
-def _read_alpha_vantage_api_key() -> str | None:
+def _read_security_config() -> AppSecurityConfig:
     try:
-        value = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
+        secrets = {
+            "APP_PASSWORD": st.secrets.get("APP_PASSWORD", ""),
+            "APP_AUTH_SCOPE": st.secrets.get("APP_AUTH_SCOPE", ""),
+            "ALPHA_VANTAGE_API_KEY": st.secrets.get("ALPHA_VANTAGE_API_KEY", ""),
+        }
     except Exception:
-        return None
-    api_key = str(value).strip()
-    return api_key or None
+        secrets = {}
+    return config_from_secrets(secrets)
 
 
 def _initialize_session_state() -> None:
     st.session_state.setdefault("manual_portfolio_rows", [])
     st.session_state.setdefault("manual_upload_token", None)
     st.session_state.setdefault("price_update_statuses", [])
+    st.session_state.setdefault(AUTHENTICATED_KEY, False)
+
+
+def _is_authenticated() -> bool:
+    return bool(st.session_state.get(AUTHENTICATED_KEY, False))
+
+
+def _render_login_form(config: AppSecurityConfig) -> None:
+    st.title("Personal Portfolio Control Panel")
+    st.subheader("비밀번호가 필요합니다")
+    st.caption("공개 앱의 포트폴리오 입력 기능과 API quota를 보호하기 위한 개인용 경량 보호입니다.")
+    with st.form("password_form"):
+        candidate_password = st.text_input("APP_PASSWORD", type="password")
+        submitted = st.form_submit_button("로그인")
+    if submitted:
+        if verify_password(candidate_password, config.app_password):
+            st.session_state[AUTHENTICATED_KEY] = True
+            st.rerun()
+        st.error("비밀번호가 올바르지 않습니다.")
+    st.stop()
+
+
+def _render_security_status(config: AppSecurityConfig) -> None:
+    if not config.has_password:
+        st.warning(UNPROTECTED_WARNING)
+        return
+    with st.sidebar:
+        st.success("인증됨")
+        if st.button("로그아웃"):
+            st.session_state[AUTHENTICATED_KEY] = False
+            st.session_state.price_update_statuses = []
+            st.rerun()
 
 
 def _snapshot_frame(snapshot: PortfolioSnapshot) -> pd.DataFrame:
@@ -216,11 +261,14 @@ def _render_price_update_statuses() -> None:
             st.info(text)
 
 
-def _render_price_update_control() -> None:
+def _render_price_update_control(config: AppSecurityConfig) -> None:
     st.subheader("미국 주식 가격 자동 업데이트")
     st.caption("Alpha Vantage API key가 Streamlit secrets에 있을 때만 US/USD 종목의 현재가와 전일종가를 갱신합니다. 한국/KRW 종목은 수동 입력을 유지합니다.")
-    if st.button("미국 주식 가격 자동 업데이트", disabled=not st.session_state.manual_portfolio_rows):
-        provider = build_alpha_vantage_provider(_read_alpha_vantage_api_key())
+    disable_for_security = should_disable_price_update(config)
+    if disable_for_security:
+        st.warning(f"{UNPROTECTED_WARNING} APP_PASSWORD가 없어 가격 자동 업데이트 버튼을 비활성화했습니다.")
+    if st.button("미국 주식 가격 자동 업데이트", disabled=not st.session_state.manual_portfolio_rows or disable_for_security):
+        provider = build_alpha_vantage_provider(config.alpha_vantage_api_key)
         try:
             updated_rows, statuses = update_us_quotes(st.session_state.manual_portfolio_rows, provider)
             st.session_state.manual_portfolio_rows = updated_rows
@@ -247,11 +295,11 @@ def _render_delete_control() -> None:
         st.rerun()
 
 
-def _render_manual_mode(usd_krw: float, cash_krw: float) -> None:
+def _render_manual_mode(usd_krw: float, cash_krw: float, config: AppSecurityConfig) -> None:
     st.subheader("내 포트폴리오 직접 입력")
     _render_csv_tools()
     _render_add_position_form()
-    _render_price_update_control()
+    _render_price_update_control(config)
 
     st.subheader("현재 포트폴리오 입력값")
     current_rows = st.session_state.manual_portfolio_rows
@@ -279,8 +327,13 @@ def _render_sample_mode(usd_krw: float, cash_krw: float) -> None:
 
 st.set_page_config(page_title="Personal Portfolio Control Panel", layout="wide")
 _initialize_session_state()
+security_config = _read_security_config()
+if should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
+    _render_login_form(security_config)
+
 st.title("Personal Portfolio Control Panel")
 st.caption("샘플 포트폴리오 또는 브라우저 세션의 직접 입력 데이터로 계산하는 수동 입력형 포트폴리오 앱")
+_render_security_status(security_config)
 
 _, _, sample_usd_krw, sample_cash_krw = sample_portfolio()
 with st.sidebar:
@@ -294,5 +347,7 @@ with st.sidebar:
 
 if mode == SAMPLE_MODE:
     _render_sample_mode(usd_krw, cash_krw)
+elif should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
+    _render_login_form(security_config)
 else:
-    _render_manual_mode(usd_krw, cash_krw)
+    _render_manual_mode(usd_krw, cash_krw, security_config)
