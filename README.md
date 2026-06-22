@@ -57,6 +57,7 @@ python scripts/init_db.py
 현재 SQLite 스키마는 MVP용입니다. 나중에 PostgreSQL로 전환할 때는 금액/수량의 `NUMERIC` 타입, `TIMESTAMPTZ`, provider별 quote cache/history 분리를 검토합니다.
 
 
+
 ## Streamlit Community Cloud 배포 방법
 
 Naver Cloud 서버 없이 GitHub 저장소를 Streamlit Community Cloud에 직접 연결해 배포합니다. 현재 MVP는 외부 API key가 필요 없으므로 secrets는 비워도 됩니다.
