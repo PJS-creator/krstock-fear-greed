@@ -3,7 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+def _ensure_project_root_on_path() -> None:
+    project_root = Path(__file__).resolve().parents[1]
+    project_root_text = str(project_root)
+    if project_root_text not in sys.path:
+        sys.path.insert(0, project_root_text)
+
+
+_ensure_project_root_on_path()
 
 import pandas as pd
 import streamlit as st
