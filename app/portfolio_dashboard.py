@@ -39,11 +39,26 @@ from portfolio.manual_input import (
 from portfolio.models import PortfolioSnapshot
 from portfolio.pricing import build_alpha_vantage_provider, update_us_quotes
 from portfolio.sample_data import sample_portfolio
+from portfolio.storage import (
+    PortfolioRecord,
+    PortfolioStore,
+    PortfolioStoreError,
+    SupabaseStorageConfig,
+    build_supabase_store,
+    deserialize_portfolio_payload,
+    serialize_portfolio_payload,
+    should_enable_storage,
+    supabase_config_from_secrets,
+)
 
 SAMPLE_MODE = "샘플 포트폴리오 사용"
 MANUAL_MODE = "내 포트폴리오 직접 입력"
 AUTHENTICATED_KEY = "is_authenticated"
+PENDING_PORTFOLIO_LOAD_KEY = "pending_portfolio_load"
+STORAGE_STATUS_KEY = "storage_status_message"
 UNPROTECTED_WARNING = "공개 앱에서 API key quota 보호를 위해 APP_PASSWORD 설정을 권장합니다."
+STORAGE_UNCONFIGURED_MESSAGE = "저장소가 설정되지 않아 CSV 방식만 사용할 수 있습니다"
+STORAGE_PASSWORD_WARNING = "저장/불러오기는 APP_PASSWORD를 설정한 인증 사용자에게만 사용할 수 있습니다. CSV 방식만 사용할 수 있습니다."
 
 
 def krw(value: float) -> str:
@@ -66,15 +81,54 @@ def _read_security_config() -> AppSecurityConfig:
     return config_from_secrets(secrets)
 
 
+def _read_storage_config() -> SupabaseStorageConfig:
+    try:
+        secrets = {
+            "SUPABASE_URL": st.secrets.get("SUPABASE_URL", ""),
+            "SUPABASE_SERVICE_ROLE_KEY": st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", ""),
+            "PORTFOLIO_OWNER_ID": st.secrets.get("PORTFOLIO_OWNER_ID", ""),
+        }
+    except Exception:
+        secrets = {}
+    return supabase_config_from_secrets(secrets)
+
+
 def _initialize_session_state() -> None:
     st.session_state.setdefault("manual_portfolio_rows", [])
     st.session_state.setdefault("manual_upload_token", None)
+    st.session_state.setdefault("manual_usd_krw", 1380.0)
+    st.session_state.setdefault("manual_cash_krw", 0.0)
     st.session_state.setdefault("price_update_statuses", [])
+    st.session_state.setdefault(PENDING_PORTFOLIO_LOAD_KEY, None)
     st.session_state.setdefault(AUTHENTICATED_KEY, False)
+
+
+def _apply_pending_portfolio_load() -> None:
+    pending = st.session_state.get(PENDING_PORTFOLIO_LOAD_KEY)
+    if not pending:
+        return
+    del st.session_state[PENDING_PORTFOLIO_LOAD_KEY]
+    st.session_state.manual_portfolio_rows = pending["rows"]
+    st.session_state.manual_usd_krw = pending["usd_krw"]
+    st.session_state.manual_cash_krw = pending["cash_krw"]
+    st.session_state.manual_upload_token = None
+    st.session_state.price_update_statuses = []
 
 
 def _is_authenticated() -> bool:
     return bool(st.session_state.get(AUTHENTICATED_KEY, False))
+
+
+def _set_storage_status(message: str) -> None:
+    st.session_state[STORAGE_STATUS_KEY] = message
+
+
+def _render_storage_status() -> None:
+    message = st.session_state.get(STORAGE_STATUS_KEY)
+    if not message:
+        return
+    del st.session_state[STORAGE_STATUS_KEY]
+    st.success(message)
 
 
 def _render_login_form(config: AppSecurityConfig) -> None:
@@ -282,6 +336,97 @@ def _render_price_update_control(config: AppSecurityConfig) -> None:
     _render_price_update_statuses()
 
 
+def _record_label(record: PortfolioRecord) -> str:
+    changed_at = record.updated_at or record.created_at or ""
+    if changed_at:
+        return f"{record.portfolio_name} ({changed_at[:10]})"
+    return record.portfolio_name
+
+
+def _render_storage_tools(usd_krw: float, cash_krw: float, security_config: AppSecurityConfig) -> None:
+    st.subheader("포트폴리오 저장/불러오기")
+    _render_storage_status()
+
+    storage_config = _read_storage_config()
+    if not should_enable_storage(storage_config):
+        st.info(STORAGE_UNCONFIGURED_MESSAGE)
+        return
+    if not security_config.has_password:
+        st.warning(STORAGE_PASSWORD_WARNING)
+        return
+
+    try:
+        store: PortfolioStore | None = build_supabase_store(storage_config)
+    except PortfolioStoreError as exc:
+        st.warning(f"저장소를 초기화할 수 없습니다: {exc}")
+        return
+    if store is None or storage_config.owner_id is None:
+        st.info(STORAGE_UNCONFIGURED_MESSAGE)
+        return
+
+    with st.form("portfolio_save_form"):
+        st.text_input("portfolio_name", key="portfolio_save_name")
+        save_submitted = st.form_submit_button("현재 포트폴리오 저장")
+    if save_submitted:
+        portfolio_name = str(st.session_state.get("portfolio_save_name", "")).strip()
+        if not portfolio_name:
+            st.error("portfolio_name을 입력하세요.")
+        else:
+            try:
+                payload = serialize_portfolio_payload(st.session_state.manual_portfolio_rows, usd_krw, cash_krw)
+                store.save_portfolio(storage_config.owner_id, portfolio_name, payload)
+                _set_storage_status(f"{portfolio_name} 포트폴리오를 저장했습니다.")
+                st.rerun()
+            except (PortfolioStoreError, ValueError) as exc:
+                st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
+
+    try:
+        records = store.list_portfolios(storage_config.owner_id)
+    except PortfolioStoreError as exc:
+        st.warning(f"저장된 포트폴리오 목록을 불러올 수 없습니다: {exc}")
+        return
+
+    if not records:
+        st.info("저장된 포트폴리오가 없습니다.")
+        return
+
+    labels = {_record_label(record): record.portfolio_name for record in records}
+    selected_label = st.selectbox("저장된 포트폴리오", options=list(labels.keys()))
+    selected_name = labels[selected_label]
+
+    load_col, delete_col = st.columns(2)
+    if load_col.button("선택 포트폴리오 불러오기"):
+        try:
+            record = store.get_portfolio(storage_config.owner_id, selected_name)
+            if record is None:
+                st.error("선택한 포트폴리오를 찾을 수 없습니다.")
+            else:
+                rows, loaded_usd_krw, loaded_cash_krw = deserialize_portfolio_payload(record.payload_json)
+                st.session_state[PENDING_PORTFOLIO_LOAD_KEY] = {
+                    "rows": rows,
+                    "usd_krw": loaded_usd_krw,
+                    "cash_krw": loaded_cash_krw,
+                }
+                _set_storage_status(f"{selected_name} 포트폴리오를 불러왔습니다.")
+                st.rerun()
+        except (PortfolioStoreError, ValueError) as exc:
+            st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
+
+    st.warning("삭제하면 Supabase 저장소에서 선택한 포트폴리오가 제거됩니다.")
+    confirm_delete = st.checkbox("선택한 포트폴리오를 삭제합니다", key="confirm_delete_portfolio")
+    if delete_col.button("선택 포트폴리오 삭제", disabled=not confirm_delete):
+        try:
+            deleted = store.delete_portfolio(storage_config.owner_id, selected_name)
+            if deleted:
+                st.session_state.confirm_delete_portfolio = False
+                _set_storage_status(f"{selected_name} 포트폴리오를 삭제했습니다.")
+                st.rerun()
+            else:
+                st.error("선택한 포트폴리오를 찾을 수 없습니다.")
+        except PortfolioStoreError as exc:
+            st.error(f"포트폴리오를 삭제할 수 없습니다: {exc}")
+
+
 def _render_delete_control() -> None:
     rows = st.session_state.manual_portfolio_rows
     if not rows:
@@ -303,6 +448,7 @@ def _render_manual_mode(usd_krw: float, cash_krw: float, config: AppSecurityConf
     _render_csv_tools()
     _render_add_position_form()
     _render_price_update_control(config)
+    _render_storage_tools(usd_krw, cash_krw, config)
 
     st.subheader("현재 포트폴리오 입력값")
     current_rows = st.session_state.manual_portfolio_rows
@@ -330,6 +476,7 @@ def _render_sample_mode(usd_krw: float, cash_krw: float) -> None:
 
 st.set_page_config(page_title="Personal Portfolio Control Panel", layout="wide")
 _initialize_session_state()
+_apply_pending_portfolio_load()
 security_config = _read_security_config()
 if should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
@@ -345,8 +492,10 @@ with st.sidebar:
         usd_krw = st.number_input("USD/KRW", min_value=0.01, value=float(sample_usd_krw), step=1.0)
         cash_krw = st.number_input("현금(KRW)", min_value=0.0, value=float(sample_cash_krw), step=100000.0)
     else:
-        usd_krw = st.number_input("USD/KRW", min_value=0.01, value=1380.0, step=1.0)
-        cash_krw = st.number_input("현금(KRW)", min_value=0.0, value=0.0, step=100000.0)
+        usd_krw = st.number_input("USD/KRW", min_value=0.01, value=float(st.session_state.manual_usd_krw), step=1.0)
+        cash_krw = st.number_input("현금(KRW)", min_value=0.0, value=float(st.session_state.manual_cash_krw), step=100000.0)
+        st.session_state.manual_usd_krw = float(usd_krw)
+        st.session_state.manual_cash_krw = float(cash_krw)
 
 if mode == SAMPLE_MODE:
     _render_sample_mode(usd_krw, cash_krw)
