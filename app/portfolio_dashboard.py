@@ -127,7 +127,7 @@ def _render_csv_tools() -> None:
         upload_token = hashlib.sha256(uploaded_bytes).hexdigest()
         if st.session_state.manual_upload_token != upload_token:
             try:
-                uploaded_frame = pd.read_csv(BytesIO(uploaded_bytes))
+                uploaded_frame = pd.read_csv(BytesIO(uploaded_bytes), dtype=str)
                 st.session_state.manual_portfolio_rows = normalize_portfolio_rows(uploaded_frame.to_dict("records"))
                 st.session_state.manual_upload_token = upload_token
                 st.success("CSV 포트폴리오를 불러왔습니다.")
