@@ -236,8 +236,8 @@ def _render_sample_mode(usd_krw: float, cash_krw: float) -> None:
     _render_snapshot(snapshot)
 
 
-_initialize_session_state()
 st.set_page_config(page_title="Personal Portfolio Control Panel", layout="wide")
+_initialize_session_state()
 st.title("Personal Portfolio Control Panel")
 st.caption("샘플 포트폴리오 또는 브라우저 세션의 직접 입력 데이터로 계산하는 수동 입력형 포트폴리오 앱")
 
