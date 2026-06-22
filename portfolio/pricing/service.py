@@ -7,7 +7,7 @@ from .base import PriceProvider, PriceProviderError
 from .cache import TTLQuoteCache
 from portfolio.manual_input import normalize_portfolio_rows
 
-FMP_TARGET_MARKETS = {"US", "USA"}
+AUTO_UPDATE_TARGET_MARKETS = {"US", "USA"}
 DEFAULT_QUOTE_CACHE = TTLQuoteCache(ttl_seconds=600)
 
 
@@ -20,10 +20,10 @@ class PriceUpdateStatus:
     message: str
 
 
-def is_fmp_update_target(row: Mapping[str, Any]) -> bool:
+def is_auto_update_target(row: Mapping[str, Any]) -> bool:
     market = str(row.get("market", "")).strip().upper()
     currency = str(row.get("currency", "")).strip().upper()
-    return currency == "USD" and market in FMP_TARGET_MARKETS
+    return currency == "USD" and market in AUTO_UPDATE_TARGET_MARKETS
 
 
 def update_us_quotes(
@@ -43,14 +43,14 @@ def update_us_quotes(
         market = str(row["market"])
         currency = str(row["currency"])
 
-        if not is_fmp_update_target(row):
+        if not is_auto_update_target(row):
             statuses.append(
                 PriceUpdateStatus(
                     symbol=symbol,
                     market=market,
                     currency=currency,
                     status="manual",
-                    message="수동 입력 유지: v0.3은 미국 USD 종목만 자동 업데이트합니다.",
+                    message="수동 입력 유지: 미국 USD 종목만 자동 업데이트합니다.",
                 )
             )
             updated_rows.append(updated_row)
@@ -63,7 +63,7 @@ def update_us_quotes(
                     market=market,
                     currency=currency,
                     status="missing_api_key",
-                    message="FMP API key가 없어 수동 입력 가격을 유지했습니다.",
+                    message="Alpha Vantage API key가 없어 수동 입력 가격을 유지했습니다.",
                 )
             )
             updated_rows.append(updated_row)
@@ -78,7 +78,7 @@ def update_us_quotes(
                     market=market,
                     currency=currency,
                     status="failed",
-                    message=f"FMP 업데이트 실패: {exc}. 기존 입력 가격을 유지했습니다.",
+                    message=f"Alpha Vantage 업데이트 실패: {exc}. 기존 입력 가격을 유지했습니다.",
                 )
             )
             updated_rows.append(updated_row)
@@ -92,7 +92,7 @@ def update_us_quotes(
                 market=market,
                 currency=currency,
                 status="updated",
-                message="FMP 가격으로 current_price와 previous_close를 업데이트했습니다.",
+                message="Alpha Vantage 가격으로 current_price와 previous_close를 업데이트했습니다.",
             )
         )
         updated_rows.append(updated_row)

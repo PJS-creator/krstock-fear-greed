@@ -29,7 +29,7 @@ from portfolio.manual_input import (
     rows_to_positions_quotes,
 )
 from portfolio.models import PortfolioSnapshot
-from portfolio.pricing import build_fmp_provider, update_us_quotes
+from portfolio.pricing import build_alpha_vantage_provider, update_us_quotes
 from portfolio.sample_data import sample_portfolio
 
 SAMPLE_MODE = "샘플 포트폴리오 사용"
@@ -44,9 +44,9 @@ def pct(value: float) -> str:
     return f"{value * 100:,.2f}%"
 
 
-def _read_fmp_api_key() -> str | None:
+def _read_alpha_vantage_api_key() -> str | None:
     try:
-        value = st.secrets.get("FMP_API_KEY", "")
+        value = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
     except Exception:
         return None
     api_key = str(value).strip()
@@ -218,9 +218,9 @@ def _render_price_update_statuses() -> None:
 
 def _render_price_update_control() -> None:
     st.subheader("미국 주식 가격 자동 업데이트")
-    st.caption("FMP API key가 Streamlit secrets에 있을 때만 US/USD 종목의 현재가와 전일종가를 갱신합니다. 한국/KRW 종목은 수동 입력을 유지합니다.")
+    st.caption("Alpha Vantage API key가 Streamlit secrets에 있을 때만 US/USD 종목의 현재가와 전일종가를 갱신합니다. 한국/KRW 종목은 수동 입력을 유지합니다.")
     if st.button("미국 주식 가격 자동 업데이트", disabled=not st.session_state.manual_portfolio_rows):
-        provider = build_fmp_provider(_read_fmp_api_key())
+        provider = build_alpha_vantage_provider(_read_alpha_vantage_api_key())
         try:
             updated_rows, statuses = update_us_quotes(st.session_state.manual_portfolio_rows, provider)
             st.session_state.manual_portfolio_rows = updated_rows

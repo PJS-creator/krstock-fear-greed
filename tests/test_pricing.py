@@ -6,11 +6,11 @@ from portfolio.pricing import (
     PriceProviderError,
     ProviderQuote,
     TTLQuoteCache,
-    build_fmp_provider,
-    parse_fmp_quote_response,
+    build_alpha_vantage_provider,
+    parse_alpha_vantage_global_quote_response,
     update_us_quotes,
 )
-from portfolio.pricing.service import is_fmp_update_target
+from portfolio.pricing.service import is_auto_update_target
 
 
 def _row(**overrides):
@@ -50,33 +50,65 @@ class FailingProvider:
         raise PriceProviderError("temporary provider outage")
 
 
-def test_fmp_provider_response_parsing():
-    quote = parse_fmp_quote_response(
-        "AAPL",
-        [
-            {
-                "symbol": "AAPL",
-                "price": 193.42,
-                "previousClose": 190.25,
+def test_alpha_vantage_global_quote_response_parsing():
+    quote = parse_alpha_vantage_global_quote_response(
+        "IBM",
+        {
+            "Global Quote": {
+                "01. symbol": "IBM",
+                "05. price": "182.1500",
+                "08. previous close": "180.9200",
             }
-        ],
+        },
     )
 
-    assert quote.symbol == "AAPL"
-    assert quote.price == pytest.approx(193.42)
-    assert quote.previous_close == pytest.approx(190.25)
-    assert quote.provider == "fmp"
+    assert quote.symbol == "IBM"
+    assert quote.price == pytest.approx(182.15)
+    assert quote.previous_close == pytest.approx(180.92)
+    assert quote.provider == "alpha_vantage"
 
 
-def test_fmp_provider_rejects_unusable_response():
-    with pytest.raises(PriceProviderError, match="previousClose"):
-        parse_fmp_quote_response("AAPL", [{"symbol": "AAPL", "price": 193.42}])
+def test_alpha_vantage_empty_global_quote_is_rejected():
+    with pytest.raises(PriceProviderError, match="Global Quote"):
+        parse_alpha_vantage_global_quote_response("IBM", {"Global Quote": {}})
+
+
+def test_alpha_vantage_missing_global_quote_is_rejected():
+    with pytest.raises(PriceProviderError, match="Global Quote"):
+        parse_alpha_vantage_global_quote_response("IBM", {})
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"Note": "Thank you for using Alpha Vantage. Our standard API rate limit is 25 requests per day."},
+        {"Information": "The **demo** API key is for demo purposes only."},
+        {"Error Message": "Invalid API call."},
+    ],
+)
+def test_alpha_vantage_rate_limit_and_api_messages_are_rejected(payload):
+    with pytest.raises(PriceProviderError, match="Alpha Vantage"):
+        parse_alpha_vantage_global_quote_response("IBM", payload)
+
+
+def test_alpha_vantage_symbol_mismatch_is_rejected():
+    with pytest.raises(PriceProviderError, match="symbol"):
+        parse_alpha_vantage_global_quote_response(
+            "IBM",
+            {
+                "Global Quote": {
+                    "01. symbol": "MSFT",
+                    "05. price": "182.1500",
+                    "08. previous close": "180.9200",
+                }
+            },
+        )
 
 
 def test_missing_api_key_does_not_fail_and_keeps_manual_quotes():
     rows = [_row(symbol="MSFT"), _row(market="KR", symbol="005930", currency="KRW")]
 
-    provider = build_fmp_provider(None)
+    provider = build_alpha_vantage_provider(None)
     updated_rows, statuses = update_us_quotes(rows, provider, cache=TTLQuoteCache())
 
     assert provider is None
@@ -86,7 +118,7 @@ def test_missing_api_key_does_not_fail_and_keeps_manual_quotes():
     assert statuses[1].status == "manual"
 
 
-def test_fmp_failure_keeps_existing_quote():
+def test_provider_failure_keeps_existing_quote():
     rows = [_row(symbol="MSFT", current_price="120", previous_close="118")]
 
     updated_rows, statuses = update_us_quotes(rows, FailingProvider(), cache=TTLQuoteCache())
@@ -117,7 +149,7 @@ def test_only_usd_us_rows_are_auto_update_targets():
 
 
 def test_krw_kr_rows_are_excluded_from_auto_update_targets():
-    assert not is_fmp_update_target(_row(market="KR", symbol="005930", currency="KRW"))
+    assert not is_auto_update_target(_row(market="KR", symbol="005930", currency="KRW"))
 
 
 def test_quote_cache_prevents_repeated_provider_calls():
