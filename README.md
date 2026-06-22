@@ -22,6 +22,8 @@ python main.py
 
 샘플 포트폴리오를 기반으로 총자산, 일간 손익, 총손익, 보유 비중, 목표 비중 차이를 계산하는 개인용 포트폴리오 대시보드입니다.
 
+v0.2부터는 공개 GitHub 코드에 실제 보유종목, 수량, 평단을 저장하지 않고 웹 화면에서 직접 입력하거나 CSV 파일로 불러와 계산할 수 있습니다. 입력 데이터는 Streamlit 브라우저 세션 안에서만 유지되며, 앱이 DB나 로그인 저장소에 저장하지 않습니다.
+
 ### 대시보드 의존성 설치
 
 ```bash
@@ -39,6 +41,37 @@ streamlit run app/portfolio_dashboard.py
 ```bash
 python app/simple_dashboard.py
 ```
+
+### v0.2 직접 입력 사용법
+
+1. 앱 왼쪽 사이드바에서 **내 포트폴리오 직접 입력**을 선택합니다.
+2. `USD/KRW` 환율과 `현금(KRW)`을 입력합니다.
+3. 화면의 입력 폼에 `market`, `symbol`, `name`, `currency`, `quantity`, `avg_price`, `current_price`, `previous_close`, `target_weight`, `strategy_tag`를 입력합니다.
+4. **종목 추가**를 누르면 현재 포트폴리오 테이블에 종목이 추가됩니다.
+5. 삭제가 필요하면 **삭제할 종목**에서 종목을 선택하고 **선택 종목 삭제**를 누릅니다.
+
+`currency`는 `KRW` 또는 `USD`만 허용합니다. 수량, 가격, 환율, 현금은 음수를 허용하지 않습니다. `quantity=0`은 관심 종목이나 감시용 입력으로 허용되며 평가액은 0으로 계산됩니다.
+
+### CSV 업로드 사용법
+
+1. **CSV 템플릿 다운로드**를 눌러 필요한 컬럼이 들어 있는 파일을 받습니다.
+2. 템플릿의 컬럼 이름을 유지한 채 종목 정보를 입력합니다.
+3. 앱의 **CSV 업로드**에서 작성한 CSV 파일을 선택합니다.
+4. 업로드가 끝나면 현재 포트폴리오 테이블과 계산 결과가 자동으로 갱신됩니다.
+
+CSV 컬럼은 다음 순서를 사용합니다.
+
+```text
+market,symbol,name,currency,quantity,avg_price,current_price,previous_close,target_weight,strategy_tag
+```
+
+`target_weight`는 `0.25`처럼 25%를 소수로 입력합니다.
+
+### CSV 다운로드 사용법
+
+현재 화면에 입력한 포트폴리오를 보관하려면 **현재 포트폴리오 CSV 다운로드**를 누릅니다. 이 CSV 파일은 사용자의 브라우저로 내려받는 파일이며 GitHub 저장소에는 저장되지 않습니다.
+
+공개 앱이므로 실제 보유종목, 수량, 평단, 계좌 정보, API 키, `.env`, `secrets.toml`, SQLite `.db` 파일은 GitHub 코드에 커밋하지 마세요.
 
 ### Streamlit Community Cloud 배포
 

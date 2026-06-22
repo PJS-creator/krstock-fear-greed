@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
+import hashlib
 import sys
 
 
@@ -17,7 +19,20 @@ import pandas as pd
 import streamlit as st
 
 from portfolio.analytics import build_portfolio_snapshot
+from portfolio.manual_input import (
+    PORTFOLIO_CSV_COLUMNS,
+    csv_template,
+    normalize_portfolio_row,
+    normalize_portfolio_rows,
+    positions_quotes_to_rows,
+    rows_to_csv,
+    rows_to_positions_quotes,
+)
+from portfolio.models import PortfolioSnapshot
 from portfolio.sample_data import sample_portfolio
+
+SAMPLE_MODE = "샘플 포트폴리오 사용"
+MANUAL_MODE = "내 포트폴리오 직접 입력"
 
 
 def krw(value: float) -> str:
@@ -28,73 +43,215 @@ def pct(value: float) -> str:
     return f"{value * 100:,.2f}%"
 
 
-st.set_page_config(page_title="Personal Portfolio Control Panel", layout="wide")
-st.title("Personal Portfolio Control Panel")
-st.caption("샘플 포트폴리오 기반 준실시간 자산/손익/비중 계산 MVP")
+def _initialize_session_state() -> None:
+    st.session_state.setdefault("manual_portfolio_rows", [])
+    st.session_state.setdefault("manual_upload_token", None)
 
-positions, quotes, usd_krw, cash_krw = sample_portfolio()
-with st.sidebar:
-    st.header("MVP 입력값")
-    usd_krw = st.number_input("USD/KRW", min_value=1.0, value=usd_krw, step=1.0)
-    cash_krw = st.number_input("현금(KRW)", min_value=0.0, value=cash_krw, step=100000.0)
-    st.info("현재 버전은 샘플 포트폴리오와 캐시된 Quote로 계산합니다. 다음 PR에서 API 공급자를 붙이면 됩니다.")
 
-snapshot = build_portfolio_snapshot(positions, quotes, usd_krw=usd_krw, cash_krw=cash_krw)
+def _snapshot_frame(snapshot: PortfolioSnapshot) -> pd.DataFrame:
+    rows = []
+    for item in snapshot.positions:
+        rows.append(
+            {
+                "시장": item.position.market,
+                "티커": item.position.symbol,
+                "종목명": item.position.name,
+                "전략": item.position.strategy_tag,
+                "수량": item.position.quantity,
+                "평균단가": item.position.avg_price,
+                "현재가": item.quote.price,
+                "평가액(KRW)": round(item.market_value_krw),
+                "일간손익(KRW)": round(item.day_pnl_krw),
+                "총손익(KRW)": round(item.total_pnl_krw),
+                "총수익률": item.total_pnl_pct,
+                "현재비중": item.weight,
+                "목표비중": item.position.target_weight,
+                "비중차이": item.target_gap,
+            }
+        )
+    return pd.DataFrame(rows)
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("총자산", krw(snapshot.total_value_krw))
-col2.metric("오늘 손익", krw(snapshot.day_pnl_krw))
-col3.metric("총 손익", krw(snapshot.total_pnl_krw), pct(snapshot.total_pnl_pct))
-col4.metric("현금 비중", pct(snapshot.cash_krw / snapshot.total_value_krw if snapshot.total_value_krw else 0))
 
-rows = []
-for item in snapshot.positions:
-    rows.append(
-        {
-            "시장": item.position.market,
-            "티커": item.position.symbol,
-            "종목명": item.position.name,
-            "전략": item.position.strategy_tag,
-            "수량": item.position.quantity,
-            "평균단가": item.position.avg_price,
-            "현재가": item.quote.price,
-            "평가액(KRW)": round(item.market_value_krw),
-            "일간손익(KRW)": round(item.day_pnl_krw),
-            "총손익(KRW)": round(item.total_pnl_krw),
-            "총수익률": item.total_pnl_pct,
-            "현재비중": item.weight,
-            "목표비중": item.position.target_weight,
-            "비중차이": item.target_gap,
-        }
+def _render_snapshot(snapshot: PortfolioSnapshot) -> None:
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("총자산", krw(snapshot.total_value_krw))
+    col2.metric("오늘 손익", krw(snapshot.day_pnl_krw))
+    col3.metric("총 손익", krw(snapshot.total_pnl_krw))
+    col4.metric("총수익률", pct(snapshot.total_pnl_pct))
+    col5.metric("현금 비중", pct(snapshot.cash_krw / snapshot.total_value_krw if snapshot.total_value_krw else 0))
+
+    frame = _snapshot_frame(snapshot)
+    st.subheader("Action Board")
+    if frame.empty:
+        st.info("입력된 종목이 없습니다. 현금만 반영한 상태입니다.")
+    else:
+        left, right = st.columns(2)
+        overweight = frame.sort_values("비중차이", ascending=False).iloc[0]
+        underweight = frame.sort_values("비중차이", ascending=True).iloc[0]
+        left.warning(f"목표 비중 초과: {overweight['종목명']} ({overweight['비중차이'] * 100:.2f}%p)")
+        right.info(f"목표 비중 미달: {underweight['종목명']} ({underweight['비중차이'] * 100:.2f}%p)")
+
+    st.subheader("보유 종목")
+    if frame.empty:
+        st.dataframe(pd.DataFrame(columns=["시장", "티커", "종목명", "평가액(KRW)", "현재비중", "비중차이"]), use_container_width=True)
+    else:
+        st.dataframe(
+            frame.style.format(
+                {
+                    "평균단가": "{:,.2f}",
+                    "현재가": "{:,.2f}",
+                    "평가액(KRW)": "{:,.0f}",
+                    "일간손익(KRW)": "{:,.0f}",
+                    "총손익(KRW)": "{:,.0f}",
+                    "총수익률": "{:.2%}",
+                    "현재비중": "{:.2%}",
+                    "목표비중": "{:.2%}",
+                    "비중차이": "{:.2%}",
+                }
+            ),
+            use_container_width=True,
+        )
+
+    st.subheader("전략 태그별 평가액")
+    if frame.empty:
+        st.bar_chart(pd.DataFrame({"전략": [], "평가액(KRW)": []}), x="전략", y="평가액(KRW)")
+    else:
+        tag_frame = frame.groupby("전략", as_index=False)["평가액(KRW)"].sum()
+        st.bar_chart(tag_frame, x="전략", y="평가액(KRW)")
+
+
+def _render_csv_tools() -> None:
+    uploaded_file = st.file_uploader("CSV 업로드", type=["csv"])
+    if uploaded_file is not None:
+        uploaded_bytes = uploaded_file.getvalue()
+        upload_token = hashlib.sha256(uploaded_bytes).hexdigest()
+        if st.session_state.manual_upload_token != upload_token:
+            try:
+                uploaded_frame = pd.read_csv(BytesIO(uploaded_bytes), dtype=str)
+                st.session_state.manual_portfolio_rows = normalize_portfolio_rows(uploaded_frame.to_dict("records"))
+                st.session_state.manual_upload_token = upload_token
+                st.success("CSV 포트폴리오를 불러왔습니다.")
+            except ValueError as exc:
+                st.error(f"CSV를 불러올 수 없습니다: {exc}")
+
+    col1, col2 = st.columns(2)
+    col1.download_button(
+        "CSV 템플릿 다운로드",
+        data=csv_template(),
+        file_name="portfolio_template.csv",
+        mime="text/csv",
+    )
+    col2.download_button(
+        "현재 포트폴리오 CSV 다운로드",
+        data=rows_to_csv(st.session_state.manual_portfolio_rows),
+        file_name="portfolio.csv",
+        mime="text/csv",
+        disabled=not st.session_state.manual_portfolio_rows,
     )
 
-frame = pd.DataFrame(rows)
-st.subheader("Action Board")
-left, right = st.columns(2)
-if not frame.empty:
-    overweight = frame.sort_values("비중차이", ascending=False).iloc[0]
-    underweight = frame.sort_values("비중차이", ascending=True).iloc[0]
-    left.warning(f"목표 비중 초과: {overweight['종목명']} ({overweight['비중차이'] * 100:.2f}%p)")
-    right.info(f"목표 비중 미달: {underweight['종목명']} ({underweight['비중차이'] * 100:.2f}%p)")
 
-st.subheader("보유 종목")
-st.dataframe(
-    frame.style.format(
-        {
-            "평균단가": "{:,.2f}",
-            "현재가": "{:,.2f}",
-            "평가액(KRW)": "{:,.0f}",
-            "일간손익(KRW)": "{:,.0f}",
-            "총손익(KRW)": "{:,.0f}",
-            "총수익률": "{:.2%}",
-            "현재비중": "{:.2%}",
-            "목표비중": "{:.2%}",
-            "비중차이": "{:.2%}",
+def _render_add_position_form() -> None:
+    with st.form("manual_position_form", clear_on_submit=True):
+        col1, col2, col3 = st.columns(3)
+        market = col1.selectbox("market", ["KR", "US"])
+        symbol = col2.text_input("symbol")
+        name = col3.text_input("name")
+
+        col4, col5, col6 = st.columns(3)
+        currency = col4.selectbox("currency", ["KRW", "USD"])
+        quantity = col5.number_input("quantity", min_value=0.0, value=0.0, step=1.0)
+        avg_price = col6.number_input("avg_price", min_value=0.0, value=0.0, step=100.0)
+
+        col7, col8, col9 = st.columns(3)
+        current_price = col7.number_input("current_price", min_value=0.0, value=0.0, step=100.0)
+        previous_close = col8.number_input("previous_close", min_value=0.0, value=0.0, step=100.0)
+        target_weight = col9.number_input("target_weight", min_value=0.0, value=0.0, step=0.01, format="%.4f")
+
+        strategy_tag = st.text_input("strategy_tag", value="Manual")
+        submitted = st.form_submit_button("종목 추가")
+
+    if submitted:
+        raw_row = {
+            "market": market,
+            "symbol": symbol,
+            "name": name,
+            "currency": currency,
+            "quantity": quantity,
+            "avg_price": avg_price,
+            "current_price": current_price,
+            "previous_close": previous_close,
+            "target_weight": target_weight,
+            "strategy_tag": strategy_tag,
         }
-    ),
-    use_container_width=True,
-)
+        try:
+            next_rows = [*st.session_state.manual_portfolio_rows, normalize_portfolio_row(raw_row)]
+            rows_to_positions_quotes(next_rows)
+            st.session_state.manual_portfolio_rows = next_rows
+            st.success("종목이 추가되었습니다.")
+        except ValueError as exc:
+            st.error(f"종목을 추가할 수 없습니다: {exc}")
 
-st.subheader("전략 태그별 평가액")
-tag_frame = frame.groupby("전략", as_index=False)["평가액(KRW)"].sum()
-st.bar_chart(tag_frame, x="전략", y="평가액(KRW)")
+
+def _render_delete_control() -> None:
+    rows = st.session_state.manual_portfolio_rows
+    if not rows:
+        return
+    options = {
+        f"{index + 1}. {row['market']}:{row['symbol']} {row['name']}": index
+        for index, row in enumerate(rows)
+    }
+    selected = st.selectbox("삭제할 종목", options=list(options.keys()))
+    if st.button("선택 종목 삭제"):
+        delete_index = options[selected]
+        st.session_state.manual_portfolio_rows = [row for index, row in enumerate(rows) if index != delete_index]
+        st.rerun()
+
+
+def _render_manual_mode(usd_krw: float, cash_krw: float) -> None:
+    st.subheader("내 포트폴리오 직접 입력")
+    _render_csv_tools()
+    _render_add_position_form()
+
+    st.subheader("현재 포트폴리오 입력값")
+    current_rows = st.session_state.manual_portfolio_rows
+    st.dataframe(pd.DataFrame(current_rows, columns=PORTFOLIO_CSV_COLUMNS), use_container_width=True)
+    _render_delete_control()
+
+    try:
+        positions, quotes = rows_to_positions_quotes(current_rows)
+        snapshot = build_portfolio_snapshot(positions, quotes, usd_krw=usd_krw, cash_krw=cash_krw)
+    except ValueError as exc:
+        st.error(f"포트폴리오를 계산할 수 없습니다: {exc}")
+        st.stop()
+
+    _render_snapshot(snapshot)
+
+
+def _render_sample_mode(usd_krw: float, cash_krw: float) -> None:
+    positions, quotes, _, _ = sample_portfolio()
+    sample_rows = positions_quotes_to_rows(positions, quotes)
+    st.subheader("샘플 포트폴리오")
+    st.dataframe(pd.DataFrame(sample_rows, columns=PORTFOLIO_CSV_COLUMNS), use_container_width=True)
+    snapshot = build_portfolio_snapshot(positions, quotes, usd_krw=usd_krw, cash_krw=cash_krw)
+    _render_snapshot(snapshot)
+
+
+st.set_page_config(page_title="Personal Portfolio Control Panel", layout="wide")
+_initialize_session_state()
+st.title("Personal Portfolio Control Panel")
+st.caption("샘플 포트폴리오 또는 브라우저 세션의 직접 입력 데이터로 계산하는 수동 입력형 포트폴리오 앱")
+
+_, _, sample_usd_krw, sample_cash_krw = sample_portfolio()
+with st.sidebar:
+    mode = st.radio("포트폴리오 모드", [SAMPLE_MODE, MANUAL_MODE])
+    if mode == SAMPLE_MODE:
+        usd_krw = st.number_input("USD/KRW", min_value=0.01, value=float(sample_usd_krw), step=1.0)
+        cash_krw = st.number_input("현금(KRW)", min_value=0.0, value=float(sample_cash_krw), step=100000.0)
+    else:
+        usd_krw = st.number_input("USD/KRW", min_value=0.01, value=1380.0, step=1.0)
+        cash_krw = st.number_input("현금(KRW)", min_value=0.0, value=0.0, step=100000.0)
+
+if mode == SAMPLE_MODE:
+    _render_sample_mode(usd_krw, cash_krw)
+else:
+    _render_manual_mode(usd_krw, cash_krw)
