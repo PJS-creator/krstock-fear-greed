@@ -29,6 +29,7 @@ from portfolio.manual_input import (
     rows_to_positions_quotes,
 )
 from portfolio.models import PortfolioSnapshot
+from portfolio.pricing import build_fmp_provider, update_us_quotes
 from portfolio.sample_data import sample_portfolio
 
 SAMPLE_MODE = "샘플 포트폴리오 사용"
@@ -43,9 +44,19 @@ def pct(value: float) -> str:
     return f"{value * 100:,.2f}%"
 
 
+def _read_fmp_api_key() -> str | None:
+    try:
+        value = st.secrets.get("FMP_API_KEY", "")
+    except Exception:
+        return None
+    api_key = str(value).strip()
+    return api_key or None
+
+
 def _initialize_session_state() -> None:
     st.session_state.setdefault("manual_portfolio_rows", [])
     st.session_state.setdefault("manual_upload_token", None)
+    st.session_state.setdefault("price_update_statuses", [])
 
 
 def _snapshot_frame(snapshot: PortfolioSnapshot) -> pd.DataFrame:
@@ -130,6 +141,7 @@ def _render_csv_tools() -> None:
                 uploaded_frame = pd.read_csv(BytesIO(uploaded_bytes), dtype=str)
                 st.session_state.manual_portfolio_rows = normalize_portfolio_rows(uploaded_frame.to_dict("records"))
                 st.session_state.manual_upload_token = upload_token
+                st.session_state.price_update_statuses = []
                 st.success("CSV 포트폴리오를 불러왔습니다.")
             except ValueError as exc:
                 st.error(f"CSV를 불러올 수 없습니다: {exc}")
@@ -187,9 +199,36 @@ def _render_add_position_form() -> None:
             next_rows = [*st.session_state.manual_portfolio_rows, normalize_portfolio_row(raw_row)]
             rows_to_positions_quotes(next_rows)
             st.session_state.manual_portfolio_rows = next_rows
+            st.session_state.price_update_statuses = []
             st.success("종목이 추가되었습니다.")
         except ValueError as exc:
             st.error(f"종목을 추가할 수 없습니다: {exc}")
+
+
+def _render_price_update_statuses() -> None:
+    for status in st.session_state.price_update_statuses:
+        text = f"{status.symbol}: {status.message}"
+        if status.status == "updated":
+            st.success(text)
+        elif status.status in {"failed", "missing_api_key"}:
+            st.warning(text)
+        else:
+            st.info(text)
+
+
+def _render_price_update_control() -> None:
+    st.subheader("미국 주식 가격 자동 업데이트")
+    st.caption("FMP API key가 Streamlit secrets에 있을 때만 US/USD 종목의 현재가와 전일종가를 갱신합니다. 한국/KRW 종목은 수동 입력을 유지합니다.")
+    if st.button("미국 주식 가격 자동 업데이트", disabled=not st.session_state.manual_portfolio_rows):
+        provider = build_fmp_provider(_read_fmp_api_key())
+        try:
+            updated_rows, statuses = update_us_quotes(st.session_state.manual_portfolio_rows, provider)
+            st.session_state.manual_portfolio_rows = updated_rows
+            st.session_state.price_update_statuses = statuses
+        except ValueError as exc:
+            st.error(f"가격 업데이트를 실행할 수 없습니다: {exc}")
+            st.session_state.price_update_statuses = []
+    _render_price_update_statuses()
 
 
 def _render_delete_control() -> None:
@@ -204,6 +243,7 @@ def _render_delete_control() -> None:
     if st.button("선택 종목 삭제"):
         delete_index = options[selected]
         st.session_state.manual_portfolio_rows = [row for index, row in enumerate(rows) if index != delete_index]
+        st.session_state.price_update_statuses = []
         st.rerun()
 
 
@@ -211,6 +251,7 @@ def _render_manual_mode(usd_krw: float, cash_krw: float) -> None:
     st.subheader("내 포트폴리오 직접 입력")
     _render_csv_tools()
     _render_add_position_form()
+    _render_price_update_control()
 
     st.subheader("현재 포트폴리오 입력값")
     current_rows = st.session_state.manual_portfolio_rows
