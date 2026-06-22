@@ -75,8 +75,11 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
-      - name: Install dashboard dependencies
-        run: python -m pip install -r requirements-dashboard.txt
+      - name: Verify Streamlit Cloud requirements mirror
+        run: cmp -s requirements-dashboard.txt app/requirements.txt
+
+      - name: Install Streamlit Cloud dashboard dependencies
+        run: python -m pip install -r app/requirements.txt
 
       - name: Verify dashboard imports
         run: python -c "import streamlit, pandas; print('dashboard deps ok')"

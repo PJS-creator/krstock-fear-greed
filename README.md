@@ -40,6 +40,25 @@ streamlit run app/portfolio_dashboard.py
 python app/simple_dashboard.py
 ```
 
+### Streamlit Community Cloud 배포
+
+Streamlit Community Cloud는 실행 파일 위치 기준으로 가까운 `requirements.txt`를 찾습니다. 이 저장소는 Cloud 배포용 의존성을 `app/requirements.txt`에 둡니다. 내용은 로컬 대시보드 의존성 파일인 `requirements-dashboard.txt`와 동일하게 유지합니다.
+
+1. Streamlit Community Cloud에 GitHub 계정으로 로그인합니다.
+2. **New app**을 선택합니다.
+3. Repository는 `PJS-creator/krstock-fear-greed`를 선택합니다.
+4. Branch는 `main`을 선택합니다.
+5. Main file path는 `app/portfolio_dashboard.py`를 입력합니다.
+6. Python version은 `3.11` 또는 `3.12`를 선택합니다.
+7. 현재 MVP는 외부 API 키나 DB 접속 정보를 사용하지 않으므로 Secrets는 비워 둡니다.
+8. **Deploy**를 클릭합니다.
+
+배포 후 생성되는 URL은 보통 다음 형식입니다.
+
+```text
+https://<app-name>.streamlit.app
+```
+
 ### 계산 기준
 
 - 지원 통화는 현재 MVP 기준 `KRW`, `USD`입니다.
