@@ -97,11 +97,14 @@ def _render_security_status(config: AppSecurityConfig) -> None:
         st.warning(UNPROTECTED_WARNING)
         return
     with st.sidebar:
-        st.success("인증됨")
-        if st.button("로그아웃"):
-            st.session_state[AUTHENTICATED_KEY] = False
-            st.session_state.price_update_statuses = []
-            st.rerun()
+        if _is_authenticated():
+            st.success("인증됨")
+            if st.button("로그아웃"):
+                st.session_state[AUTHENTICATED_KEY] = False
+                st.session_state.price_update_statuses = []
+                st.rerun()
+        else:
+            st.info("샘플 모드는 공개 상태입니다. 직접 입력 모드는 비밀번호가 필요합니다.")
 
 
 def _snapshot_frame(snapshot: PortfolioSnapshot) -> pd.DataFrame:
