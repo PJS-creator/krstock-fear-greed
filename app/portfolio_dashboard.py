@@ -413,12 +413,11 @@ def _render_storage_tools(usd_krw: float, cash_krw: float, security_config: AppS
             st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
 
     st.warning("삭제하면 Supabase 저장소에서 선택한 포트폴리오가 제거됩니다.")
-    confirm_delete = st.checkbox("선택한 포트폴리오를 삭제합니다", key="confirm_delete_portfolio")
+    confirm_delete = st.checkbox("선택한 포트폴리오를 삭제합니다", key=f"confirm_delete_portfolio_{selected_name}")
     if delete_col.button("선택 포트폴리오 삭제", disabled=not confirm_delete):
         try:
             deleted = store.delete_portfolio(storage_config.owner_id, selected_name)
             if deleted:
-                st.session_state.confirm_delete_portfolio = False
                 _set_storage_status(f"{selected_name} 포트폴리오를 삭제했습니다.")
                 st.rerun()
             else:
