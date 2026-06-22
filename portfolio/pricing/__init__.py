@@ -1,18 +1,23 @@
 """Optional price providers for portfolio dashboard quotes."""
 
+from .alpha_vantage import (
+    AlphaVantageQuoteProvider,
+    build_alpha_vantage_provider,
+    parse_alpha_vantage_global_quote_response,
+)
 from .base import PriceProvider, PriceProviderError, ProviderQuote
 from .cache import TTLQuoteCache
-from .fmp import FMPQuoteProvider, build_fmp_provider, parse_fmp_quote_response
-from .service import PriceUpdateStatus, update_us_quotes
+from .service import PriceUpdateStatus, is_auto_update_target, update_us_quotes
 
 __all__ = [
-    "FMPQuoteProvider",
+    "AlphaVantageQuoteProvider",
     "PriceProvider",
     "PriceProviderError",
     "PriceUpdateStatus",
     "ProviderQuote",
     "TTLQuoteCache",
-    "build_fmp_provider",
-    "parse_fmp_quote_response",
+    "build_alpha_vantage_provider",
+    "is_auto_update_target",
+    "parse_alpha_vantage_global_quote_response",
     "update_us_quotes",
 ]
