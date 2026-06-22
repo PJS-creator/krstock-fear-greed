@@ -26,6 +26,8 @@ v0.2부터는 공개 GitHub 코드에 실제 보유종목, 수량, 평단을 저
 
 v0.3부터는 Alpha Vantage API key를 Streamlit Community Cloud Secrets에 설정한 경우에만 미국 USD 종목의 현재가와 전일종가를 선택적으로 자동 업데이트할 수 있습니다. API key가 없으면 기존 수동 입력과 CSV 업로드/다운로드 기능은 그대로 동작합니다.
 
+v0.4부터는 `APP_PASSWORD`를 Streamlit Community Cloud Secrets에 설정해 공개 앱을 간단히 보호할 수 있습니다. 기본값은 전체 앱 보호이며, 인증된 사용자만 직접 입력, CSV 업로드/다운로드, Alpha Vantage 가격 자동 업데이트를 사용할 수 있습니다.
+
 ### 대시보드 의존성 설치
 
 ```bash
@@ -64,6 +66,29 @@ python app/simple_dashboard.py
 
 API 호출 남발을 막기 위해 Alpha Vantage quote는 10분 동안 앱 메모리에 캐시합니다.
 
+### v0.4 비밀번호 보호
+
+`APP_PASSWORD`가 설정되어 있으면 앱 시작 시 비밀번호 입력 화면이 먼저 표시됩니다. 로그인 후에는 사이드바의 **로그아웃** 버튼으로 인증 상태를 지울 수 있습니다.
+
+보호 범위는 `APP_AUTH_SCOPE`로 선택할 수 있습니다.
+
+```toml
+APP_AUTH_SCOPE = "all"
+```
+
+- `all`: 전체 앱 보호입니다. 기본값입니다.
+- `manual`: 샘플 포트폴리오 모드는 공개하고, 직접 입력/CSV/가격 업데이트 기능만 보호합니다.
+
+`APP_PASSWORD`가 없으면 앱은 계속 작동하지만 상단에 다음 경고를 표시합니다.
+
+```text
+공개 앱에서 API key quota 보호를 위해 APP_PASSWORD 설정을 권장합니다.
+```
+
+`ALPHA_VANTAGE_API_KEY`가 있는데 `APP_PASSWORD`가 없으면 API quota 보호를 위해 가격 자동 업데이트 버튼은 비활성화됩니다.
+
+이 비밀번호 보호는 개인용 경량 보호입니다. 금융기관급 인증, 계정 관리, 접근 감사, OAuth, DB 기반 사용자 관리를 제공하지 않습니다.
+
 ### CSV 업로드 사용법
 
 1. **CSV 템플릿 다운로드**를 눌러 필요한 컬럼이 들어 있는 파일을 받습니다.
@@ -95,16 +120,17 @@ Streamlit Community Cloud는 실행 파일 위치 기준으로 가까운 `requir
 4. Branch는 `main`을 선택합니다.
 5. Main file path는 `app/portfolio_dashboard.py`를 입력합니다.
 6. Python version은 `3.11` 또는 `3.12`를 선택합니다.
-7. Alpha Vantage 자동 업데이트를 쓰지 않을 경우 Secrets는 비워 둡니다.
-8. **Deploy**를 클릭합니다.
+7. **Deploy**를 클릭합니다.
 
-Alpha Vantage 자동 업데이트를 사용하려면 Streamlit Community Cloud의 **Settings → Secrets** 또는 **Advanced settings → Secrets**에 다음 값을 추가합니다.
+Streamlit Community Cloud의 **Settings → Secrets** 또는 **Advanced settings → Secrets**에 다음 값을 추가합니다.
 
 ```toml
+APP_PASSWORD = "strong-password-placeholder"
 ALPHA_VANTAGE_API_KEY = "your-alpha-vantage-api-key"
+APP_AUTH_SCOPE = "all"
 ```
 
-`.streamlit/secrets.toml`, `.env`, API key, 실제 계좌/보유종목 정보는 절대 GitHub에 커밋하지 마세요. Secrets는 Streamlit Cloud 설정 화면에만 입력합니다.
+`APP_PASSWORD`, `ALPHA_VANTAGE_API_KEY`, `.streamlit/secrets.toml`, `.env`, 실제 계좌/보유종목 정보는 절대 GitHub에 커밋하지 마세요. Secrets는 Streamlit Cloud 설정 화면에만 입력합니다.
 
 배포 후 생성되는 URL은 보통 다음 형식입니다.
 
