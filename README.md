@@ -24,6 +24,8 @@ python main.py
 
 v0.2부터는 공개 GitHub 코드에 실제 보유종목, 수량, 평단을 저장하지 않고 웹 화면에서 직접 입력하거나 CSV 파일로 불러와 계산할 수 있습니다. 입력 데이터는 Streamlit 브라우저 세션 안에서만 유지되며, 앱이 DB나 로그인 저장소에 저장하지 않습니다.
 
+v0.3부터는 FMP API key를 Streamlit Community Cloud Secrets에 설정한 경우에만 미국 USD 종목의 현재가와 전일종가를 선택적으로 자동 업데이트할 수 있습니다. API key가 없으면 기존 수동 입력과 CSV 업로드/다운로드 기능은 그대로 동작합니다.
+
 ### 대시보드 의존성 설치
 
 ```bash
@@ -51,6 +53,16 @@ python app/simple_dashboard.py
 5. 삭제가 필요하면 **삭제할 종목**에서 종목을 선택하고 **선택 종목 삭제**를 누릅니다.
 
 `currency`는 `KRW` 또는 `USD`만 허용합니다. 수량, 가격, 환율, 현금은 음수를 허용하지 않습니다. `quantity=0`은 관심 종목이나 감시용 입력으로 허용되며 평가액은 0으로 계산됩니다.
+
+### v0.3 미국 주식 가격 자동 업데이트
+
+1. 직접 입력 모드에서 미국 주식은 `market`을 `US` 또는 `USA`, `currency`를 `USD`로 입력합니다.
+2. Streamlit Community Cloud Secrets에 `FMP_API_KEY`가 설정되어 있으면 **미국 주식 가격 자동 업데이트** 버튼을 누릅니다.
+3. FMP에서 조회한 값으로 `current_price`, `previous_close`가 갱신됩니다.
+4. FMP 호출이 실패하면 기존에 직접 입력한 가격을 유지하고 화면에 경고를 보여줍니다.
+5. 한국 주식이나 `KRW` 종목은 이번 v0.3에서 자동 업데이트하지 않고 **수동 입력 유지**로 표시됩니다.
+
+API 호출 남발을 막기 위해 FMP quote는 10분 동안 앱 메모리에 캐시합니다.
 
 ### CSV 업로드 사용법
 
@@ -83,8 +95,16 @@ Streamlit Community Cloud는 실행 파일 위치 기준으로 가까운 `requir
 4. Branch는 `main`을 선택합니다.
 5. Main file path는 `app/portfolio_dashboard.py`를 입력합니다.
 6. Python version은 `3.11` 또는 `3.12`를 선택합니다.
-7. 현재 MVP는 외부 API 키나 DB 접속 정보를 사용하지 않으므로 Secrets는 비워 둡니다.
+7. FMP 자동 업데이트를 쓰지 않을 경우 Secrets는 비워 둡니다.
 8. **Deploy**를 클릭합니다.
+
+FMP 자동 업데이트를 사용하려면 Streamlit Community Cloud의 app settings 또는 Advanced settings에서 Secrets에 다음 값을 추가합니다.
+
+```toml
+FMP_API_KEY = "your-fmp-api-key"
+```
+
+`.streamlit/secrets.toml`, `.env`, API key, 실제 계좌/보유종목 정보는 절대 GitHub에 커밋하지 마세요. Secrets는 Streamlit Cloud 설정 화면에만 입력합니다.
 
 배포 후 생성되는 URL은 보통 다음 형식입니다.
 
