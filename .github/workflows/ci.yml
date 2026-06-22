@@ -82,7 +82,7 @@ jobs:
         run: python -m pip install -r app/requirements.txt
 
       - name: Verify dashboard imports
-        run: python -c "import streamlit, pandas; print('dashboard deps ok')"
+        run: python -c "import streamlit, pandas, supabase; print('dashboard deps ok')"
 
       - name: Smoke test simple dashboard
         run: |

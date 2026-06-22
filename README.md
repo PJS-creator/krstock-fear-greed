@@ -22,11 +22,13 @@ python main.py
 
 샘플 포트폴리오를 기반으로 총자산, 일간 손익, 총손익, 보유 비중, 목표 비중 차이를 계산하는 개인용 포트폴리오 대시보드입니다.
 
-v0.2부터는 공개 GitHub 코드에 실제 보유종목, 수량, 평단을 저장하지 않고 웹 화면에서 직접 입력하거나 CSV 파일로 불러와 계산할 수 있습니다. 입력 데이터는 Streamlit 브라우저 세션 안에서만 유지되며, 앱이 DB나 로그인 저장소에 저장하지 않습니다.
+v0.2부터는 공개 GitHub 코드에 실제 보유종목, 수량, 평단을 저장하지 않고 웹 화면에서 직접 입력하거나 CSV 파일로 불러와 계산할 수 있습니다. Supabase 저장소가 설정되지 않은 경우 입력 데이터는 Streamlit 브라우저 세션 안에서만 유지됩니다.
 
 v0.3부터는 Alpha Vantage API key를 Streamlit Community Cloud Secrets에 설정한 경우에만 미국 USD 종목의 현재가와 전일종가를 선택적으로 자동 업데이트할 수 있습니다. API key가 없으면 기존 수동 입력과 CSV 업로드/다운로드 기능은 그대로 동작합니다.
 
 v0.4부터는 `APP_PASSWORD`를 Streamlit Community Cloud Secrets에 설정해 공개 앱을 간단히 보호할 수 있습니다. 기본값은 전체 앱 보호이며, 인증된 사용자만 직접 입력, CSV 업로드/다운로드, Alpha Vantage 가격 자동 업데이트를 사용할 수 있습니다.
+
+v0.5부터는 Supabase를 외부 저장소로 사용해 직접 입력한 포트폴리오를 이름 붙여 저장하고 다시 불러올 수 있습니다. Supabase secrets가 없으면 기존 CSV 업로드/다운로드 방식만 사용할 수 있습니다.
 
 ### 대시보드 의존성 설치
 
@@ -85,9 +87,46 @@ APP_AUTH_SCOPE = "all"
 공개 앱에서 API key quota 보호를 위해 APP_PASSWORD 설정을 권장합니다.
 ```
 
-`ALPHA_VANTAGE_API_KEY`가 있는데 `APP_PASSWORD`가 없으면 API quota 보호를 위해 가격 자동 업데이트 버튼은 비활성화됩니다.
+`ALPHA_VANTAGE_API_KEY`가 있는데 `APP_PASSWORD`가 없으면 API quota 보호를 위해 가격 자동 업데이트 버튼은 비활성화됩니다. v0.5 저장/불러오기는 Supabase secrets가 있더라도 `APP_PASSWORD`가 없으면 비활성화됩니다.
 
 이 비밀번호 보호는 개인용 경량 보호입니다. 금융기관급 인증, 계정 관리, 접근 감사, OAuth, DB 기반 사용자 관리를 제공하지 않습니다.
+
+### v0.5 Supabase 저장/불러오기
+
+이 기능은 개인용 단일 사용자 저장소입니다. `PORTFOLIO_OWNER_ID` 하나에 연결된 포트폴리오만 저장하고 불러옵니다. 다중 사용자 로그인, RLS 정책 설계, OAuth, 팀 계정, PostgreSQL 직접 connection string 방식은 이번 버전 범위 밖입니다.
+
+Supabase 설정이 없으면 앱에는 다음 안내가 표시되고, CSV 업로드/다운로드는 계속 사용할 수 있습니다.
+
+```text
+저장소가 설정되지 않아 CSV 방식만 사용할 수 있습니다
+```
+
+Supabase 설정 순서는 다음과 같습니다.
+
+1. [Supabase](https://supabase.com/)에 로그인합니다.
+2. **New project**를 눌러 새 프로젝트를 만듭니다.
+3. 프로젝트가 준비되면 왼쪽 메뉴에서 **SQL Editor**를 엽니다.
+4. `docs/supabase_schema.sql` 파일 내용을 SQL Editor에 붙여넣고 실행합니다.
+5. 왼쪽 메뉴의 **Project Settings → API**에서 Project URL과 service role key를 확인합니다.
+6. Streamlit Community Cloud의 **Settings → Secrets**에 아래 값을 추가합니다.
+
+```toml
+SUPABASE_URL = "https://your-project.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY = "your-service-role-key"
+PORTFOLIO_OWNER_ID = "jisung-main"
+```
+
+`SUPABASE_SERVICE_ROLE_KEY`는 Supabase 데이터에 강한 권한을 가진 비밀키입니다. 절대 GitHub 코드, README, 이슈, PR 댓글, `.env`, `.streamlit/secrets.toml`에 커밋하거나 붙여넣지 마세요. Streamlit Cloud Secrets 화면에만 입력합니다.
+
+저장/불러오기 사용법은 다음과 같습니다.
+
+1. `APP_PASSWORD`로 로그인합니다.
+2. 왼쪽 사이드바에서 **내 포트폴리오 직접 입력**을 선택합니다.
+3. 종목, `USD/KRW`, `현금(KRW)`을 입력하거나 CSV로 불러옵니다.
+4. **포트폴리오 저장/불러오기** 섹션의 `portfolio_name`에 이름을 입력하고 **현재 포트폴리오 저장**을 누릅니다.
+5. 같은 `portfolio_name`으로 다시 저장하면 기존 저장값을 덮어씁니다.
+6. 저장된 포트폴리오 목록에서 항목을 선택하고 **선택 포트폴리오 불러오기**를 누르면 종목, 환율, 현금이 현재 화면에 반영됩니다.
+7. 삭제하려면 삭제 경고 아래 체크박스를 선택한 뒤 **선택 포트폴리오 삭제**를 누릅니다.
 
 ### CSV 업로드 사용법
 
@@ -108,7 +147,7 @@ market,symbol,name,currency,quantity,avg_price,current_price,previous_close,targ
 
 현재 화면에 입력한 포트폴리오를 보관하려면 **현재 포트폴리오 CSV 다운로드**를 누릅니다. 이 CSV 파일은 사용자의 브라우저로 내려받는 파일이며 GitHub 저장소에는 저장되지 않습니다.
 
-공개 앱이므로 실제 보유종목, 수량, 평단, 계좌 정보, API 키, `.env`, `secrets.toml`, SQLite `.db` 파일은 GitHub 코드에 커밋하지 마세요.
+공개 앱이므로 실제 보유종목, 수량, 평단, 계좌 정보, API 키, 비밀번호, Supabase service role key, `.env`, `secrets.toml`, SQLite `.db` 파일은 GitHub 코드에 커밋하지 마세요.
 
 ### Streamlit Community Cloud 배포
 
@@ -128,9 +167,12 @@ Streamlit Community Cloud의 **Settings → Secrets** 또는 **Advanced settings
 APP_PASSWORD = "strong-password-placeholder"
 ALPHA_VANTAGE_API_KEY = "your-alpha-vantage-api-key"
 APP_AUTH_SCOPE = "all"
+SUPABASE_URL = "https://your-project.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY = "your-service-role-key"
+PORTFOLIO_OWNER_ID = "jisung-main"
 ```
 
-`APP_PASSWORD`, `ALPHA_VANTAGE_API_KEY`, `.streamlit/secrets.toml`, `.env`, 실제 계좌/보유종목 정보는 절대 GitHub에 커밋하지 마세요. Secrets는 Streamlit Cloud 설정 화면에만 입력합니다.
+`APP_PASSWORD`, `ALPHA_VANTAGE_API_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `.streamlit/secrets.toml`, `.env`, 실제 계좌/보유종목 정보는 절대 GitHub에 커밋하지 마세요. Secrets는 Streamlit Cloud 설정 화면에만 입력합니다.
 
 배포 후 생성되는 URL은 보통 다음 형식입니다.
 
@@ -152,7 +194,7 @@ https://<app-name>.streamlit.app
 python scripts/init_db.py
 ```
 
-현재 SQLite 스키마는 MVP용입니다. 나중에 PostgreSQL로 전환할 때는 금액/수량의 `NUMERIC` 타입, `TIMESTAMPTZ`, provider별 quote cache/history 분리를 검토합니다.
+현재 SQLite 스키마는 MVP용입니다. 나중에 PostgreSQL로 전환할 때는 금액/수량의 `NUMERIC` 타입, `TIMESTAMPTZ`, provider별 quote cache/history 분리를 검토합니다. Streamlit Community Cloud의 포트폴리오 저장/불러오기는 SQLite가 아니라 Supabase를 사용합니다.
 
 ## Tests
 
