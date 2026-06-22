@@ -1,0 +1,106 @@
+import pytest
+
+from portfolio.storage import (
+    MemoryPortfolioStore,
+    PortfolioPayloadError,
+    deserialize_portfolio_payload,
+    serialize_portfolio_payload,
+    should_enable_storage,
+    supabase_config_from_secrets,
+)
+
+
+def _row(**overrides):
+    row = {
+        "market": "US",
+        "symbol": "TST",
+        "name": "Test Holding",
+        "currency": "USD",
+        "quantity": "2",
+        "avg_price": "100",
+        "current_price": "125",
+        "previous_close": "120",
+        "target_weight": "0.5",
+        "strategy_tag": "Test",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_portfolio_payload_round_trip():
+    payload = serialize_portfolio_payload([_row(symbol="abc")], usd_krw=1300, cash_krw=10000)
+
+    rows, usd_krw, cash_krw = deserialize_portfolio_payload(payload)
+
+    assert payload["schema_version"] == 1
+    assert rows[0]["symbol"] == "ABC"
+    assert rows[0]["quantity"] == 2.0
+    assert usd_krw == 1300.0
+    assert cash_krw == 10000.0
+
+
+def test_memory_store_save_load_and_delete():
+    store = MemoryPortfolioStore()
+    payload = serialize_portfolio_payload([_row(symbol="AAA")], usd_krw=1300, cash_krw=0)
+
+    saved = store.save_portfolio("owner-a", "core", payload)
+    loaded = store.get_portfolio("owner-a", "core")
+
+    assert saved.portfolio_name == "core"
+    assert loaded is not None
+    assert loaded.payload_json == payload
+    assert [record.portfolio_name for record in store.list_portfolios("owner-a")] == ["core"]
+    assert store.delete_portfolio("owner-a", "core")
+    assert store.get_portfolio("owner-a", "core") is None
+    assert not store.delete_portfolio("owner-a", "core")
+
+
+def test_memory_store_overwrites_same_portfolio_name():
+    store = MemoryPortfolioStore()
+    first_payload = serialize_portfolio_payload([_row(symbol="AAA")], usd_krw=1300, cash_krw=0)
+    second_payload = serialize_portfolio_payload([_row(symbol="BBB")], usd_krw=1400, cash_krw=5000)
+
+    first = store.save_portfolio("owner-a", "core", first_payload)
+    second = store.save_portfolio("owner-a", "core", second_payload)
+    loaded = store.get_portfolio("owner-a", "core")
+
+    assert loaded is not None
+    assert first.created_at == second.created_at
+    assert loaded.payload_json["rows"][0]["symbol"] == "BBB"
+    assert loaded.payload_json["usd_krw"] == 1400.0
+    assert len(store.list_portfolios("owner-a")) == 1
+
+
+def test_missing_supabase_secrets_disable_storage_policy():
+    assert not should_enable_storage(supabase_config_from_secrets({}))
+    assert not should_enable_storage(
+        supabase_config_from_secrets(
+            {
+                "SUPABASE_URL": "https://example.supabase.co",
+                "SUPABASE_SERVICE_ROLE_KEY": "placeholder-service-role-key",
+            }
+        )
+    )
+    assert should_enable_storage(
+        supabase_config_from_secrets(
+            {
+                "SUPABASE_URL": "https://example.supabase.co",
+                "SUPABASE_SERVICE_ROLE_KEY": "placeholder-service-role-key",
+                "PORTFOLIO_OWNER_ID": "test-owner",
+            }
+        )
+    )
+
+
+def test_invalid_payload_validation_errors():
+    with pytest.raises(PortfolioPayloadError, match="schema_version"):
+        deserialize_portfolio_payload({"schema_version": 999, "rows": [], "usd_krw": 1300, "cash_krw": 0})
+
+    with pytest.raises(PortfolioPayloadError, match="rows"):
+        deserialize_portfolio_payload({"schema_version": 1, "rows": "not-a-list", "usd_krw": 1300, "cash_krw": 0})
+
+    with pytest.raises(PortfolioPayloadError, match="usd_krw"):
+        deserialize_portfolio_payload({"schema_version": 1, "rows": [], "usd_krw": 0, "cash_krw": 0})
+
+    with pytest.raises(PortfolioPayloadError, match="Missing CSV column"):
+        deserialize_portfolio_payload({"schema_version": 1, "rows": [{"market": "US"}], "usd_krw": 1300, "cash_krw": 0})
