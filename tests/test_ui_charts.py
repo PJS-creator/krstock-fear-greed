@@ -67,7 +67,7 @@ def test_allocation_donut_collapses_small_or_extra_slices_to_other():
     fig = plot_allocation(_metrics(rows), max_slices=3, min_label_weight=0.0)
 
     assert fig is not None
-    assert any("기타" in str(label) for label in fig.data[0].customdata[:, 0])
+    assert any("기타" in str(row[0]) for row in fig.data[0].customdata)
 
 
 def test_contribution_chart_uses_semantic_colors_labels_and_zero_line():
