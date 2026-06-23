@@ -105,6 +105,7 @@ def _apply_pending_portfolio_state() -> None:
     pending_state = st.session_state.pop(PENDING_PORTFOLIO_STATE_KEY, None)
     if not isinstance(pending_state, dict):
         return
+    loaded_portfolio_state = "portfolio_name" in pending_state or "holdings_rows" in pending_state
     if "portfolio_name" in pending_state:
         clean_name = _clean_portfolio_name(pending_state["portfolio_name"])
         st.session_state[PORTFOLIO_NAME_KEY] = clean_name
@@ -112,7 +113,8 @@ def _apply_pending_portfolio_state() -> None:
     for key in ("holdings_rows", "cash_krw", "cash_usd", "usd_krw", "fx_status_message", "fx_fetched_at"):
         if key in pending_state:
             st.session_state[key] = pending_state[key]
-    st.session_state[MARK_CLEAN_KEY] = True
+    if loaded_portfolio_state:
+        st.session_state[MARK_CLEAN_KEY] = True
 
 
 def _initialize_session_state() -> None:
