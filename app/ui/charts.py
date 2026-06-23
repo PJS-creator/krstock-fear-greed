@@ -21,7 +21,6 @@ def apply_chart_layout(
     showlegend: bool = True,
 ) -> go.Figure:
     fig.update_layout(
-        template="streamlit",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         margin=dict(l=16, r=20, t=28, b=18),
@@ -91,7 +90,6 @@ def plot_allocation(metrics: PortfolioMetrics, *, max_slices: int = 7, min_label
         return None
     rows = _collapse_small_allocation_rows(source_rows, max_slices=max_slices, min_weight=min_label_weight)
     values = [float(row["market_value_krw"]) for row in rows]
-    labels = [str(row["ticker"]) for row in rows]
     legend_labels = [f"{row['ticker']} · {row['display_name']}" for row in rows]
     text = [f"{row['ticker']}<br>{percentage(float(row['weight']))}" if float(row["weight"]) >= min_label_weight or row["ticker"] == "기타" else "" for row in rows]
     colors = [SEMANTIC_COLORS["missing"] if row["ticker"] == "기타" else deterministic_color(row["ticker"]) for row in rows]
