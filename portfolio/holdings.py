@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,6 +15,7 @@ QUOTE_STATUS_CACHED = "cached"
 QUOTE_STATUS_STALE = "stale"
 QUOTE_STATUS_FAILED = "failed"
 QUOTE_STATUS_MISSING = "missing"
+QUOTE_STATUS_MISSING_API_KEY = "missing_api_key"
 QUOTE_STATUS_MANUAL = "manual"
 QUOTE_STATUSES = {
     QUOTE_STATUS_UPDATED,
@@ -21,10 +23,11 @@ QUOTE_STATUSES = {
     QUOTE_STATUS_STALE,
     QUOTE_STATUS_FAILED,
     QUOTE_STATUS_MISSING,
+    QUOTE_STATUS_MISSING_API_KEY,
     QUOTE_STATUS_MANUAL,
 }
 
-QUICK_INPUT_COLUMNS = ["ticker", "quantity"]
+QUICK_INPUT_COLUMNS = ["market", "ticker", "quantity"]
 HOLDING_COLUMNS = [
     "ticker",
     "quantity",
@@ -111,6 +114,25 @@ def normalize_ticker(value: object) -> str:
     return ticker
 
 
+def normalize_korea_ticker(value: object) -> str:
+    ticker = normalize_ticker(value)
+    if ticker.startswith("KR:"):
+        ticker = ticker[3:]
+    for suffix in (".KS", ".KQ"):
+        if ticker.endswith(suffix):
+            ticker = ticker[: -len(suffix)]
+            break
+    if re.fullmatch(r"\d{6}", ticker) is None:
+        raise ValueError("KR ticker must be a 6-digit stock code")
+    return ticker
+
+
+def _normalize_ticker_for_market(value: object, market: str) -> str:
+    if market == "KR":
+        return normalize_korea_ticker(value)
+    return normalize_ticker(value)
+
+
 def parse_non_negative_float(field_name: str, value: object) -> float:
     if isinstance(value, bool):
         raise ValueError(f"{field_name} must be a number")
@@ -135,6 +157,8 @@ def _normalize_market(value: object | None) -> str:
     market = clean_text(value).upper() or "US"
     if market == "USA":
         return "US"
+    if market in {"KRX", "KOSPI", "KOSDAQ"}:
+        return "KR"
     if market not in {"KR", "US"}:
         raise ValueError(f"Unsupported market: {market}")
     return market
@@ -156,8 +180,8 @@ def _normalize_quote_status(value: object | None, current_price: float | None) -
 
 
 def normalize_holding_row(row: Mapping[str, Any]) -> dict[str, object]:
-    ticker = normalize_ticker(row.get("ticker") or row.get("symbol"))
     market = _normalize_market(row.get("market"))
+    ticker = _normalize_ticker_for_market(row.get("ticker") or row.get("symbol"), market)
     currency = _normalize_currency(row.get("currency"), market)
     quantity = parse_non_negative_float("quantity", row.get("quantity"))
     display_name = clean_text(row.get("display_name") or row.get("name")) or ticker
@@ -212,12 +236,15 @@ def merge_quick_rows_with_existing(
     merged_rows: list[dict[str, object]] = []
     seen: set[str] = set()
     for index, row in enumerate(quick_rows, start=1):
-        ticker = normalize_ticker(row.get("ticker") or row.get("symbol"))
+        market = _normalize_market(row.get("market"))
+        ticker = _normalize_ticker_for_market(row.get("ticker") or row.get("symbol"), market)
         if ticker in seen:
             raise ValueError(f"Row {index}: duplicate ticker: {ticker}")
         seen.add(ticker)
         base = dict(existing_by_ticker.get(ticker, {}))
-        base.update({"ticker": ticker, "quantity": row.get("quantity")})
+        base.update({"market": market, "ticker": ticker, "quantity": row.get("quantity")})
+        if row.get("currency"):
+            base["currency"] = row.get("currency")
         merged_rows.append(normalize_holding_row(base))
     return merged_rows
 
@@ -358,7 +385,7 @@ def build_portfolio_metrics(
         priced_count=sum(1 for row in rows if row.get("current_price") is not None),
         stale_quote_count=statuses.count(QUOTE_STATUS_STALE),
         failed_quote_count=statuses.count(QUOTE_STATUS_FAILED),
-        missing_quote_count=statuses.count(QUOTE_STATUS_MISSING),
+        missing_quote_count=statuses.count(QUOTE_STATUS_MISSING) + statuses.count(QUOTE_STATUS_MISSING_API_KEY),
         cost_basis_coverage=cost_basis_value / total_position_value_krw if total_position_value_krw else 0.0,
         total_cost_krw=total_cost_krw,
         total_pnl_krw=total_pnl_krw,
