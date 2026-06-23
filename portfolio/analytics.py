@@ -29,9 +29,9 @@ def _currency_to_krw_rate(currency: str, usd_krw: float) -> float:
 
 def _validate_position(position: Position) -> None:
     _validate_currency(position.currency)
-    # MVP intentionally excludes short positions. Quantity must be zero or positive.
     _validate_non_negative("quantity", position.quantity)
-    _validate_non_negative("avg_price", position.avg_price)
+    if position.avg_price is not None:
+        _validate_non_negative("avg_price", position.avg_price)
 
 
 def _validate_quote(quote: Quote) -> None:
@@ -62,13 +62,18 @@ def build_position_snapshot(
     _validate_position_quote_pair(position, quote)
 
     fx_rate = _currency_to_krw_rate(position.currency, usd_krw)
-    cost_basis_krw = position.avg_price * position.quantity * fx_rate
     market_value_krw = quote.price * position.quantity * fx_rate
     day_pnl_krw = (quote.price - quote.previous_close) * position.quantity * fx_rate
-    total_pnl_krw = market_value_krw - cost_basis_krw
-    total_pnl_pct = total_pnl_krw / cost_basis_krw if cost_basis_krw else 0.0
     weight = market_value_krw / total_value_krw if total_value_krw else 0.0
     target_gap = weight - position.target_weight
+
+    cost_basis_krw: float | None = None
+    total_pnl_krw: float | None = None
+    total_pnl_pct: float | None = None
+    if position.avg_price is not None:
+        cost_basis_krw = position.avg_price * position.quantity * fx_rate
+        total_pnl_krw = market_value_krw - cost_basis_krw
+        total_pnl_pct = total_pnl_krw / cost_basis_krw if cost_basis_krw else 0.0
 
     return PositionSnapshot(
         position=position,
@@ -111,10 +116,15 @@ def build_portfolio_snapshot(
         for position in positions
     ]
 
-    total_cost_krw = sum(item.cost_basis_krw for item in position_snapshots)
+    known_cost_positions = [item for item in position_snapshots if item.cost_basis_krw is not None]
+    total_cost_krw = sum(item.cost_basis_krw or 0.0 for item in known_cost_positions)
     day_pnl_krw = sum(item.day_pnl_krw for item in position_snapshots)
-    total_pnl_krw = sum(item.total_pnl_krw for item in position_snapshots)
-    total_pnl_pct = total_pnl_krw / total_cost_krw if total_cost_krw else 0.0
+    total_pnl_krw = sum(item.total_pnl_krw or 0.0 for item in known_cost_positions) if known_cost_positions else None
+    total_pnl_pct = None
+    if known_cost_positions:
+        total_pnl_pct = (total_pnl_krw or 0.0) / total_cost_krw if total_cost_krw else 0.0
+    cost_basis_market_value_krw = sum(item.market_value_krw for item in known_cost_positions)
+    cost_basis_coverage = cost_basis_market_value_krw / total_position_value_krw if total_position_value_krw else 0.0
 
     return PortfolioSnapshot(
         positions=position_snapshots,
@@ -125,4 +135,7 @@ def build_portfolio_snapshot(
         day_pnl_krw=day_pnl_krw,
         total_pnl_krw=total_pnl_krw,
         total_pnl_pct=total_pnl_pct,
+        cost_basis_market_value_krw=cost_basis_market_value_krw,
+        cost_basis_coverage=cost_basis_coverage,
+        cost_basis_position_count=len(known_cost_positions),
     )
