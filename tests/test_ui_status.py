@@ -10,6 +10,7 @@ from app.ui.status import (
     parse_bulk_input,
     prepare_quick_input_records,
     present_diagnostic,
+    split_diagnostics,
 )
 
 
@@ -72,17 +73,28 @@ def test_dirty_signature_is_stable_and_sensitive_to_portfolio_changes():
     assert dirty_signature(base) != dirty_signature(changed)
 
 
-def test_diagnostic_presentation_keeps_quote_status_short():
-    item = DiagnosticItem(
+def test_diagnostic_presentation_keeps_quote_status_short_and_splits_details():
+    quote_item = DiagnosticItem(
         key="quote_freshness",
         label="가격 상태",
         value="정상 5 / stale 0 / 실패 0",
         level="ok",
         message="세부 가격 상태입니다.",
     )
+    detail_item = DiagnosticItem(
+        key="gain_contributors",
+        label="오늘 상승 기여 상위",
+        value="MU",
+        level="info",
+        message="상승 기여 종목입니다.",
+    )
 
-    presentation = present_diagnostic(item, priced_count=5, holdings_count=5)
+    quote_presentation = present_diagnostic(quote_item, priced_count=5, holdings_count=5)
+    detail_presentation = present_diagnostic(detail_item)
+    primary, details = split_diagnostics([quote_presentation, detail_presentation])
 
-    assert presentation.value == "5/5 정상"
-    assert presentation.severity_label == "양호"
-    assert "정상 5 / stale 0 / 실패 0" in presentation.help_text
+    assert quote_presentation.value == "5/5 정상"
+    assert quote_presentation.severity_label == "양호"
+    assert "정상 5 / stale 0 / 실패 0" in quote_presentation.help_text
+    assert [item.key for item in primary] == ["quote_freshness"]
+    assert [item.key for item in details] == ["gain_contributors"]
