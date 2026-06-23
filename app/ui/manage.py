@@ -18,6 +18,7 @@ from portfolio.storage import (
 
 STORAGE_UNCONFIGURED_MESSAGE = "저장소가 설정되지 않아 CSV 방식만 사용할 수 있습니다"
 PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
+PENDING_PORTFOLIO_STATE_KEY = "pending_portfolio_state"
 STORAGE_STATUS_MESSAGE_KEY = "storage_status_message"
 
 
@@ -33,6 +34,14 @@ def _read_csv(uploaded_file) -> list[dict[str, object]]:
 
 def _queue_portfolio_name_update(portfolio_name: str) -> None:
     st.session_state[PENDING_PORTFOLIO_NAME_KEY] = portfolio_name
+
+
+def _queue_portfolio_state_update(**values: object) -> None:
+    pending_state = st.session_state.get(PENDING_PORTFOLIO_STATE_KEY)
+    if not isinstance(pending_state, dict):
+        pending_state = {}
+    pending_state.update(values)
+    st.session_state[PENDING_PORTFOLIO_STATE_KEY] = pending_state
 
 
 def _set_storage_status(message: str) -> None:
@@ -129,11 +138,13 @@ def render_storage_tools(
         try:
             payload = deserialize_portfolio_payload_v2(selected.payload_json)
             cash = payload["cash_balances"]
-            st.session_state.holdings_rows = payload["holdings"]
-            st.session_state.usd_krw = float(payload["usd_krw"])
-            st.session_state.cash_krw = float(cash.get("KRW", 0.0))
-            st.session_state.cash_usd = float(cash.get("USD", 0.0))
-            _queue_portfolio_name_update(selected.portfolio_name)
+            _queue_portfolio_state_update(
+                portfolio_name=selected.portfolio_name,
+                holdings_rows=payload["holdings"],
+                usd_krw=float(payload["usd_krw"]),
+                cash_krw=float(cash.get("KRW", 0.0)),
+                cash_usd=float(cash.get("USD", 0.0)),
+            )
             _set_storage_status(f"{selected.portfolio_name} 포트폴리오를 불러왔습니다.")
             st.rerun()
         except (PortfolioStoreError, ValueError) as exc:

@@ -43,6 +43,7 @@ AUTHENTICATED_KEY = "is_authenticated"
 PORTFOLIO_NAME_KEY = "portfolio_name"
 PORTFOLIO_NAME_INPUT_KEY = "portfolio_name_input"
 PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
+PENDING_PORTFOLIO_STATE_KEY = "pending_portfolio_state"
 UNPROTECTED_WARNING = "공개 앱에서 API key quota 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 
 
@@ -74,6 +75,19 @@ def _read_storage_config():
     return supabase_config_from_secrets(secrets)
 
 
+def _apply_pending_portfolio_state() -> None:
+    pending_state = st.session_state.pop(PENDING_PORTFOLIO_STATE_KEY, None)
+    if not isinstance(pending_state, dict):
+        return
+    if "portfolio_name" in pending_state:
+        clean_name = _clean_portfolio_name(pending_state["portfolio_name"])
+        st.session_state[PORTFOLIO_NAME_KEY] = clean_name
+        st.session_state[PORTFOLIO_NAME_INPUT_KEY] = clean_name
+    for key in ("holdings_rows", "cash_krw", "cash_usd", "usd_krw", "fx_status_message", "fx_fetched_at"):
+        if key in pending_state:
+            st.session_state[key] = pending_state[key]
+
+
 def _initialize_session_state() -> None:
     st.session_state.setdefault(AUTHENTICATED_KEY, False)
     st.session_state.setdefault(PORTFOLIO_NAME_KEY, "main")
@@ -82,6 +96,7 @@ def _initialize_session_state() -> None:
         clean_name = _clean_portfolio_name(pending_portfolio_name)
         st.session_state[PORTFOLIO_NAME_KEY] = clean_name
         st.session_state[PORTFOLIO_NAME_INPUT_KEY] = clean_name
+    _apply_pending_portfolio_state()
     st.session_state.setdefault(PORTFOLIO_NAME_INPUT_KEY, st.session_state[PORTFOLIO_NAME_KEY])
     st.session_state.setdefault("holdings_rows", [])
     st.session_state.setdefault("cash_krw", 0.0)
@@ -221,9 +236,11 @@ def _refresh_fx(config: AppSecurityConfig) -> None:
     except ValueError as exc:
         st.error(f"환율을 갱신할 수 없습니다: {exc}")
         return
-    st.session_state.usd_krw = new_rate
-    st.session_state.fx_status_message = status.message
-    st.session_state.fx_fetched_at = status.fetched_at
+    st.session_state[PENDING_PORTFOLIO_STATE_KEY] = {
+        "usd_krw": new_rate,
+        "fx_status_message": status.message,
+        "fx_fetched_at": status.fetched_at,
+    }
     st.rerun()
 
 
