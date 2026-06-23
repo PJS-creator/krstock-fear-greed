@@ -9,6 +9,7 @@ import streamlit as st
 from portfolio.history import PortfolioHistoryStore, build_history_record
 from portfolio.holdings import HOLDING_COLUMNS, PortfolioMetrics, normalize_holding_rows
 from portfolio.storage import (
+    PortfolioRecord,
     PortfolioStore,
     PortfolioStoreError,
     deserialize_portfolio_payload_v2,
@@ -26,6 +27,11 @@ def _holdings_csv(rows: list[dict[str, object]]) -> str:
 def _read_csv(uploaded_file) -> list[dict[str, object]]:
     frame = pd.read_csv(BytesIO(uploaded_file.getvalue()), dtype=str)
     return normalize_holding_rows(frame.to_dict("records"))
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _list_portfolios_cached(_store: PortfolioStore, owner_id: str) -> list[PortfolioRecord]:
+    return _store.list_portfolios(owner_id)
 
 
 def render_csv_tools() -> None:
@@ -87,12 +93,13 @@ def render_storage_tools(
                     )
                 if on_capture is not None:
                     on_capture("portfolio_save")
+                st.cache_data.clear()
                 st.success(f"{clean_name} 포트폴리오를 저장했습니다.")
             except (PortfolioStoreError, ValueError) as exc:
                 st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
 
     try:
-        records = store.list_portfolios(owner_id)
+        records = _list_portfolios_cached(store, owner_id)
     except PortfolioStoreError as exc:
         st.warning(f"저장 목록을 불러올 수 없습니다: {exc}")
         records = []
@@ -122,6 +129,7 @@ def render_storage_tools(
     if col2.button("선택 포트폴리오 삭제", disabled=not confirm):
         try:
             if store.delete_portfolio(owner_id, selected.portfolio_name):
+                st.cache_data.clear()
                 st.success(f"{selected.portfolio_name} 포트폴리오를 삭제했습니다.")
                 st.rerun()
             else:
@@ -150,4 +158,5 @@ def render_manual_capture(
                 metrics=metrics,
             )
         )
+        st.cache_data.clear()
         st.success("현재 총자산 스냅샷을 기록했습니다.")
