@@ -13,7 +13,7 @@ from .theme import DIMENSIONS, chart_config
 
 
 def render_plotly_chart(fig, *, key: str) -> None:
-    st.plotly_chart(fig, width="stretch", config=chart_config(), key=key)
+    st.plotly_chart(fig, width="stretch", theme="streamlit", config=chart_config(), key=key)
 
 
 def render_empty_portfolio() -> None:
