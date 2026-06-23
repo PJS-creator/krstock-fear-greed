@@ -14,7 +14,7 @@ class Position:
     symbol: str
     name: str
     quantity: float
-    avg_price: float
+    avg_price: float | None
     currency: Currency
     target_weight: float = 0.0
     strategy_tag: str = "Core"
@@ -38,11 +38,11 @@ class PositionSnapshot:
     position: Position
     quote: Quote
     fx_rate: float
-    cost_basis_krw: float
+    cost_basis_krw: float | None
     market_value_krw: float
     day_pnl_krw: float
-    total_pnl_krw: float
-    total_pnl_pct: float
+    total_pnl_krw: float | None
+    total_pnl_pct: float | None
     weight: float
     target_gap: float
 
@@ -55,5 +55,8 @@ class PortfolioSnapshot:
     total_value_krw: float
     total_cost_krw: float
     day_pnl_krw: float
-    total_pnl_krw: float
-    total_pnl_pct: float
+    total_pnl_krw: float | None
+    total_pnl_pct: float | None
+    cost_basis_market_value_krw: float = 0.0
+    cost_basis_coverage: float = 0.0
+    cost_basis_position_count: int = 0
