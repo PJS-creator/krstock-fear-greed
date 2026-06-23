@@ -16,8 +16,12 @@ def inject_styles() -> None:
         """
         <style>
         .block-container { padding-top: 1.25rem; padding-bottom: 2rem; }
+        .block-container h1 { font-size: 3rem; line-height: 1.08; word-break: keep-all; }
         .section-gap { margin-top: 1.25rem; }
         .small-muted { color: var(--text-color); opacity: 0.72; font-size: 0.88rem; }
+        @media (max-width: 480px) {
+            .block-container h1 { font-size: 2rem; line-height: 1.15; }
+        }
         </style>
         """,
         unsafe_allow_html=True,
