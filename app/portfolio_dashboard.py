@@ -30,7 +30,7 @@ from portfolio.auth import (
 )
 from portfolio.history import build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
-from portfolio.pricing import build_alpha_vantage_provider, refresh_holding_quotes, refresh_usd_krw
+from portfolio.pricing import build_alpha_vantage_provider, build_korea_quote_provider, refresh_holding_quotes, refresh_usd_krw
 from portfolio.storage import (
     PortfolioStoreError,
     build_supabase_store,
@@ -197,7 +197,8 @@ def _refresh_prices(config: AppSecurityConfig, owner_id, history_store) -> None:
     if should_disable_price_update(config):
         st.warning(f"{UNPROTECTED_WARNING} APP_PASSWORD가 없어 가격 새로고침을 비활성화했습니다.")
         return
-    provider = build_alpha_vantage_provider(config.alpha_vantage_api_key)
+    alpha_provider = build_alpha_vantage_provider(config.alpha_vantage_api_key)
+    korea_provider = build_korea_quote_provider()
     progress = st.progress(0, text="최근 제공 가격 조회 준비 중")
 
     def update_progress(completed: int, total: int, symbol: str) -> None:
@@ -206,7 +207,8 @@ def _refresh_prices(config: AppSecurityConfig, owner_id, history_store) -> None:
 
     updated_rows, statuses = refresh_holding_quotes(
         st.session_state.holdings_rows,
-        provider,
+        alpha_provider,
+        korea_provider=korea_provider,
         on_progress=update_progress,
     )
     progress.progress(100, text="최근 제공 가격 조회 완료")
@@ -260,7 +262,7 @@ def _render_sidebar(config: AppSecurityConfig) -> None:
 
 def _render_header(config: AppSecurityConfig, owner_id, store, history_store, metrics) -> None:
     st.title("Personal Portfolio Control Panel")
-    st.caption("최근 제공 가격과 사용자가 입력한 현금/보유수량으로 총자산을 계산하는 개인용 대시보드")
+    st.caption("미국 주식은 Alpha Vantage, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
     col1, col2, col3, col4 = st.columns([2, 1.4, 1, 1])
     col1.write(f"선택 포트폴리오: **{_current_portfolio_name()}**")
     col2.write(f"마지막 가격 갱신: **{metrics.last_price_refresh_at or st.session_state.last_price_refresh_at or '미조회'}**")
@@ -276,7 +278,7 @@ def _render_status_messages() -> None:
         text = f"{status.symbol}: {status.message}"
         if status.status in {"updated", "cached"}:
             st.success(text)
-        elif status.status in {"failed", "stale", "missing"}:
+        elif status.status in {"failed", "stale", "missing", "missing_api_key"}:
             st.warning(text)
         else:
             st.info(text)
