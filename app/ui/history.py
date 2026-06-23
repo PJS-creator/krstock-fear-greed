@@ -25,7 +25,7 @@ def render_history_tab(
     if history_store is None or owner_id is None:
         st.info("Supabase 설정이 없으면 자산추이 탭을 사용할 수 없습니다.")
         return
-    label = st.segmented_control("기간", options=list(PERIOD_OPTIONS.keys()), default="1개월")
+    label = st.radio("기간", options=list(PERIOD_OPTIONS.keys()), index=1, horizontal=True)
     period = PERIOD_OPTIONS[str(label)]
     try:
         records = history_store.list_history(owner_id, portfolio_name, period=period)
