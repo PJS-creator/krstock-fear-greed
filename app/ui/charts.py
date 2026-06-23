@@ -110,11 +110,13 @@ def plot_allocation(metrics: PortfolioMetrics, *, max_slices: int = 7, min_label
         go.Pie(
             labels=legend_labels,
             values=values,
+            domain=dict(x=[0.08, 0.92], y=[0.02, 0.98]),
             hole=0.58,
             sort=False,
             text=text,
             textinfo="text",
             textposition="outside",
+            textfont=dict(size=11),
             customdata=customdata,
             marker=dict(colors=colors, line=dict(color="rgba(148,163,184,0.38)", width=1)),
             hovertemplate=(
@@ -138,8 +140,11 @@ def plot_allocation(metrics: PortfolioMetrics, *, max_slices: int = 7, min_label
             )
         ],
         legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5),
+        uniformtext=dict(minsize=10, mode="hide"),
     )
-    return apply_chart_layout(fig, height=DIMENSIONS.tall_height, hovermode="closest")
+    fig = apply_chart_layout(fig, height=DIMENSIONS.tall_height, hovermode="closest")
+    fig.update_layout(margin=dict(l=44, r=44, t=28, b=56))
+    return fig
 
 
 def plot_contribution(metrics: PortfolioMetrics, *, limit: int = 10, show_all: bool = False) -> go.Figure | None:
