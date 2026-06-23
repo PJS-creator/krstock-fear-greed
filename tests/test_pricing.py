@@ -4,10 +4,14 @@ import pytest
 
 from portfolio.pricing import (
     PriceProviderError,
+    ProviderFxRate,
     ProviderQuote,
+    TTLFxCache,
     TTLQuoteCache,
     build_alpha_vantage_provider,
+    parse_alpha_vantage_currency_exchange_response,
     parse_alpha_vantage_global_quote_response,
+    refresh_usd_krw,
     update_us_quotes,
 )
 from portfolio.pricing.service import is_auto_update_target
@@ -33,6 +37,7 @@ def _row(**overrides):
 class FakeProvider:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.fx_calls: list[tuple[str, str]] = []
 
     def get_quote(self, symbol: str) -> ProviderQuote:
         self.calls.append(symbol)
@@ -44,9 +49,21 @@ class FakeProvider:
             fetched_at=datetime.now(timezone.utc),
         )
 
+    def get_exchange_rate(self, from_currency: str, to_currency: str) -> ProviderFxRate:
+        self.fx_calls.append((from_currency, to_currency))
+        return ProviderFxRate.now(
+            from_currency=from_currency,
+            to_currency=to_currency,
+            rate=1380.5,
+            provider="fake",
+        )
+
 
 class FailingProvider:
     def get_quote(self, symbol: str) -> ProviderQuote:
+        raise PriceProviderError("temporary provider outage")
+
+    def get_exchange_rate(self, from_currency: str, to_currency: str) -> ProviderFxRate:
         raise PriceProviderError("temporary provider outage")
 
 
@@ -66,6 +83,24 @@ def test_alpha_vantage_global_quote_response_parsing():
     assert quote.price == pytest.approx(182.15)
     assert quote.previous_close == pytest.approx(180.92)
     assert quote.provider == "alpha_vantage"
+
+
+def test_alpha_vantage_currency_exchange_response_parsing():
+    rate = parse_alpha_vantage_currency_exchange_response(
+        "USD",
+        "KRW",
+        {
+            "Realtime Currency Exchange Rate": {
+                "1. From_Currency Code": "USD",
+                "3. To_Currency Code": "KRW",
+                "5. Exchange Rate": "1380.5000",
+            }
+        },
+    )
+
+    assert rate.from_currency == "USD"
+    assert rate.to_currency == "KRW"
+    assert rate.rate == pytest.approx(1380.5)
 
 
 def test_alpha_vantage_empty_global_quote_is_rejected():
@@ -161,3 +196,20 @@ def test_quote_cache_prevents_repeated_provider_calls():
     update_us_quotes(rows, provider, cache=cache)
 
     assert provider.calls == ["AAPL"]
+
+
+def test_fx_refresh_uses_cache_and_failure_keeps_manual_rate():
+    provider = FakeProvider()
+    cache = TTLFxCache(ttl_seconds=600)
+
+    first_rate, first_status = refresh_usd_krw(provider, 1300, cache=cache)
+    second_rate, second_status = refresh_usd_krw(provider, 1300, cache=cache)
+    failed_rate, failed_status = refresh_usd_krw(FailingProvider(), 1300, cache=TTLFxCache())
+
+    assert first_rate == pytest.approx(1380.5)
+    assert second_rate == pytest.approx(1380.5)
+    assert provider.fx_calls == [("USD", "KRW")]
+    assert first_status.status == "updated"
+    assert second_status.status == "cached"
+    assert failed_rate == 1300
+    assert failed_status.status == "failed"
