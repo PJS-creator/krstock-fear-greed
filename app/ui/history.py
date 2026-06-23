@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from portfolio.history import HistoryPeriod, PortfolioHistoryStore, PortfolioHistoryStoreError
+from portfolio.history import HistoryPeriod, PortfolioHistoryRecord, PortfolioHistoryStore, PortfolioHistoryStoreError
 
 from .styles import plot_total_value_history
 
@@ -12,6 +12,16 @@ PERIOD_OPTIONS: dict[str, HistoryPeriod] = {
     "3개월": "3m",
     "전체": "all",
 }
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _list_history_cached(
+    _history_store: PortfolioHistoryStore,
+    owner_id: str,
+    portfolio_name: str,
+    period: HistoryPeriod,
+) -> list[PortfolioHistoryRecord]:
+    return _history_store.list_history(owner_id, portfolio_name, period=period)
 
 
 def render_history_tab(
@@ -25,10 +35,10 @@ def render_history_tab(
     if history_store is None or owner_id is None:
         st.info("Supabase 설정이 없으면 자산추이 탭을 사용할 수 없습니다.")
         return
-    label = st.radio("기간", options=list(PERIOD_OPTIONS.keys()), index=1, horizontal=True)
+    label = st.radio("기간", options=list(PERIOD_OPTIONS.keys()), index=1, horizontal=True, key="history_period")
     period = PERIOD_OPTIONS[str(label)]
     try:
-        records = history_store.list_history(owner_id, portfolio_name, period=period)
+        records = _list_history_cached(history_store, owner_id, portfolio_name, period)
     except PortfolioHistoryStoreError as exc:
         st.warning(f"자산 이력을 불러올 수 없습니다: {exc}")
         return
