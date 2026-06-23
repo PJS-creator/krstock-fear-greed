@@ -19,7 +19,13 @@ from app.ui.components import render_price_update_log
 from app.ui.formatters import format_kst, format_relative_time
 from app.ui.holdings import render_holdings_editor, render_holdings_table
 from app.ui.history import render_history_tab
-from app.ui.manage import render_csv_tools, render_manual_capture, render_storage_tools
+from app.ui.manage import (
+    list_portfolios_cached,
+    queue_portfolio_record_load,
+    render_csv_tools,
+    render_manual_capture,
+    render_storage_tools,
+)
 from app.ui.overview import render_overview
 from app.ui.status import aggregate_price_statuses, dirty_signature
 from app.ui.styles import inject_styles
@@ -281,11 +287,43 @@ def _refresh_fx(config: AppSecurityConfig) -> None:
     st.rerun()
 
 
-def _render_sidebar(config: AppSecurityConfig) -> None:
+def _render_saved_portfolio_selector(owner_id, store) -> None:
+    if owner_id is None or store is None:
+        st.text_input("포트폴리오 이름", key=PORTFOLIO_NAME_INPUT_KEY)
+        st.session_state[PORTFOLIO_NAME_KEY] = _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_INPUT_KEY))
+        return
+    try:
+        records = list_portfolios_cached(store, owner_id)
+    except PortfolioStoreError as exc:
+        st.caption(f"저장 목록을 불러올 수 없습니다: {exc}")
+        records = []
+    if not records:
+        st.text_input("포트폴리오 이름", key=PORTFOLIO_NAME_INPUT_KEY)
+        st.session_state[PORTFOLIO_NAME_KEY] = _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_INPUT_KEY))
+        st.caption("새 포트폴리오 이름 변경은 관리 탭에서 저장할 때 확정됩니다.")
+        return
+
+    labels = {f"{record.portfolio_name} · {(record.updated_at or record.created_at or '')[:10] or '날짜 없음'}": record for record in records}
+    current_name = _current_portfolio_name()
+    selected_index = next((index for index, record in enumerate(labels.values()) if record.portfolio_name == current_name), 0)
+    selected_label = st.selectbox("저장된 포트폴리오", list(labels.keys()), index=selected_index, key="sidebar_saved_portfolio")
+    selected = labels[selected_label]
+    if selected.portfolio_name != current_name:
+        if _portfolio_is_dirty():
+            st.warning("저장하지 않은 변경이 있습니다. 관리 탭에서 저장한 뒤 다른 포트폴리오를 불러오세요.")
+        if st.button("선택 포트폴리오 불러오기", disabled=_portfolio_is_dirty(), width="stretch"):
+            try:
+                queue_portfolio_record_load(selected)
+                st.rerun()
+            except (PortfolioStoreError, ValueError) as exc:
+                st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
+    st.caption("새 포트폴리오 생성과 이름 변경은 관리 탭에서 처리합니다.")
+
+
+def _render_sidebar(config: AppSecurityConfig, owner_id, store) -> None:
     with st.sidebar:
         st.subheader("현재 포트폴리오")
-        portfolio_name_input = st.text_input("포트폴리오 이름", key=PORTFOLIO_NAME_INPUT_KEY)
-        st.session_state[PORTFOLIO_NAME_KEY] = _clean_portfolio_name(portfolio_name_input)
+        _render_saved_portfolio_selector(owner_id, store)
         if _portfolio_is_dirty():
             st.caption("저장하지 않은 변경 있음")
         else:
@@ -347,7 +385,7 @@ if should_lock_entire_app(security_config, is_authenticated=_is_authenticated())
 storage_config = _read_storage_config()
 portfolio_store, history_store = _build_stores(storage_config)
 owner_id = storage_config.owner_id if should_enable_storage(storage_config) else None
-_render_sidebar(security_config)
+_render_sidebar(security_config, owner_id, portfolio_store)
 _render_security_status(security_config)
 if should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
