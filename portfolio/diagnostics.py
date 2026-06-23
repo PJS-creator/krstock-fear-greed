@@ -127,6 +127,6 @@ def calculate_diagnostics(
             label="원가 정보 범위",
             value=_fmt_pct(cost_basis_coverage),
             level="warning" if cost_basis_coverage is not None and cost_basis_coverage < thresholds.low_cost_basis_coverage else "ok",
-            message="평균 매수가가 입력된 종목의 평가액이 전체 보유 평가액에서 차지하는 비중입니다.",
+            message="원가 정보가 입력된 종목의 평가액이 전체 보유 평가액에서 차지하는 비중입니다.",
         ),
     ]
