@@ -28,6 +28,30 @@ class ProviderQuote:
         )
 
 
+@dataclass(frozen=True)
+class ProviderFxRate:
+    from_currency: str
+    to_currency: str
+    rate: float
+    provider: str
+    fetched_at: datetime
+
+    @classmethod
+    def now(cls, *, from_currency: str, to_currency: str, rate: float, provider: str) -> "ProviderFxRate":
+        return cls(
+            from_currency=from_currency.upper(),
+            to_currency=to_currency.upper(),
+            rate=rate,
+            provider=provider,
+            fetched_at=datetime.now(timezone.utc),
+        )
+
+
 class PriceProvider(Protocol):
     def get_quote(self, symbol: str) -> ProviderQuote:
         """Return the latest provider quote for a symbol or raise PriceProviderError."""
+
+
+class FxProvider(Protocol):
+    def get_exchange_rate(self, from_currency: str, to_currency: str) -> ProviderFxRate:
+        """Return the latest provider FX rate or raise PriceProviderError."""
