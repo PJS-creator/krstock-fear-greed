@@ -8,7 +8,7 @@ from urllib.error import URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-from .base import PriceProviderError, ProviderQuote
+from .base import PriceProviderError, ProviderFxRate, ProviderQuote
 
 ALPHA_VANTAGE_GLOBAL_QUOTE_URL = "https://www.alphavantage.co/query"
 
@@ -21,15 +21,15 @@ def _raise_if_api_message(payload: dict[str, Any]) -> None:
 
 def _as_non_negative_float(payload: dict[str, Any], field: str) -> float:
     if field not in payload:
-        raise PriceProviderError(f"Alpha Vantage Global Quote 응답에 필드가 없습니다: {field}")
+        raise PriceProviderError(f"Alpha Vantage 응답에 필드가 없습니다: {field}")
     try:
         value = float(payload[field])
     except (TypeError, ValueError) as exc:
-        raise PriceProviderError(f"Alpha Vantage Global Quote 필드가 숫자가 아닙니다: {field}") from exc
+        raise PriceProviderError(f"Alpha Vantage 필드가 숫자가 아닙니다: {field}") from exc
     if not math.isfinite(value):
-        raise PriceProviderError(f"Alpha Vantage Global Quote 필드가 유효한 숫자가 아닙니다: {field}")
+        raise PriceProviderError(f"Alpha Vantage 필드가 유효한 숫자가 아닙니다: {field}")
     if value < 0:
-        raise PriceProviderError(f"Alpha Vantage Global Quote 필드가 음수입니다: {field}")
+        raise PriceProviderError(f"Alpha Vantage 필드가 음수입니다: {field}")
     return value
 
 
@@ -54,6 +54,34 @@ def parse_alpha_vantage_global_quote_response(symbol: str, payload: Any) -> Prov
         symbol=requested_symbol,
         price=_as_non_negative_float(quote_payload, "05. price"),
         previous_close=_as_non_negative_float(quote_payload, "08. previous close"),
+        provider="alpha_vantage",
+    )
+
+
+def parse_alpha_vantage_currency_exchange_response(
+    from_currency: str,
+    to_currency: str,
+    payload: Any,
+) -> ProviderFxRate:
+    if not isinstance(payload, dict):
+        raise PriceProviderError("Alpha Vantage 환율 응답 형식이 올바르지 않습니다.")
+    _raise_if_api_message(payload)
+    exchange_payload = payload.get("Realtime Currency Exchange Rate")
+    if not isinstance(exchange_payload, dict) or not exchange_payload:
+        raise PriceProviderError("Alpha Vantage 응답에 환율 데이터가 없습니다.")
+    _raise_if_api_message(exchange_payload)
+    requested_from = from_currency.strip().upper()
+    requested_to = to_currency.strip().upper()
+    response_from = str(exchange_payload.get("1. From_Currency Code", "")).strip().upper()
+    response_to = str(exchange_payload.get("3. To_Currency Code", "")).strip().upper()
+    if response_from and response_from != requested_from:
+        raise PriceProviderError(f"Alpha Vantage 환율 기준 통화 불일치: 요청={requested_from}, 응답={response_from}")
+    if response_to and response_to != requested_to:
+        raise PriceProviderError(f"Alpha Vantage 환율 대상 통화 불일치: 요청={requested_to}, 응답={response_to}")
+    return ProviderFxRate.now(
+        from_currency=requested_from,
+        to_currency=requested_to,
+        rate=_as_non_negative_float(exchange_payload, "5. Exchange Rate"),
         provider="alpha_vantage",
     )
 
@@ -92,8 +120,31 @@ class AlphaVantageQuoteProvider:
             with self._opener(self._quote_url(normalized_symbol), timeout=self._timeout_seconds) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except (OSError, URLError, json.JSONDecodeError) as exc:
-            raise PriceProviderError(f"Alpha Vantage quote 요청 실패: {normalized_symbol}: {exc}") from exc
+            raise PriceProviderError(f"Alpha Vantage quote 요청 실패: {normalized_symbol}") from exc
         return parse_alpha_vantage_global_quote_response(normalized_symbol, payload)
+
+    def _exchange_url(self, from_currency: str, to_currency: str) -> str:
+        query = urlencode(
+            {
+                "function": "CURRENCY_EXCHANGE_RATE",
+                "from_currency": from_currency.upper(),
+                "to_currency": to_currency.upper(),
+                "apikey": self._api_key,
+            }
+        )
+        return f"{self._base_url}?{query}"
+
+    def get_exchange_rate(self, from_currency: str, to_currency: str) -> ProviderFxRate:
+        normalized_from = from_currency.strip().upper()
+        normalized_to = to_currency.strip().upper()
+        if not normalized_from or not normalized_to:
+            raise PriceProviderError("currency is required")
+        try:
+            with self._opener(self._exchange_url(normalized_from, normalized_to), timeout=self._timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (OSError, URLError, json.JSONDecodeError) as exc:
+            raise PriceProviderError(f"Alpha Vantage 환율 요청 실패: {normalized_from}/{normalized_to}") from exc
+        return parse_alpha_vantage_currency_exchange_response(normalized_from, normalized_to, payload)
 
 
 def build_alpha_vantage_provider(api_key: str | None) -> AlphaVantageQuoteProvider | None:
