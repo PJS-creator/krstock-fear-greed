@@ -21,7 +21,8 @@ from portfolio.manual_input import normalize_portfolio_rows
 
 ALPHA_VANTAGE_TARGET_MARKETS = {"US", "USA"}
 KOREA_TARGET_MARKETS = {"KR", "KRX", "KOSPI", "KOSDAQ"}
-ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS = 1.1
+ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS = 2.0
+ALPHA_VANTAGE_BURST_RETRY_DELAY_SECONDS = 3.0
 DEFAULT_QUOTE_CACHE = TTLQuoteCache(ttl_seconds=600)
 DEFAULT_FX_CACHE = TTLFxCache(ttl_seconds=600)
 
@@ -168,17 +169,48 @@ def _report_progress(
         on_progress(completed, total, symbol)
 
 
+def _is_alpha_vantage_burst_limit_error(exc: PriceProviderError) -> bool:
+    message = str(exc).lower()
+    return any(
+        marker in message
+        for marker in (
+            "요청 간격 제한",
+            "1 request per second",
+            "per-second",
+            "spread out",
+        )
+    )
+
+
+def _fetch_quote_with_burst_retry(
+    symbol: str,
+    provider: PriceProvider,
+    pacer: _ProviderRequestPacer,
+    retry_delay_seconds: float,
+) -> ProviderQuote:
+    pacer.wait_before_request()
+    try:
+        return provider.get_quote(symbol)
+    except PriceProviderError as exc:
+        if retry_delay_seconds <= 0 or not _is_alpha_vantage_burst_limit_error(exc):
+            raise
+        pacer.sleep_fn(retry_delay_seconds)
+        pacer.last_request_started_at = pacer.now_fn()
+        return provider.get_quote(symbol)
+
+
 def _get_quote_with_cache_and_pacing(
     symbol: str,
     provider: PriceProvider,
     quote_cache: TTLQuoteCache,
     pacer: _ProviderRequestPacer,
+    *,
+    burst_retry_delay_seconds: float,
 ) -> tuple[ProviderQuote, bool]:
     cached_quote = quote_cache.get(symbol)
     if cached_quote is not None:
         return cached_quote, True
-    pacer.wait_before_request()
-    quote = provider.get_quote(symbol)
+    quote = _fetch_quote_with_burst_retry(symbol, provider, pacer, burst_retry_delay_seconds)
     quote_cache.set(symbol, quote)
     return quote, False
 
@@ -240,6 +272,7 @@ def refresh_holding_quotes(
     cache: TTLQuoteCache | None = None,
     on_progress: Callable[[int, int, str], None] | None = None,
     request_interval_seconds: float = ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS,
+    burst_retry_delay_seconds: float = ALPHA_VANTAGE_BURST_RETRY_DELAY_SECONDS,
     sleep_fn: Callable[[float], None] = sleep,
     now_fn: Callable[[], float] = monotonic,
 ) -> tuple[list[dict[str, object]], list[PriceUpdateStatus]]:
@@ -279,7 +312,13 @@ def refresh_holding_quotes(
                 _report_progress(on_progress, len(updated_rows), total_rows, symbol)
                 continue
             try:
-                quote, was_cached = _get_quote_with_cache_and_pacing(symbol, provider, quote_cache, pacer)
+                quote, was_cached = _get_quote_with_cache_and_pacing(
+                    symbol,
+                    provider,
+                    quote_cache,
+                    pacer,
+                    burst_retry_delay_seconds=burst_retry_delay_seconds,
+                )
             except PriceProviderError as exc:
                 status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_FAILED
                 updated_row["quote_status"] = status
