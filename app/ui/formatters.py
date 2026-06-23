@@ -75,7 +75,7 @@ def signed_percentage(value: float | None, *, digits: int = 1) -> str:
     if value is None or not _is_number(value):
         return "미산정"
     if float(value) == 0:
-        return f"0.{''.join('0' for _ in range(digits - 1))}%" if digits > 0 else "0%"
+        return percentage(0.0, digits=digits)
     sign = "+" if value > 0 else ""
     return f"{sign}{percentage(float(value), digits=digits)}"
 
