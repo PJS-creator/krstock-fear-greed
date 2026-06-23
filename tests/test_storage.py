@@ -4,6 +4,8 @@ from portfolio.storage import (
     MemoryPortfolioStore,
     PortfolioPayloadError,
     deserialize_portfolio_payload,
+    deserialize_portfolio_payload_v2,
+    migrate_v1_payload_to_v2,
     serialize_portfolio_payload,
     should_enable_storage,
     supabase_config_from_secrets,
@@ -28,15 +30,28 @@ def _row(**overrides):
 
 
 def test_portfolio_payload_round_trip():
-    payload = serialize_portfolio_payload([_row(symbol="abc")], usd_krw=1300, cash_krw=10000)
+    payload = serialize_portfolio_payload([_row(symbol="abc")], usd_krw=1300, cash_krw=10000, cash_usd=5)
 
     rows, usd_krw, cash_krw = deserialize_portfolio_payload(payload)
+    v2 = deserialize_portfolio_payload_v2(payload)
 
-    assert payload["schema_version"] == 1
-    assert rows[0]["symbol"] == "ABC"
+    assert payload["schema_version"] == 2
+    assert rows[0]["ticker"] == "ABC"
     assert rows[0]["quantity"] == 2.0
     assert usd_krw == 1300.0
     assert cash_krw == 10000.0
+    assert v2["cash_balances"]["USD"] == 5.0
+    assert v2["last_known_quotes"]["ABC"]["current_price"] == 125.0
+
+
+def test_v1_payload_migrates_to_v2():
+    v1 = {"schema_version": 1, "rows": [_row(symbol="abc")], "usd_krw": 1300, "cash_krw": 10000}
+
+    migrated = migrate_v1_payload_to_v2(v1)
+
+    assert migrated["schema_version"] == 2
+    assert migrated["holdings"][0]["ticker"] == "ABC"
+    assert migrated["cash_balances"] == {"KRW": 10000.0, "USD": 0.0}
 
 
 def test_memory_store_save_load_and_delete():
@@ -66,7 +81,7 @@ def test_memory_store_overwrites_same_portfolio_name():
 
     assert loaded is not None
     assert first.created_at == second.created_at
-    assert loaded.payload_json["rows"][0]["symbol"] == "BBB"
+    assert loaded.payload_json["holdings"][0]["ticker"] == "BBB"
     assert loaded.payload_json["usd_krw"] == 1400.0
     assert len(store.list_portfolios("owner-a")) == 1
 
@@ -94,13 +109,13 @@ def test_missing_supabase_secrets_disable_storage_policy():
 
 def test_invalid_payload_validation_errors():
     with pytest.raises(PortfolioPayloadError, match="schema_version"):
-        deserialize_portfolio_payload({"schema_version": 999, "rows": [], "usd_krw": 1300, "cash_krw": 0})
+        deserialize_portfolio_payload({"schema_version": 999, "holdings": [], "usd_krw": 1300, "cash_balances": {}})
 
-    with pytest.raises(PortfolioPayloadError, match="rows"):
-        deserialize_portfolio_payload({"schema_version": 1, "rows": "not-a-list", "usd_krw": 1300, "cash_krw": 0})
+    with pytest.raises(PortfolioPayloadError, match="holdings"):
+        deserialize_portfolio_payload({"schema_version": 2, "holdings": "not-a-list", "usd_krw": 1300, "cash_balances": {}})
 
     with pytest.raises(PortfolioPayloadError, match="usd_krw"):
-        deserialize_portfolio_payload({"schema_version": 1, "rows": [], "usd_krw": 0, "cash_krw": 0})
+        deserialize_portfolio_payload({"schema_version": 2, "holdings": [], "usd_krw": 0, "cash_balances": {}})
 
-    with pytest.raises(PortfolioPayloadError, match="Missing CSV column"):
-        deserialize_portfolio_payload({"schema_version": 1, "rows": [{"market": "US"}], "usd_krw": 1300, "cash_krw": 0})
+    with pytest.raises(PortfolioPayloadError, match="quantity"):
+        deserialize_portfolio_payload({"schema_version": 2, "holdings": [{"ticker": "AAA"}], "usd_krw": 1300, "cash_balances": {}})
