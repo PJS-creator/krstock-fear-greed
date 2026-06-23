@@ -40,7 +40,14 @@ from portfolio.storage import (
 )
 
 AUTHENTICATED_KEY = "is_authenticated"
+PORTFOLIO_NAME_KEY = "portfolio_name"
+PORTFOLIO_NAME_INPUT_KEY = "portfolio_name_input"
+PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
 UNPROTECTED_WARNING = "공개 앱에서 API key quota 보호를 위해 APP_PASSWORD 설정을 권장합니다."
+
+
+def _clean_portfolio_name(value: object) -> str:
+    return str(value or "main").strip() or "main"
 
 
 def _read_security_config() -> AppSecurityConfig:
@@ -69,7 +76,13 @@ def _read_storage_config():
 
 def _initialize_session_state() -> None:
     st.session_state.setdefault(AUTHENTICATED_KEY, False)
-    st.session_state.setdefault("portfolio_name", "main")
+    st.session_state.setdefault(PORTFOLIO_NAME_KEY, "main")
+    pending_portfolio_name = st.session_state.pop(PENDING_PORTFOLIO_NAME_KEY, None)
+    if pending_portfolio_name is not None:
+        clean_name = _clean_portfolio_name(pending_portfolio_name)
+        st.session_state[PORTFOLIO_NAME_KEY] = clean_name
+        st.session_state[PORTFOLIO_NAME_INPUT_KEY] = clean_name
+    st.session_state.setdefault(PORTFOLIO_NAME_INPUT_KEY, st.session_state[PORTFOLIO_NAME_KEY])
     st.session_state.setdefault("holdings_rows", [])
     st.session_state.setdefault("cash_krw", 0.0)
     st.session_state.setdefault("cash_usd", 0.0)
@@ -78,6 +91,10 @@ def _initialize_session_state() -> None:
     st.session_state.setdefault("fx_fetched_at", None)
     st.session_state.setdefault("price_update_statuses", [])
     st.session_state.setdefault("last_price_refresh_at", None)
+
+
+def _current_portfolio_name() -> str:
+    return _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_KEY))
 
 
 def _is_authenticated() -> bool:
@@ -137,7 +154,7 @@ def _save_current_portfolio(owner_id, store, history_store, metrics) -> None:
     if owner_id is None or store is None:
         st.warning("Supabase 저장소가 설정되지 않아 저장할 수 없습니다.")
         return
-    portfolio_name = str(st.session_state.portfolio_name or "main").strip() or "main"
+    portfolio_name = _current_portfolio_name()
     try:
         payload = serialize_portfolio_payload(
             st.session_state.holdings_rows,
@@ -188,7 +205,7 @@ def _refresh_prices(config: AppSecurityConfig, owner_id, history_store) -> None:
         history_store.save_snapshot(
             build_history_record(
                 owner_id=owner_id,
-                portfolio_name=st.session_state.portfolio_name,
+                portfolio_name=_current_portfolio_name(),
                 event_type="price_refresh",
                 metrics=metrics,
             )
@@ -212,7 +229,8 @@ def _refresh_fx(config: AppSecurityConfig) -> None:
 
 def _render_sidebar(config: AppSecurityConfig) -> None:
     with st.sidebar:
-        st.text_input("현재 포트폴리오", key="portfolio_name")
+        portfolio_name_input = st.text_input("현재 포트폴리오", key=PORTFOLIO_NAME_INPUT_KEY)
+        st.session_state[PORTFOLIO_NAME_KEY] = _clean_portfolio_name(portfolio_name_input)
         st.number_input("KRW 현금", min_value=0.0, step=100000.0, key="cash_krw")
         st.number_input("USD 현금", min_value=0.0, step=100.0, key="cash_usd")
         st.number_input("USD/KRW", min_value=0.01, step=1.0, key="usd_krw")
@@ -227,7 +245,7 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
     st.title("Personal Portfolio Control Panel")
     st.caption("최근 제공 가격과 사용자가 입력한 현금/보유수량으로 총자산을 계산하는 개인용 대시보드")
     col1, col2, col3, col4 = st.columns([2, 1.4, 1, 1])
-    col1.write(f"선택 포트폴리오: **{st.session_state.portfolio_name}**")
+    col1.write(f"선택 포트폴리오: **{_current_portfolio_name()}**")
     col2.write(f"마지막 가격 갱신: **{metrics.last_price_refresh_at or st.session_state.last_price_refresh_at or '미조회'}**")
     col3.write(f"가격 상태: 정상 {metrics.priced_count} · stale {metrics.stale_quote_count} · 실패 {metrics.failed_quote_count}")
     if col4.button("가격 새로고침", type="primary"):
@@ -273,7 +291,7 @@ with holdings_tab:
     metrics = _current_metrics()
     render_holdings_table(metrics)
 with history_tab:
-    render_history_tab(owner_id=owner_id, portfolio_name=st.session_state.portfolio_name, history_store=history_store)
+    render_history_tab(owner_id=owner_id, portfolio_name=_current_portfolio_name(), history_store=history_store)
 with manage_tab:
     render_csv_tools()
     metrics = _current_metrics()
