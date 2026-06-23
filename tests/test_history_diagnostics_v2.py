@@ -6,10 +6,10 @@ from portfolio.history import MemoryPortfolioHistoryStore, build_history_record
 from portfolio.holdings import build_portfolio_metrics
 
 
-def _metrics():
+def _metrics(quantity=2):
     return build_portfolio_metrics(
         [
-            {"ticker": "AAA", "quantity": 2, "current_price": 10, "previous_close": 9, "avg_price": 8, "strategy_tag": "Core"},
+            {"ticker": "AAA", "quantity": quantity, "current_price": 10, "previous_close": 9, "avg_price": 8, "strategy_tag": "Core"},
             {"ticker": "BBB", "quantity": 1, "current_price": 20, "previous_close": 22, "avg_price": 25, "strategy_tag": "Core"},
         ],
         cash_krw=100,
@@ -38,14 +38,14 @@ def test_history_period_filter():
         owner_id="owner",
         portfolio_name="main",
         event_type="manual_capture",
-        metrics=_metrics(),
+        metrics=_metrics(quantity=2),
         captured_at=(now - timedelta(days=40)).isoformat(),
     )
     recent = build_history_record(
         owner_id="owner",
         portfolio_name="main",
         event_type="holdings_changed",
-        metrics=_metrics(),
+        metrics=_metrics(quantity=3),
         captured_at=now.isoformat(),
     )
 
@@ -70,7 +70,7 @@ def test_chart_dataframe_builders():
     metrics = _metrics()
     records = [
         build_history_record(owner_id="owner", portfolio_name="main", event_type="manual_capture", metrics=metrics),
-        build_history_record(owner_id="owner", portfolio_name="main", event_type="holdings_changed", metrics=metrics),
+        build_history_record(owner_id="owner", portfolio_name="main", event_type="holdings_changed", metrics=_metrics(quantity=3)),
     ]
 
     assert not holdings_allocation_frame(metrics).empty
