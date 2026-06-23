@@ -34,9 +34,13 @@ class TTLQuoteCache:
         self._entries[symbol.upper()] = _CacheEntry(quote=quote, stored_at=monotonic())
 
     def get_or_fetch(self, symbol: str, fetcher: Callable[[str], ProviderQuote]) -> ProviderQuote:
+        quote, _ = self.get_or_fetch_with_status(symbol, fetcher)
+        return quote
+
+    def get_or_fetch_with_status(self, symbol: str, fetcher: Callable[[str], ProviderQuote]) -> tuple[ProviderQuote, bool]:
         cached_quote = self.get(symbol)
         if cached_quote is not None:
-            return cached_quote
+            return cached_quote, True
         quote = fetcher(symbol)
         self.set(symbol, quote)
-        return quote
+        return quote, False
