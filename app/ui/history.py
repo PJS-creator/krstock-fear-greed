@@ -4,7 +4,8 @@ import streamlit as st
 
 from portfolio.history import HistoryPeriod, PortfolioHistoryRecord, PortfolioHistoryStore, PortfolioHistoryStoreError
 
-from .styles import plot_total_value_history
+from .charts import plot_total_value_history
+from .components import render_plotly_chart
 
 PERIOD_OPTIONS: dict[str, HistoryPeriod] = {
     "1주": "1w",
@@ -31,7 +32,7 @@ def render_history_tab(
     history_store: PortfolioHistoryStore | None,
 ) -> None:
     st.subheader("총자산 추이")
-    st.caption("이 차트는 저장된 실제 스냅샷 기반 총자산 추이입니다. 거래내역과 입출금 기록이 없으므로 투자성과 수익률로 해석하지 않습니다.")
+    st.caption("저장된 스냅샷 기반 총자산 변화입니다. 거래내역과 입출금 기록이 없으므로 투자성과 수익률로 해석하지 않습니다.")
     if history_store is None or owner_id is None:
         st.info("Supabase 설정이 없으면 자산추이 탭을 사용할 수 없습니다.")
         return
@@ -42,8 +43,8 @@ def render_history_tab(
     except PortfolioHistoryStoreError as exc:
         st.warning(f"자산 이력을 불러올 수 없습니다: {exc}")
         return
-    fig = plot_total_value_history(records, period="all")
+    fig = plot_total_value_history(records, period=period)
     if fig is None:
-        st.info("총자산 추이는 스냅샷이 2개 이상 쌓인 뒤 표시됩니다. 이력은 v0.6 배포 이후부터 기록됩니다.")
+        st.info("자산 기록이 2개 이상 쌓이면 추이가 표시됩니다. 저장 또는 현재 상태 기록을 사용해 스냅샷을 남길 수 있습니다.")
         return
-    st.plotly_chart(fig, use_container_width=True)
+    render_plotly_chart(fig, key=f"history_chart_{period}")

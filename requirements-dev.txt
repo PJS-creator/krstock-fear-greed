@@ -1,2 +1,4 @@
 pytest
 pandas
+plotly
+streamlit>=1.50
