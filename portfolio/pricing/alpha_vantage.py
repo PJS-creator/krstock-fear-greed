@@ -13,10 +13,24 @@ from .base import PriceProviderError, ProviderFxRate, ProviderQuote
 ALPHA_VANTAGE_GLOBAL_QUOTE_URL = "https://www.alphavantage.co/query"
 
 
+def _friendly_api_message(field: str, value: object) -> str:
+    raw_message = str(value or "").strip()
+    lowered = raw_message.lower()
+    if "1 request per second" in lowered or "per-second" in lowered:
+        return "Alpha Vantage 무료 API 요청 간격 제한에 걸렸습니다. 잠시 후 다시 시도하세요."
+    if "rate limit" in lowered or "25 requests per day" in lowered or "requests per day" in lowered:
+        return "Alpha Vantage 무료 API 일일 요청 한도에 도달했습니다. 내일 다시 시도하거나 API key 한도를 확인하세요."
+    if "demo" in lowered:
+        return "Alpha Vantage demo API key로는 이 조회를 사용할 수 없습니다. 개인 API key를 설정하세요."
+    if field == "Error Message":
+        return "Alpha Vantage API 요청이 올바르지 않습니다. ticker 또는 API 설정을 확인하세요."
+    return f"Alpha Vantage 응답 오류({field})가 발생했습니다. 잠시 후 다시 시도하세요."
+
+
 def _raise_if_api_message(payload: dict[str, Any]) -> None:
     for field in ("Note", "Information", "Error Message"):
         if field in payload:
-            raise PriceProviderError(f"Alpha Vantage 응답 오류: {payload[field]}")
+            raise PriceProviderError(_friendly_api_message(field, payload[field]))
 
 
 def _as_non_negative_float(payload: dict[str, Any], field: str) -> float:
