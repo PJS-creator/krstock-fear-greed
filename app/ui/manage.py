@@ -49,8 +49,21 @@ def _set_storage_status(message: str) -> None:
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _list_portfolios_cached(_store: PortfolioStore, owner_id: str) -> list[PortfolioRecord]:
+def list_portfolios_cached(_store: PortfolioStore, owner_id: str) -> list[PortfolioRecord]:
     return _store.list_portfolios(owner_id)
+
+
+def queue_portfolio_record_load(record: PortfolioRecord) -> None:
+    payload = deserialize_portfolio_payload_v2(record.payload_json)
+    cash = payload["cash_balances"]
+    _queue_portfolio_state_update(
+        portfolio_name=record.portfolio_name,
+        holdings_rows=payload["holdings"],
+        usd_krw=float(payload["usd_krw"]),
+        cash_krw=float(cash.get("KRW", 0.0)),
+        cash_usd=float(cash.get("USD", 0.0)),
+    )
+    _set_storage_status(f"{record.portfolio_name} 포트폴리오를 불러왔습니다.")
 
 
 def render_csv_tools() -> None:
@@ -122,7 +135,7 @@ def render_storage_tools(
                 st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
 
     try:
-        records = _list_portfolios_cached(store, owner_id)
+        records = list_portfolios_cached(store, owner_id)
     except PortfolioStoreError as exc:
         st.warning(f"저장 목록을 불러올 수 없습니다: {exc}")
         records = []
@@ -136,16 +149,7 @@ def render_storage_tools(
     col1, col2 = st.columns(2)
     if col1.button("선택 포트폴리오 불러오기"):
         try:
-            payload = deserialize_portfolio_payload_v2(selected.payload_json)
-            cash = payload["cash_balances"]
-            _queue_portfolio_state_update(
-                portfolio_name=selected.portfolio_name,
-                holdings_rows=payload["holdings"],
-                usd_krw=float(payload["usd_krw"]),
-                cash_krw=float(cash.get("KRW", 0.0)),
-                cash_usd=float(cash.get("USD", 0.0)),
-            )
-            _set_storage_status(f"{selected.portfolio_name} 포트폴리오를 불러왔습니다.")
+            queue_portfolio_record_load(selected)
             st.rerun()
         except (PortfolioStoreError, ValueError) as exc:
             st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
