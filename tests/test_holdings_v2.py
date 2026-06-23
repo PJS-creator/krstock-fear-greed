@@ -103,6 +103,33 @@ def test_quote_refresh_updates_only_explicit_call_and_reports_cached():
     assert second_rows[0]["current_price"] == 12
 
 
+def test_quote_refresh_paces_uncached_provider_calls():
+    provider = FakeProvider()
+    current_time = [100.0]
+    sleeps = []
+
+    def now_fn():
+        return current_time[0]
+
+    def sleep_fn(seconds):
+        sleeps.append(seconds)
+        current_time[0] += seconds
+
+    rows = [{"ticker": "AAA", "quantity": 1}, {"ticker": "BBB", "quantity": 1}]
+
+    refresh_holding_quotes(
+        rows,
+        provider,
+        cache=TTLQuoteCache(),
+        request_interval_seconds=1.1,
+        sleep_fn=sleep_fn,
+        now_fn=now_fn,
+    )
+
+    assert provider.calls == ["AAA", "BBB"]
+    assert sleeps == [pytest.approx(1.1)]
+
+
 def test_quote_failure_keeps_last_price_as_stale_and_missing_price_as_failed():
     stale_rows, stale_statuses = refresh_holding_quotes(
         [{"ticker": "AAA", "quantity": 1, "current_price": 10, "previous_close": 9}],
