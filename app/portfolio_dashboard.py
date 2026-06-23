@@ -155,6 +155,7 @@ def _save_current_portfolio(owner_id, store, history_store, metrics) -> None:
                     metrics=metrics,
                 )
             )
+        st.cache_data.clear()
         st.success(f"{portfolio_name} 포트폴리오를 저장했습니다.")
     except (PortfolioStoreError, ValueError) as exc:
         st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
@@ -165,8 +166,17 @@ def _refresh_prices(config: AppSecurityConfig, owner_id, history_store) -> None:
         st.warning(f"{UNPROTECTED_WARNING} APP_PASSWORD가 없어 가격 새로고침을 비활성화했습니다.")
         return
     provider = build_alpha_vantage_provider(config.alpha_vantage_api_key)
-    progress = st.progress(0, text="최근 제공 가격 조회 중")
-    updated_rows, statuses = refresh_holding_quotes(st.session_state.holdings_rows, provider)
+    progress = st.progress(0, text="최근 제공 가격 조회 준비 중")
+
+    def update_progress(completed: int, total: int, symbol: str) -> None:
+        percent = int((completed / max(total, 1)) * 100)
+        progress.progress(percent, text=f"최근 제공 가격 조회 중: {symbol} ({completed}/{total})")
+
+    updated_rows, statuses = refresh_holding_quotes(
+        st.session_state.holdings_rows,
+        provider,
+        on_progress=update_progress,
+    )
     progress.progress(100, text="최근 제공 가격 조회 완료")
     st.session_state.holdings_rows = updated_rows
     st.session_state.price_update_statuses = statuses
@@ -183,6 +193,7 @@ def _refresh_prices(config: AppSecurityConfig, owner_id, history_store) -> None:
                 metrics=metrics,
             )
         )
+        st.cache_data.clear()
     st.rerun()
 
 
