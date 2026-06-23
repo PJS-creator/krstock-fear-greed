@@ -2,3 +2,4 @@ streamlit>=1.36
 pandas
 plotly
 supabase
+finance-datareader
