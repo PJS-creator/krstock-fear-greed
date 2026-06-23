@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from time import monotonic, sleep
 from typing import Any, Mapping
 
-from .base import FxProvider, PriceProvider, PriceProviderError
+from .base import FxProvider, PriceProvider, PriceProviderError, ProviderQuote
 from .cache import TTLFxCache, TTLQuoteCache
 from portfolio.holdings import (
     QUOTE_STATUS_CACHED,
@@ -18,6 +19,7 @@ from portfolio.holdings import (
 from portfolio.manual_input import normalize_portfolio_rows
 
 AUTO_UPDATE_TARGET_MARKETS = {"US", "USA"}
+ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS = 1.1
 DEFAULT_QUOTE_CACHE = TTLQuoteCache(ttl_seconds=600)
 DEFAULT_FX_CACHE = TTLFxCache(ttl_seconds=600)
 
@@ -37,6 +39,30 @@ class FxUpdateStatus:
     status: str
     message: str
     fetched_at: str | None = None
+
+
+class _ProviderRequestPacer:
+    def __init__(
+        self,
+        *,
+        min_interval_seconds: float,
+        sleep_fn: Callable[[float], None],
+        now_fn: Callable[[], float],
+    ) -> None:
+        self.min_interval_seconds = max(0.0, min_interval_seconds)
+        self.sleep_fn = sleep_fn
+        self.now_fn = now_fn
+        self.last_request_started_at: float | None = None
+
+    def wait_before_request(self) -> None:
+        now = self.now_fn()
+        if self.last_request_started_at is not None:
+            elapsed = now - self.last_request_started_at
+            remaining = self.min_interval_seconds - elapsed
+            if remaining > 0:
+                self.sleep_fn(remaining)
+                now = self.now_fn()
+        self.last_request_started_at = now
 
 
 def is_auto_update_target(row: Mapping[str, Any]) -> bool:
@@ -130,15 +156,38 @@ def _report_progress(
         on_progress(completed, total, symbol)
 
 
+def _get_quote_with_cache_and_pacing(
+    symbol: str,
+    provider: PriceProvider,
+    quote_cache: TTLQuoteCache,
+    pacer: _ProviderRequestPacer,
+) -> tuple[ProviderQuote, bool]:
+    cached_quote = quote_cache.get(symbol)
+    if cached_quote is not None:
+        return cached_quote, True
+    pacer.wait_before_request()
+    quote = provider.get_quote(symbol)
+    quote_cache.set(symbol, quote)
+    return quote, False
+
+
 def refresh_holding_quotes(
     rows: list[Mapping[str, Any]],
     provider: PriceProvider | None,
     *,
     cache: TTLQuoteCache | None = None,
     on_progress: Callable[[int, int, str], None] | None = None,
+    request_interval_seconds: float = ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS,
+    sleep_fn: Callable[[float], None] = sleep,
+    now_fn: Callable[[], float] = monotonic,
 ) -> tuple[list[dict[str, object]], list[PriceUpdateStatus]]:
     normalized_rows = normalize_holding_rows(rows)
     quote_cache = cache or DEFAULT_QUOTE_CACHE
+    pacer = _ProviderRequestPacer(
+        min_interval_seconds=request_interval_seconds,
+        sleep_fn=sleep_fn,
+        now_fn=now_fn,
+    )
     updated_rows: list[dict[str, object]] = []
     statuses: list[PriceUpdateStatus] = []
     total_rows = len(normalized_rows)
@@ -185,7 +234,7 @@ def refresh_holding_quotes(
             continue
 
         try:
-            quote, was_cached = quote_cache.get_or_fetch_with_status(symbol, provider.get_quote)
+            quote, was_cached = _get_quote_with_cache_and_pacing(symbol, provider, quote_cache, pacer)
         except PriceProviderError as exc:
             status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_FAILED
             updated_row["quote_status"] = status

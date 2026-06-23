@@ -126,6 +126,24 @@ def test_alpha_vantage_rate_limit_and_api_messages_are_rejected(payload):
         parse_alpha_vantage_global_quote_response("IBM", payload)
 
 
+def test_alpha_vantage_burst_limit_message_is_user_friendly():
+    payload = {
+        "Information": (
+            "Thank you for using Alpha Vantage! Please consider spreading out your free API requests more sparingly "
+            "(1 request per second). You may subscribe to any of the premium plans at "
+            "https://www.alphavantage.co/premium/ to lift the free key rate limit."
+        )
+    }
+
+    with pytest.raises(PriceProviderError) as exc_info:
+        parse_alpha_vantage_global_quote_response("IBM", payload)
+
+    message = str(exc_info.value)
+    assert "요청 간격 제한" in message
+    assert "premium" not in message
+    assert "https://" not in message
+
+
 def test_alpha_vantage_symbol_mismatch_is_rejected():
     with pytest.raises(PriceProviderError, match="symbol"):
         parse_alpha_vantage_global_quote_response(
