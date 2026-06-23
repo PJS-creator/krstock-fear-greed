@@ -17,6 +17,8 @@ from portfolio.storage import (
 )
 
 STORAGE_UNCONFIGURED_MESSAGE = "저장소가 설정되지 않아 CSV 방식만 사용할 수 있습니다"
+PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
+STORAGE_STATUS_MESSAGE_KEY = "storage_status_message"
 
 
 def _holdings_csv(rows: list[dict[str, object]]) -> str:
@@ -27,6 +29,14 @@ def _holdings_csv(rows: list[dict[str, object]]) -> str:
 def _read_csv(uploaded_file) -> list[dict[str, object]]:
     frame = pd.read_csv(BytesIO(uploaded_file.getvalue()), dtype=str)
     return normalize_holding_rows(frame.to_dict("records"))
+
+
+def _queue_portfolio_name_update(portfolio_name: str) -> None:
+    st.session_state[PENDING_PORTFOLIO_NAME_KEY] = portfolio_name
+
+
+def _set_storage_status(message: str) -> None:
+    st.session_state[STORAGE_STATUS_MESSAGE_KEY] = message
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -61,6 +71,9 @@ def render_storage_tools(
     on_capture: Callable[[str], None] | None = None,
 ) -> None:
     st.subheader("포트폴리오 저장/불러오기")
+    status_message = st.session_state.pop(STORAGE_STATUS_MESSAGE_KEY, None)
+    if status_message:
+        st.success(status_message)
     if store is None or owner_id is None:
         st.info(STORAGE_UNCONFIGURED_MESSAGE)
         return
@@ -69,7 +82,7 @@ def render_storage_tools(
         portfolio_name = st.text_input("portfolio_name", value=st.session_state.get("portfolio_name", "main"))
         submitted = st.form_submit_button("현재 포트폴리오 저장")
     if submitted:
-        clean_name = portfolio_name.strip()
+        clean_name = str(portfolio_name or "").strip()
         if not clean_name:
             st.error("portfolio_name을 입력하세요.")
         else:
@@ -81,7 +94,6 @@ def render_storage_tools(
                     cash_usd=st.session_state.get("cash_usd", 0.0),
                 )
                 store.save_portfolio(owner_id, clean_name, payload)
-                st.session_state.portfolio_name = clean_name
                 if history_store is not None:
                     history_store.save_snapshot(
                         build_history_record(
@@ -94,7 +106,9 @@ def render_storage_tools(
                 if on_capture is not None:
                     on_capture("portfolio_save")
                 st.cache_data.clear()
-                st.success(f"{clean_name} 포트폴리오를 저장했습니다.")
+                _queue_portfolio_name_update(clean_name)
+                _set_storage_status(f"{clean_name} 포트폴리오를 저장했습니다.")
+                st.rerun()
             except (PortfolioStoreError, ValueError) as exc:
                 st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
 
@@ -115,12 +129,12 @@ def render_storage_tools(
         try:
             payload = deserialize_portfolio_payload_v2(selected.payload_json)
             cash = payload["cash_balances"]
-            st.session_state.portfolio_name = selected.portfolio_name
             st.session_state.holdings_rows = payload["holdings"]
             st.session_state.usd_krw = float(payload["usd_krw"])
             st.session_state.cash_krw = float(cash.get("KRW", 0.0))
             st.session_state.cash_usd = float(cash.get("USD", 0.0))
-            st.success(f"{selected.portfolio_name} 포트폴리오를 불러왔습니다.")
+            _queue_portfolio_name_update(selected.portfolio_name)
+            _set_storage_status(f"{selected.portfolio_name} 포트폴리오를 불러왔습니다.")
             st.rerun()
         except (PortfolioStoreError, ValueError) as exc:
             st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
@@ -130,7 +144,7 @@ def render_storage_tools(
         try:
             if store.delete_portfolio(owner_id, selected.portfolio_name):
                 st.cache_data.clear()
-                st.success(f"{selected.portfolio_name} 포트폴리오를 삭제했습니다.")
+                _set_storage_status(f"{selected.portfolio_name} 포트폴리오를 삭제했습니다.")
                 st.rerun()
             else:
                 st.error("선택한 포트폴리오를 찾을 수 없습니다.")
