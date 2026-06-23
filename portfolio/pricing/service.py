@@ -12,13 +12,15 @@ from portfolio.holdings import (
     QUOTE_STATUS_FAILED,
     QUOTE_STATUS_MANUAL,
     QUOTE_STATUS_MISSING,
+    QUOTE_STATUS_MISSING_API_KEY,
     QUOTE_STATUS_STALE,
     QUOTE_STATUS_UPDATED,
     normalize_holding_rows,
 )
 from portfolio.manual_input import normalize_portfolio_rows
 
-AUTO_UPDATE_TARGET_MARKETS = {"US", "USA"}
+ALPHA_VANTAGE_TARGET_MARKETS = {"US", "USA"}
+KOREA_TARGET_MARKETS = {"KR", "KRX", "KOSPI", "KOSDAQ"}
 ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS = 1.1
 DEFAULT_QUOTE_CACHE = TTLQuoteCache(ttl_seconds=600)
 DEFAULT_FX_CACHE = TTLFxCache(ttl_seconds=600)
@@ -65,10 +67,20 @@ class _ProviderRequestPacer:
         self.last_request_started_at = now
 
 
-def is_auto_update_target(row: Mapping[str, Any]) -> bool:
+def is_alpha_vantage_target(row: Mapping[str, Any]) -> bool:
     market = str(row.get("market", "")).strip().upper()
     currency = str(row.get("currency", "")).strip().upper()
-    return currency == "USD" and market in AUTO_UPDATE_TARGET_MARKETS
+    return currency == "USD" and market in ALPHA_VANTAGE_TARGET_MARKETS
+
+
+def is_korea_update_target(row: Mapping[str, Any]) -> bool:
+    market = str(row.get("market", "")).strip().upper()
+    currency = str(row.get("currency", "")).strip().upper()
+    return currency == "KRW" and market in KOREA_TARGET_MARKETS
+
+
+def is_auto_update_target(row: Mapping[str, Any]) -> bool:
+    return is_alpha_vantage_target(row)
 
 
 def update_us_quotes(
@@ -88,7 +100,7 @@ def update_us_quotes(
         market = str(row["market"])
         currency = str(row["currency"])
 
-        if not is_auto_update_target(row):
+        if not is_alpha_vantage_target(row):
             statuses.append(
                 PriceUpdateStatus(
                     symbol=symbol,
@@ -171,10 +183,60 @@ def _get_quote_with_cache_and_pacing(
     return quote, False
 
 
+def _get_quote_with_cache(
+    symbol: str,
+    provider: PriceProvider,
+    quote_cache: TTLQuoteCache,
+) -> tuple[ProviderQuote, bool]:
+    cached_quote = quote_cache.get(symbol)
+    if cached_quote is not None:
+        return cached_quote, True
+    quote = provider.get_quote(symbol)
+    quote_cache.set(symbol, quote)
+    return quote, False
+
+
+def _provider_display_name(provider: PriceProvider, symbol: str) -> str | None:
+    lookup = getattr(provider, "get_display_name", None)
+    if not callable(lookup):
+        return None
+    try:
+        name = str(lookup(symbol)).strip()
+    except Exception:
+        return None
+    return name or None
+
+
+def _update_row_from_quote(
+    row: dict[str, object],
+    quote: ProviderQuote,
+    *,
+    status: str,
+    provider: PriceProvider | None = None,
+) -> dict[str, object]:
+    updated_row = dict(row)
+    updated_row["ticker"] = quote.symbol
+    updated_row["symbol"] = quote.symbol
+    updated_row["current_price"] = quote.price
+    updated_row["previous_close"] = quote.previous_close
+    updated_row["quote_status"] = status
+    updated_row["fetched_at"] = quote.fetched_at.isoformat()
+    updated_row["provider"] = quote.provider
+    if provider is not None:
+        display_name = str(updated_row.get("display_name") or "").strip()
+        if not display_name or display_name == str(row.get("ticker")):
+            provider_name = _provider_display_name(provider, quote.symbol)
+            if provider_name:
+                updated_row["display_name"] = provider_name
+                updated_row["name"] = provider_name
+    return updated_row
+
+
 def refresh_holding_quotes(
     rows: list[Mapping[str, Any]],
     provider: PriceProvider | None,
     *,
+    korea_provider: PriceProvider | None = None,
     cache: TTLQuoteCache | None = None,
     on_progress: Callable[[int, int, str], None] | None = None,
     request_interval_seconds: float = ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS,
@@ -199,73 +261,116 @@ def refresh_holding_quotes(
         currency = str(row["currency"])
         has_last_price = row.get("current_price") is not None
 
-        if not is_auto_update_target({"market": market, "currency": currency}):
-            status = QUOTE_STATUS_MANUAL if has_last_price else QUOTE_STATUS_MISSING
-            updated_row["quote_status"] = status
+        if is_alpha_vantage_target(row):
+            if provider is None:
+                status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_MISSING_API_KEY
+                updated_row["quote_status"] = status
+                statuses.append(
+                    PriceUpdateStatus(
+                        symbol=symbol,
+                        market=market,
+                        currency=currency,
+                        status=status,
+                        message="Alpha Vantage API key가 없어 최근 제공 가격을 갱신하지 못했습니다.",
+                        fetched_at=updated_row.get("fetched_at"),
+                    )
+                )
+                updated_rows.append(updated_row)
+                _report_progress(on_progress, len(updated_rows), total_rows, symbol)
+                continue
+            try:
+                quote, was_cached = _get_quote_with_cache_and_pacing(symbol, provider, quote_cache, pacer)
+            except PriceProviderError as exc:
+                status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_FAILED
+                updated_row["quote_status"] = status
+                statuses.append(
+                    PriceUpdateStatus(
+                        symbol=symbol,
+                        market=market,
+                        currency=currency,
+                        status=status,
+                        message=f"최근 제공 가격 갱신 실패: {exc}. 마지막 정상 가격을 유지했습니다." if has_last_price else f"최근 제공 가격 갱신 실패: {exc}.",
+                        fetched_at=updated_row.get("fetched_at"),
+                    )
+                )
+                updated_rows.append(updated_row)
+                _report_progress(on_progress, len(updated_rows), total_rows, symbol)
+                continue
+            status = QUOTE_STATUS_CACHED if was_cached else QUOTE_STATUS_UPDATED
+            updated_rows.append(_update_row_from_quote(updated_row, quote, status=status, provider=provider))
             statuses.append(
                 PriceUpdateStatus(
-                    symbol=symbol,
+                    symbol=quote.symbol,
                     market=market,
                     currency=currency,
                     status=status,
-                    message="KR/KRW 또는 수동 가격 종목은 마지막 입력 가격을 유지합니다.",
-                    fetched_at=updated_row.get("fetched_at"),
+                    message="캐시된 최근 제공 가격을 사용했습니다." if was_cached else "미국 주식 최근 제공 가격으로 업데이트했습니다.",
+                    fetched_at=quote.fetched_at.isoformat(),
                 )
             )
-            updated_rows.append(updated_row)
-            _report_progress(on_progress, len(updated_rows), total_rows, symbol)
+            _report_progress(on_progress, len(updated_rows), total_rows, quote.symbol)
             continue
 
-        if provider is None:
-            status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_MISSING
-            updated_row["quote_status"] = status
+        if is_korea_update_target(row):
+            if korea_provider is None:
+                status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_MISSING
+                updated_row["quote_status"] = status
+                statuses.append(
+                    PriceUpdateStatus(
+                        symbol=symbol,
+                        market=market,
+                        currency=currency,
+                        status=status,
+                        message="국내 주식 가격 provider를 사용할 수 없어 마지막 입력 가격을 유지했습니다.",
+                        fetched_at=updated_row.get("fetched_at"),
+                    )
+                )
+                updated_rows.append(updated_row)
+                _report_progress(on_progress, len(updated_rows), total_rows, symbol)
+                continue
+            try:
+                quote, was_cached = _get_quote_with_cache(symbol, korea_provider, quote_cache)
+            except PriceProviderError as exc:
+                status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_FAILED
+                updated_row["quote_status"] = status
+                statuses.append(
+                    PriceUpdateStatus(
+                        symbol=symbol,
+                        market=market,
+                        currency=currency,
+                        status=status,
+                        message=f"국내 주식 최근 제공 가격 갱신 실패: {exc}. 마지막 정상 가격을 유지했습니다." if has_last_price else f"국내 주식 최근 제공 가격 갱신 실패: {exc}.",
+                        fetched_at=updated_row.get("fetched_at"),
+                    )
+                )
+                updated_rows.append(updated_row)
+                _report_progress(on_progress, len(updated_rows), total_rows, symbol)
+                continue
+            status = QUOTE_STATUS_CACHED if was_cached else QUOTE_STATUS_UPDATED
+            updated_rows.append(_update_row_from_quote(updated_row, quote, status=status, provider=korea_provider))
             statuses.append(
                 PriceUpdateStatus(
-                    symbol=symbol,
+                    symbol=quote.symbol,
                     market=market,
                     currency=currency,
                     status=status,
-                    message="Alpha Vantage API key가 없어 최근 제공 가격을 갱신하지 못했습니다.",
-                    fetched_at=updated_row.get("fetched_at"),
+                    message="캐시된 국내 주식 최근 제공 가격을 사용했습니다." if was_cached else "국내 주식 최근 제공 가격으로 업데이트했습니다.",
+                    fetched_at=quote.fetched_at.isoformat(),
                 )
             )
-            updated_rows.append(updated_row)
-            _report_progress(on_progress, len(updated_rows), total_rows, symbol)
+            _report_progress(on_progress, len(updated_rows), total_rows, quote.symbol)
             continue
 
-        try:
-            quote, was_cached = _get_quote_with_cache_and_pacing(symbol, provider, quote_cache, pacer)
-        except PriceProviderError as exc:
-            status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_FAILED
-            updated_row["quote_status"] = status
-            statuses.append(
-                PriceUpdateStatus(
-                    symbol=symbol,
-                    market=market,
-                    currency=currency,
-                    status=status,
-                    message=f"최근 제공 가격 갱신 실패: {exc}. 마지막 정상 가격을 유지했습니다." if has_last_price else f"최근 제공 가격 갱신 실패: {exc}.",
-                    fetched_at=updated_row.get("fetched_at"),
-                )
-            )
-            updated_rows.append(updated_row)
-            _report_progress(on_progress, len(updated_rows), total_rows, symbol)
-            continue
-
-        status = QUOTE_STATUS_CACHED if was_cached else QUOTE_STATUS_UPDATED
-        updated_row["current_price"] = quote.price
-        updated_row["previous_close"] = quote.previous_close
+        status = QUOTE_STATUS_MANUAL if has_last_price else QUOTE_STATUS_MISSING
         updated_row["quote_status"] = status
-        updated_row["fetched_at"] = quote.fetched_at.isoformat()
-        updated_row["provider"] = quote.provider
         statuses.append(
             PriceUpdateStatus(
                 symbol=symbol,
                 market=market,
                 currency=currency,
                 status=status,
-                message="캐시된 최근 제공 가격을 사용했습니다." if was_cached else "최근 제공 가격으로 갱신했습니다.",
-                fetched_at=quote.fetched_at.isoformat(),
+                message="자동 가격 새로고침 대상이 아니어서 마지막 입력 가격을 유지합니다.",
+                fetched_at=updated_row.get("fetched_at"),
             )
         )
         updated_rows.append(updated_row)

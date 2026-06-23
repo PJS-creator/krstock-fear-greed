@@ -13,6 +13,7 @@ STATUS_LABELS = {
     "stale": "이전 가격 유지",
     "failed": "조회 실패",
     "missing": "가격 없음",
+    "missing_api_key": "API key 없음",
     "manual": "수동",
 }
 
@@ -23,6 +24,7 @@ def _quick_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
+                "market": row.get("market") or "US",
                 "ticker": row.get("ticker") or row.get("symbol"),
                 "quantity": row.get("quantity"),
             }
@@ -38,7 +40,7 @@ def _advanced_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
 
 def render_holdings_editor() -> None:
     st.subheader("빠른 입력")
-    st.caption("기본 입력은 ticker와 quantity만 사용합니다. 가격 조회는 아래 버튼이 아니라 상단의 가격 새로고침 버튼을 눌렀을 때만 실행됩니다.")
+    st.caption("market, ticker, quantity만 입력합니다. 미국은 US/USD, 국내는 KR/KRW로 처리하며 국내 ticker는 6자리 종목코드입니다. 가격 조회는 상단의 가격 새로고침 버튼을 눌렀을 때만 실행됩니다.")
     rows = st.session_state.get("holdings_rows", [])
     quick_frame = st.data_editor(
         _quick_frame(rows),
@@ -46,7 +48,8 @@ def render_holdings_editor() -> None:
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "ticker": st.column_config.TextColumn("ticker", required=True),
+            "market": st.column_config.SelectboxColumn("market", options=["US", "KR"], required=True, help="US는 미국 주식, KR은 국내 주식입니다."),
+            "ticker": st.column_config.TextColumn("ticker", required=True, help="국내 주식은 005930 같은 6자리 종목코드를 입력합니다."),
             "quantity": st.column_config.NumberColumn("quantity", min_value=0.0, step=0.0001, required=True),
         },
     )
@@ -94,6 +97,7 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
             {
                 "ticker": holding["ticker"],
                 "display_name": holding["display_name"],
+                "market": holding["market"],
                 "quantity": holding["quantity"],
                 "currency": holding["currency"],
                 "current_price": holding.get("current_price"),
