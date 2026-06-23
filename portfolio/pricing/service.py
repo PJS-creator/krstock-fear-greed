@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -119,16 +120,28 @@ def update_us_quotes(
     return updated_rows, statuses
 
 
+def _report_progress(
+    on_progress: Callable[[int, int, str], None] | None,
+    completed: int,
+    total: int,
+    symbol: str,
+) -> None:
+    if on_progress is not None:
+        on_progress(completed, total, symbol)
+
+
 def refresh_holding_quotes(
     rows: list[Mapping[str, Any]],
     provider: PriceProvider | None,
     *,
     cache: TTLQuoteCache | None = None,
+    on_progress: Callable[[int, int, str], None] | None = None,
 ) -> tuple[list[dict[str, object]], list[PriceUpdateStatus]]:
     normalized_rows = normalize_holding_rows(rows)
     quote_cache = cache or DEFAULT_QUOTE_CACHE
     updated_rows: list[dict[str, object]] = []
     statuses: list[PriceUpdateStatus] = []
+    total_rows = len(normalized_rows)
 
     for row in normalized_rows:
         updated_row = dict(row)
@@ -151,6 +164,7 @@ def refresh_holding_quotes(
                 )
             )
             updated_rows.append(updated_row)
+            _report_progress(on_progress, len(updated_rows), total_rows, symbol)
             continue
 
         if provider is None:
@@ -167,6 +181,7 @@ def refresh_holding_quotes(
                 )
             )
             updated_rows.append(updated_row)
+            _report_progress(on_progress, len(updated_rows), total_rows, symbol)
             continue
 
         try:
@@ -185,6 +200,7 @@ def refresh_holding_quotes(
                 )
             )
             updated_rows.append(updated_row)
+            _report_progress(on_progress, len(updated_rows), total_rows, symbol)
             continue
 
         status = QUOTE_STATUS_CACHED if was_cached else QUOTE_STATUS_UPDATED
@@ -204,6 +220,7 @@ def refresh_holding_quotes(
             )
         )
         updated_rows.append(updated_row)
+        _report_progress(on_progress, len(updated_rows), total_rows, symbol)
 
     return updated_rows, statuses
 
