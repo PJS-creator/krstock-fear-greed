@@ -20,9 +20,16 @@ def test_ticker_quantity_quick_rows_create_default_holding():
     assert rows[0]["avg_price"] is None
 
 
-def test_duplicate_ticker_is_rejected():
+def test_duplicate_market_ticker_is_rejected_but_same_ticker_across_markets_is_allowed():
     with pytest.raises(ValueError, match="duplicate ticker"):
         normalize_holding_rows([{"ticker": "AAA", "quantity": 1}, {"ticker": "aaa", "quantity": 2}])
+    rows = normalize_holding_rows(
+        [
+            {"market": "KR", "ticker": "005930", "quantity": 1},
+            {"market": "US", "ticker": "005930", "quantity": 2},
+        ]
+    )
+    assert [(row["market"], row["ticker"]) for row in rows] == [("KR", "005930"), ("US", "005930")]
 
 
 def test_invalid_ticker_and_quantity_are_rejected():
@@ -45,6 +52,14 @@ def test_merge_quick_rows_preserves_existing_quote_metadata():
     merged = merge_quick_rows_with_existing([{"ticker": "AAA", "quantity": 2}], existing)
 
     assert merged[0]["quantity"] == 2.0
+    assert merged[0]["current_price"] == 10.0
+
+
+def test_merge_quick_rows_can_add_to_existing_quantity():
+    existing = [{"ticker": "AAA", "quantity": 1, "current_price": 10}]
+    merged = merge_quick_rows_with_existing([{"ticker": "AAA", "quantity": 2}], existing, duplicate_policy="add")
+
+    assert merged[0]["quantity"] == 3.0
     assert merged[0]["current_price"] == 10.0
 
 

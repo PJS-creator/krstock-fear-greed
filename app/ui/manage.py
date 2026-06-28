@@ -15,6 +15,7 @@ from portfolio.storage import (
     deserialize_portfolio_payload_v2,
     serialize_portfolio_payload,
 )
+from .formatters import format_kst
 
 STORAGE_UNCONFIGURED_MESSAGE = "저장소가 설정되지 않아 CSV 방식만 사용할 수 있습니다"
 PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
@@ -101,12 +102,12 @@ def render_storage_tools(
         return
 
     with st.form("portfolio_save_form"):
-        portfolio_name = st.text_input("portfolio_name", value=st.session_state.get("portfolio_name", "main"))
+        portfolio_name = st.text_input("포트폴리오 이름", value=st.session_state.get("portfolio_name", "main"))
         submitted = st.form_submit_button("현재 포트폴리오 저장")
     if submitted:
         clean_name = str(portfolio_name or "").strip()
         if not clean_name:
-            st.error("portfolio_name을 입력하세요.")
+            st.error("포트폴리오 이름을 입력하세요.")
         else:
             try:
                 payload = serialize_portfolio_payload(
@@ -143,16 +144,36 @@ def render_storage_tools(
         st.info("저장된 포트폴리오가 없습니다.")
         return
 
-    labels = {f"{record.portfolio_name} ({(record.updated_at or record.created_at or '')[:10]})": record for record in records}
+    labels = {f"{record.portfolio_name} · {format_kst(record.updated_at or record.created_at, compact=True)}": record for record in records}
     selected_label = st.selectbox("저장된 포트폴리오", list(labels.keys()))
     selected = labels[selected_label]
     col1, col2 = st.columns(2)
-    if col1.button("선택 포트폴리오 불러오기"):
+    confirm_load = st.checkbox("현재 입력을 선택 포트폴리오로 교체 확인", key=f"load_{selected.portfolio_name}")
+    if col1.button("선택 포트폴리오 불러오기", disabled=not confirm_load):
         try:
             queue_portfolio_record_load(selected)
             st.rerun()
         except (PortfolioStoreError, ValueError) as exc:
             st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
+
+    with st.expander("포트폴리오 이름 변경", expanded=False):
+        new_name = st.text_input("새 이름", value=selected.portfolio_name, key=f"rename_{selected.portfolio_name}")
+        confirm_rename = st.checkbox("선택한 포트폴리오 이름 변경 확인", key=f"confirm_rename_{selected.portfolio_name}")
+        if st.button("이름 변경", disabled=not confirm_rename):
+            clean_name = str(new_name or "").strip()
+            if not clean_name:
+                st.error("새 이름을 입력하세요.")
+            else:
+                try:
+                    store.save_portfolio(owner_id, clean_name, selected.payload_json)
+                    if clean_name != selected.portfolio_name:
+                        store.delete_portfolio(owner_id, selected.portfolio_name)
+                    st.cache_data.clear()
+                    _queue_portfolio_name_update(clean_name)
+                    _set_storage_status(f"{selected.portfolio_name} → {clean_name} 이름을 변경했습니다.")
+                    st.rerun()
+                except PortfolioStoreError as exc:
+                    st.error(f"포트폴리오 이름을 변경할 수 없습니다: {exc}")
 
     confirm = st.checkbox("선택한 포트폴리오를 삭제합니다", key=f"delete_{selected.portfolio_name}")
     if col2.button("선택 포트폴리오 삭제", disabled=not confirm):

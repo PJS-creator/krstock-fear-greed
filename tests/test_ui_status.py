@@ -10,6 +10,7 @@ from app.ui.status import (
     parse_bulk_input,
     prepare_quick_input_records,
     present_diagnostic,
+    select_price_refresh_rows,
     split_diagnostics,
 )
 
@@ -50,9 +51,9 @@ def test_market_inference_and_quick_record_preparation_preserves_korea_code():
 
     records = prepare_quick_input_records([{"ticker": " 005930 ", "quantity": 10}, {"ticker": " mu ", "quantity": 20}])
 
-    assert records == [
-        {"market": "KR", "ticker": "005930", "quantity": 10},
-        {"market": "US", "ticker": "MU", "quantity": 20},
+    assert [(record["market"], record["ticker"], record["quantity"]) for record in records] == [
+        ("KR", "005930", 10.0),
+        ("US", "MU", 20.0),
     ]
 
 
@@ -61,7 +62,21 @@ def test_bulk_input_parsing_validation_and_duplicate_policy():
 
     assert {tuple(row[key] for key in ("market", "ticker")) for row in result.rows} == {("KR", "005930"), ("US", "MU")}
     assert next(row for row in result.rows if row["ticker"] == "MU")["quantity"] == 25
-    assert result.errors == ["4행: ticker와 quantity를 입력하세요"]
+    assert result.errors == ["4행: quantity must be a number"]
+
+
+def test_price_refresh_target_selection_modes():
+    rows = [
+        {"ticker": "A", "quote_status": "updated", "current_price": 1},
+        {"ticker": "B", "quote_status": "cached", "current_price": 2},
+        {"ticker": "C", "quote_status": "failed", "current_price": None},
+        {"ticker": "D", "quote_status": "manual", "current_price": 3},
+        {"ticker": "E", "quote_status": "missing", "current_price": None},
+    ]
+
+    assert [row["ticker"] for row in select_price_refresh_rows(rows, "미조회/오래된 가격만")] == ["C", "D", "E"]
+    assert [row["ticker"] for row in select_price_refresh_rows(rows, "실패 종목만")] == ["C"]
+    assert [row["ticker"] for row in select_price_refresh_rows(rows, "전체 강제 재조회")] == ["A", "B", "C", "D", "E"]
 
 
 def test_dirty_signature_is_stable_and_sensitive_to_portfolio_changes():

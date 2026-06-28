@@ -32,5 +32,6 @@ def test_kst_and_relative_time_formatting():
     captured = "2026-06-23T03:58:00+00:00"
     assert format_kst(captured) == "2026-06-23 12:58 KST"
     assert format_kst(captured, compact=True) == "06-23 12:58 KST"
+    assert format_kst(None, compact=True) == "미조회"
     now = datetime(2026, 6, 23, 4, 1, tzinfo=timezone.utc)
     assert format_relative_time(captured, now=now) == "3분 전"
