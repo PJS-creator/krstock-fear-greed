@@ -4,12 +4,22 @@ import pandas as pd
 import streamlit as st
 
 from portfolio.holdings import HOLDING_COLUMNS, PortfolioMetrics, merge_quick_rows_with_existing, normalize_holding_rows
+from portfolio.symbols import (
+    SIMPLE_PORTFOLIO_COLUMNS,
+    build_input_preview,
+    csv_to_rows,
+    load_korea_listing_records,
+    parse_symbol_quantity_lines,
+    preview_rows_to_holdings,
+    rows_to_csv,
+)
 
 from .formatters import format_kst, full_krw, percentage, signed_krw, signed_percentage
-from .status import ISSUE_STATUSES, parse_bulk_input, prepare_quick_input_records, quote_status_label
+from .status import ISSUE_STATUSES, quote_status_label
 from .theme import DIMENSIONS
 
-QUICK_EDITOR_COLUMNS = ["ticker", "quantity"]
+QUICK_EDITOR_COLUMNS = ["ticker_or_name", "quantity"]
+QUICK_PREVIEW_STATE_KEY = "quick_holdings_preview_rows"
 MARKET_LABELS = {"전체": None, "미국": "US", "국내": "KR"}
 STATUS_FILTERS = {
     "전체": None,
@@ -23,11 +33,23 @@ STATUS_FILTERS = {
 }
 
 
+@st.cache_data(ttl=60 * 60 * 12, show_spinner=False)
+def _cached_korea_listing_records() -> list[dict[str, str]]:
+    try:
+        import FinanceDataReader as fdr
+    except ImportError:
+        return []
+    try:
+        return load_korea_listing_records(fdr.StockListing)
+    except Exception:
+        return []
+
+
 def _quick_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=QUICK_EDITOR_COLUMNS)
     return pd.DataFrame(
-        [{"ticker": row.get("ticker") or row.get("symbol"), "quantity": row.get("quantity")} for row in rows],
+        [{"ticker_or_name": row.get("display_name") or row.get("ticker") or row.get("symbol"), "quantity": row.get("quantity")} for row in rows],
         columns=QUICK_EDITOR_COLUMNS,
     )
 
@@ -37,18 +59,72 @@ def _advanced_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
 
 
 def _preview_frame(records: list[dict[str, object]]) -> pd.DataFrame:
-    return pd.DataFrame(records, columns=["market", "ticker", "quantity"])
+    frame = pd.DataFrame(records, columns=["row_number", "raw_input", "ticker", "display_name", "market", "currency", "quantity", "status", "message"])
+    return frame.rename(
+        columns={
+            "row_number": "행",
+            "raw_input": "입력값",
+            "ticker": "티커",
+            "display_name": "표시명",
+            "market": "시장",
+            "currency": "통화",
+            "quantity": "수량",
+            "status": "상태",
+            "message": "메시지",
+        }
+    )
 
 
-def _apply_quick_records(records: list[dict[str, object]], existing_rows: list[dict[str, object]]) -> None:
-    st.session_state.holdings_rows = merge_quick_rows_with_existing(records, existing_rows)
+def _apply_quick_records(records: list[dict[str, object]], existing_rows: list[dict[str, object]], *, duplicate_policy: str) -> None:
+    st.session_state.holdings_rows = merge_quick_rows_with_existing(records, existing_rows, duplicate_policy=duplicate_policy)
+    st.session_state.pop(QUICK_PREVIEW_STATE_KEY, None)
     st.session_state.holdings_message = "입력값을 적용했습니다. 가격 새로고침 버튼을 눌러 최근 제공 가격을 갱신하세요."
     st.rerun()
 
 
+def _build_preview(rows: list[dict[str, object]]) -> None:
+    listing_records = _cached_korea_listing_records()
+    preview = build_input_preview(rows, korea_listing_records=listing_records)
+    st.session_state[QUICK_PREVIEW_STATE_KEY] = preview.rows
+    if preview.errors:
+        st.session_state.holdings_message = "\n".join(preview.errors)
+
+
+def _candidate_resolved_rows(preview_rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    resolved: list[dict[str, object]] = []
+    for row in preview_rows:
+        next_row = dict(row)
+        candidates = list(next_row.get("candidates") or [])
+        if next_row.get("status") == "candidate_required" and candidates:
+            labels = [f"{candidate['ticker']} · {candidate['display_name']}" for candidate in candidates]
+            selected_label = st.selectbox(f"{next_row.get('row_number')}행 후보 선택", labels, key=f"quick_candidate_{next_row.get('row_number')}")
+            selected = candidates[labels.index(selected_label)]
+            next_row.update(
+                {
+                    "ticker": selected["ticker"],
+                    "display_name": selected["display_name"],
+                    "market": selected["market"],
+                    "currency": selected["currency"],
+                    "status": "ok",
+                    "message": "선택한 후보를 적용합니다.",
+                }
+            )
+        resolved.append(next_row)
+    return resolved
+
+
+def _render_quality_summary(preview_rows: list[dict[str, object]]) -> None:
+    total = len(preview_rows)
+    ok = sum(1 for row in preview_rows if row.get("status") == "ok")
+    candidate = sum(1 for row in preview_rows if row.get("status") == "candidate_required")
+    error = sum(1 for row in preview_rows if row.get("status") == "error")
+    duplicate = len(preview_rows) - len({(row.get("market"), row.get("ticker")) for row in preview_rows if row.get("status") == "ok"})
+    st.caption(f"입력 {total}행 · 인식 성공 {ok} · 후보 선택 필요 {candidate} · 오류 {error} · 중복 {max(duplicate, 0)}")
+
+
 def render_holdings_editor() -> None:
     st.subheader("빠른 입력")
-    st.caption("ticker와 quantity만 입력해도 됩니다. 6자리 숫자는 국내 KR/KRW, 영문 ticker는 미국 US/USD로 추론합니다. 가격 조회는 자동 실행되지 않습니다.")
+    st.caption("종목명 또는 티커와 수량만 입력해도 됩니다. 국내 종목명은 KRX 목록에서 찾고, 가격 조회는 버튼을 눌렀을 때만 실행됩니다.")
     rows = st.session_state.get("holdings_rows", [])
     quick_frame = st.data_editor(
         _quick_frame(rows),
@@ -56,56 +132,53 @@ def render_holdings_editor() -> None:
         num_rows="dynamic",
         width="stretch",
         column_config={
-            "ticker": st.column_config.TextColumn("ticker", required=True, help="예: 005930, MU, GOOG"),
-            "quantity": st.column_config.NumberColumn("quantity", min_value=0.0, step=0.0001, required=True),
+            "ticker_or_name": st.column_config.TextColumn("종목명 또는 티커", required=True, help="예: 삼성전자, 005930, MU, QURE"),
+            "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, required=True),
         },
     )
-    prepared_records: list[dict[str, object]] = []
-    try:
-        prepared_records = prepare_quick_input_records(quick_frame.to_dict("records"))
-    except ValueError as exc:
-        st.warning(f"자동 추론을 확인하세요: {exc}")
+    duplicate_policy = st.radio("동일 종목 입력 처리", ["새 입력값으로 교체", "기존 수량에 합산"], horizontal=True, key="quick_duplicate_policy")
+    if st.button("입력 미리보기", type="primary"):
+        _build_preview(quick_frame.to_dict("records"))
 
-    if prepared_records:
-        st.caption("자동 추론 preview")
-        preview_frame = st.data_editor(
-            _preview_frame(prepared_records),
-            key="quick_holdings_preview",
-            num_rows="fixed",
-            width="stretch",
-            column_config={
-                "market": st.column_config.SelectboxColumn("market", options=["US", "KR"], required=True),
-                "ticker": st.column_config.TextColumn("ticker", required=True),
-                "quantity": st.column_config.NumberColumn("quantity", min_value=0.0, step=0.0001, required=True),
-            },
-        )
-    else:
-        preview_frame = pd.DataFrame(columns=["market", "ticker", "quantity"])
-
-    if st.button("입력 적용", type="primary"):
-        try:
-            _apply_quick_records(preview_frame.to_dict("records"), rows)
-        except ValueError as exc:
-            st.error(f"입력값을 적용할 수 없습니다: {exc}")
+    preview_rows = list(st.session_state.get(QUICK_PREVIEW_STATE_KEY, []))
+    if preview_rows:
+        st.caption("적용 전 미리보기")
+        preview_rows = _candidate_resolved_rows(preview_rows)
+        _render_quality_summary(preview_rows)
+        st.dataframe(_preview_frame(preview_rows), hide_index=True, width="stretch")
+        ok_rows = [row for row in preview_rows if row.get("status") == "ok"]
+        if st.button("오류 없는 행 적용", disabled=not ok_rows):
+            try:
+                _apply_quick_records(
+                    preview_rows_to_holdings(ok_rows),
+                    rows,
+                    duplicate_policy="add" if duplicate_policy == "기존 수량에 합산" else "replace",
+                )
+            except ValueError as exc:
+                st.error(f"입력값을 적용할 수 없습니다: {exc}")
 
     with st.expander("다중 붙여넣기", expanded=False):
-        bulk_text = st.text_area("한 줄에 ticker,quantity 형식으로 붙여넣기", placeholder="005930,10\nMU,20", height=110)
-        result = parse_bulk_input(bulk_text) if bulk_text.strip() else None
-        if result is not None:
-            if result.errors:
-                st.warning("\n".join(result.errors))
-            if result.rows:
-                st.caption("붙여넣기 preview")
-                st.dataframe(_preview_frame(result.rows), hide_index=True, width="stretch")
-            if st.button("붙여넣기 적용", disabled=not bool(result.rows)):
-                try:
-                    _apply_quick_records(result.rows, rows)
-                except ValueError as exc:
-                    st.error(f"붙여넣기 입력을 적용할 수 없습니다: {exc}")
+        bulk_text = st.text_area("한 줄에 종목명 또는 티커와 수량 붙여넣기", placeholder="삼성전자 10\n005930,10\nMU 20\nQURE,500", height=110)
+        if st.button("붙여넣기 미리보기", disabled=not bulk_text.strip()):
+            _build_preview(parse_symbol_quantity_lines(bulk_text))
+
+    with st.expander("CSV 업로드", expanded=False):
+        st.download_button(
+            "간편 CSV 템플릿",
+            data=rows_to_csv([{"ticker_or_name": "삼성전자", "quantity": "10"}, {"ticker_or_name": "MU", "quantity": "20"}], SIMPLE_PORTFOLIO_COLUMNS).encode("utf-8-sig"),
+            file_name="portfolio_simple_template.csv",
+            mime="text/csv",
+        )
+        uploaded = st.file_uploader("간편 CSV 업로드", type=["csv"], key="quick_simple_csv_upload")
+        if uploaded is not None and st.button("CSV 미리보기"):
+            _build_preview(csv_to_rows(uploaded.getvalue()))
 
     message = st.session_state.pop("holdings_message", None)
     if message:
-        st.toast(message)
+        if "\n" in message:
+            st.warning(message)
+        else:
+            st.toast(message)
 
     with st.expander("고급 설정", expanded=False):
         advanced = st.data_editor(
@@ -114,12 +187,16 @@ def render_holdings_editor() -> None:
             num_rows="dynamic",
             width="stretch",
             column_config={
-                "ticker": st.column_config.TextColumn("ticker", required=True),
-                "quantity": st.column_config.NumberColumn("quantity", min_value=0.0, step=0.0001, required=True),
-                "market": st.column_config.SelectboxColumn("market", options=["US", "KR"], required=True),
-                "currency": st.column_config.SelectboxColumn("currency", options=["USD", "KRW"], required=True),
-                "avg_price": st.column_config.NumberColumn("avg_price", min_value=0.0, step=0.01),
-                "target_weight": st.column_config.NumberColumn("target_weight", min_value=0.0, max_value=1.0, step=0.01),
+                "ticker": st.column_config.TextColumn("티커", required=True),
+                "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, required=True),
+                "market": st.column_config.SelectboxColumn("시장", options=["US", "KR"], required=True),
+                "currency": st.column_config.SelectboxColumn("통화", options=["USD", "KRW"], required=True),
+                "display_name": st.column_config.TextColumn("표시명"),
+                "account_name": st.column_config.TextColumn("계좌"),
+                "strategy_tag": st.column_config.TextColumn("전략 태그"),
+                "avg_price": st.column_config.NumberColumn("평균 매수가", min_value=0.0, step=0.01),
+                "target_weight": st.column_config.NumberColumn("목표 비중", min_value=0.0, max_value=1.0, step=0.01),
+                "note": st.column_config.TextColumn("메모"),
             },
         )
         if st.button("고급 설정 적용"):

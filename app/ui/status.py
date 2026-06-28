@@ -9,7 +9,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from portfolio.diagnostics import DiagnosticItem
-from portfolio.holdings import normalize_korea_ticker, normalize_ticker
+from portfolio.holdings import (
+    QUOTE_STATUS_FAILED,
+    QUOTE_STATUS_MANUAL,
+    QUOTE_STATUS_MISSING,
+    QUOTE_STATUS_MISSING_API_KEY,
+    QUOTE_STATUS_STALE,
+    normalize_korea_ticker,
+    normalize_ticker,
+)
+from portfolio.symbols import build_input_preview, parse_symbol_quantity_lines, preview_rows_to_holdings
 
 from .formatters import format_kst
 
@@ -24,6 +33,14 @@ STATUS_LABELS = {
 }
 
 ISSUE_STATUSES = {"stale", "failed", "missing", "missing_api_key"}
+DEFAULT_PRICE_REFRESH_STATUSES = {
+    "",
+    QUOTE_STATUS_MISSING,
+    QUOTE_STATUS_MISSING_API_KEY,
+    QUOTE_STATUS_FAILED,
+    QUOTE_STATUS_STALE,
+    QUOTE_STATUS_MANUAL,
+}
 PRIMARY_DIAGNOSTIC_KEYS = {
     "max_position_weight",
     "top3_weight",
@@ -102,6 +119,20 @@ def quote_status_label(status: object) -> str:
     return STATUS_LABELS.get(str(status or "").lower(), str(status or "미조회"))
 
 
+def select_price_refresh_rows(rows: Iterable[Mapping[str, Any]], mode: str) -> list[Mapping[str, Any]]:
+    all_rows = list(rows)
+    if mode == "실패 종목만":
+        return [row for row in all_rows if str(row.get("quote_status") or "").lower() == QUOTE_STATUS_FAILED]
+    if mode == "전체 강제 재조회":
+        return all_rows
+    return [
+        row
+        for row in all_rows
+        if str(row.get("quote_status") or "").lower() in DEFAULT_PRICE_REFRESH_STATUSES
+        or row.get("current_price") is None
+    ]
+
+
 def build_price_log_rows(statuses: Iterable[object], holdings_rows: Iterable[Mapping[str, Any]]) -> list[dict[str, object]]:
     holdings_by_ticker = {str(row.get("ticker") or row.get("symbol") or "").upper(): row for row in holdings_rows}
     rows: list[dict[str, object]] = []
@@ -135,51 +166,34 @@ def infer_market_from_ticker(value: object) -> str:
 
 
 def prepare_quick_input_records(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, object]]:
+    normalized_rows = [
+        {
+            "ticker_or_name": row.get("ticker_or_name") or row.get("ticker") or row.get("symbol"),
+            "quantity": row.get("quantity"),
+            "row_number": index,
+        }
+        for index, row in enumerate(rows, start=1)
+    ]
+    preview = build_input_preview(normalized_rows)
+    if preview.errors:
+        raise ValueError("; ".join(preview.errors))
     prepared: list[dict[str, object]] = []
     seen: set[tuple[str, str]] = set()
-    for index, row in enumerate(rows, start=1):
-        raw_ticker = row.get("ticker") or row.get("symbol")
-        if raw_ticker is None or str(raw_ticker).strip() == "":
-            continue
-        market = str(row.get("market") or infer_market_from_ticker(raw_ticker)).strip().upper()
-        if market == "KR":
-            ticker = normalize_korea_ticker(raw_ticker)
-        else:
-            market = "US"
-            ticker = normalize_ticker(raw_ticker)
-        key = (market, ticker)
+    for row in preview_rows_to_holdings(preview.rows):
+        key = (str(row["market"]), str(row["ticker"]))
         if key in seen:
-            raise ValueError(f"Row {index}: duplicate ticker: {market}/{ticker}")
+            raise ValueError(f"duplicate ticker: {key[0]}/{key[1]}")
         seen.add(key)
-        prepared.append({"market": market, "ticker": ticker, "quantity": row.get("quantity")})
+        prepared.append(row)
     return prepared
 
 
 def parse_bulk_input(text: str) -> BulkInputResult:
-    rows: list[dict[str, object]] = []
-    errors: list[str] = []
+    preview = build_input_preview(parse_symbol_quantity_lines(text))
     latest_by_key: dict[tuple[str, str], dict[str, object]] = {}
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = [part.strip() for part in re.split(r"[,\t ]+", line) if part.strip()]
-        if len(parts) != 2:
-            errors.append(f"{line_number}행: ticker와 quantity를 입력하세요")
-            continue
-        ticker_raw, quantity_raw = parts
-        try:
-            market = infer_market_from_ticker(ticker_raw)
-            ticker = normalize_korea_ticker(ticker_raw) if market == "KR" else normalize_ticker(ticker_raw)
-            quantity = float(quantity_raw)
-            if quantity < 0:
-                raise ValueError("quantity must be non-negative")
-        except ValueError as exc:
-            errors.append(f"{line_number}행: {exc}")
-            continue
-        latest_by_key[(market, ticker)] = {"market": market, "ticker": ticker, "quantity": quantity}
-    rows.extend(latest_by_key.values())
-    return BulkInputResult(rows=rows, errors=errors)
+    for row in preview_rows_to_holdings(preview.rows):
+        latest_by_key[(str(row["market"]), str(row["ticker"]))] = row
+    return BulkInputResult(rows=list(latest_by_key.values()), errors=preview.errors)
 
 
 def dirty_signature(payload: Mapping[str, Any]) -> str:

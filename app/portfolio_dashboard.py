@@ -27,7 +27,7 @@ from app.ui.manage import (
     render_storage_tools,
 )
 from app.ui.overview import render_overview
-from app.ui.status import aggregate_price_statuses, dirty_signature
+from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
 from app.ui.styles import inject_styles
 from portfolio.auth import (
     AppSecurityConfig,
@@ -40,7 +40,7 @@ from portfolio.auth import (
 from portfolio.history import build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
-from portfolio.pricing import build_alpha_vantage_provider, build_korea_quote_provider, refresh_holding_quotes, refresh_usd_krw
+from portfolio.pricing import TTLQuoteCache, build_alpha_vantage_provider, build_korea_quote_provider, refresh_holding_quotes, refresh_usd_krw
 from portfolio.storage import (
     PortfolioStoreError,
     build_supabase_store,
@@ -55,8 +55,10 @@ PORTFOLIO_NAME_INPUT_KEY = "portfolio_name_input"
 PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
 PENDING_PORTFOLIO_STATE_KEY = "pending_portfolio_state"
 SAVED_SIGNATURE_KEY = "saved_portfolio_signature"
+LAST_SAVED_STATE_KEY = "last_saved_portfolio_state"
 MARK_CLEAN_KEY = "mark_portfolio_clean"
 SAVE_STATUS_KEY = "portfolio_save_status_message"
+PRICE_REFRESH_MODE_KEY = "price_refresh_mode"
 UNPROTECTED_WARNING = "공개 앱에서 API key quota 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 
 
@@ -65,23 +67,39 @@ def _clean_portfolio_name(value: object) -> str:
 
 
 def _current_portfolio_signature() -> str:
-    return dirty_signature(
-        {
-            "portfolio_name": _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_KEY)),
-            "holdings_rows": st.session_state.get("holdings_rows", []),
-            "cash_krw": st.session_state.get("cash_krw", 0.0),
-            "cash_usd": st.session_state.get("cash_usd", 0.0),
-            "usd_krw": st.session_state.get("usd_krw", 1380.0),
-        }
-    )
+    return dirty_signature(_current_portfolio_state())
+
+
+def _current_portfolio_state() -> dict[str, object]:
+    return {
+        "portfolio_name": _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_KEY)),
+        "holdings_rows": st.session_state.get("holdings_rows", []),
+        "cash_krw": st.session_state.get("cash_krw", 0.0),
+        "cash_usd": st.session_state.get("cash_usd", 0.0),
+        "usd_krw": st.session_state.get("usd_krw", 1380.0),
+    }
 
 
 def _mark_portfolio_clean() -> None:
     st.session_state[SAVED_SIGNATURE_KEY] = _current_portfolio_signature()
+    st.session_state[LAST_SAVED_STATE_KEY] = _current_portfolio_state()
 
 
 def _portfolio_is_dirty() -> bool:
     return st.session_state.get(SAVED_SIGNATURE_KEY) != _current_portfolio_signature()
+
+
+def _restore_last_saved_state() -> None:
+    state = st.session_state.get(LAST_SAVED_STATE_KEY)
+    if not isinstance(state, dict):
+        return
+    st.session_state[PORTFOLIO_NAME_KEY] = _clean_portfolio_name(state.get("portfolio_name"))
+    st.session_state[PORTFOLIO_NAME_INPUT_KEY] = st.session_state[PORTFOLIO_NAME_KEY]
+    st.session_state.holdings_rows = list(state.get("holdings_rows") or [])
+    st.session_state.cash_krw = float(state.get("cash_krw") or 0.0)
+    st.session_state.cash_usd = float(state.get("cash_usd") or 0.0)
+    st.session_state.usd_krw = float(state.get("usd_krw") or 1380.0)
+    _mark_portfolio_clean()
 
 
 def _read_security_config() -> AppSecurityConfig:
@@ -143,6 +161,7 @@ def _initialize_session_state() -> None:
     st.session_state.setdefault("fx_fetched_at", None)
     st.session_state.setdefault("price_update_statuses", [])
     st.session_state.setdefault("last_price_refresh_at", None)
+    st.session_state.setdefault(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
     if st.session_state.pop(MARK_CLEAN_KEY, False) or SAVED_SIGNATURE_KEY not in st.session_state:
         _mark_portfolio_clean()
 
@@ -251,14 +270,24 @@ def _refresh_prices(config: AppSecurityConfig, owner_id, history_store) -> None:
         percent = int((completed / max(total, 1)) * 100)
         progress.progress(percent, text=f"최근 제공 가격 조회 중: {symbol} ({completed}/{total})")
 
+    all_rows = list(st.session_state.holdings_rows)
+    mode = st.session_state.get(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
+    target_rows = list(select_price_refresh_rows(all_rows, mode))
+    if not target_rows:
+        progress.empty()
+        st.info("새로 조회할 대상 종목이 없습니다.")
+        return
+
     updated_rows, statuses = refresh_holding_quotes(
-        st.session_state.holdings_rows,
+        target_rows,
         alpha_provider,
         korea_provider=korea_provider,
+        cache=TTLQuoteCache() if mode == "전체 강제 재조회" else None,
         on_progress=update_progress,
     )
     progress.empty()
-    st.session_state.holdings_rows = updated_rows
+    updated_by_key = {(str(row.get("market")), str(row.get("ticker"))): row for row in updated_rows}
+    st.session_state.holdings_rows = [updated_by_key.get((str(row.get("market")), str(row.get("ticker"))), row) for row in all_rows]
     st.session_state.price_update_statuses = statuses
     fetched_times = [status.fetched_at for status in statuses if status.fetched_at]
     if fetched_times:
@@ -308,7 +337,7 @@ def _render_saved_portfolio_selector(owner_id, store) -> None:
         st.caption("새 포트폴리오 이름 변경은 관리 탭에서 저장할 때 확정됩니다.")
         return
 
-    labels = {f"{record.portfolio_name} · {(record.updated_at or record.created_at or '')[:10] or '날짜 없음'}": record for record in records}
+    labels = {f"{record.portfolio_name} · {format_kst(record.updated_at or record.created_at, compact=True)}": record for record in records}
     current_name = _current_portfolio_name()
     selected_index = next((index for index, record in enumerate(labels.values()) if record.portfolio_name == current_name), 0)
     selected_label = st.selectbox("저장된 포트폴리오", list(labels.keys()), index=selected_index, key="sidebar_saved_portfolio")
@@ -331,19 +360,37 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store) -> None:
         _render_saved_portfolio_selector(owner_id, store)
         if _portfolio_is_dirty():
             st.caption("저장하지 않은 변경 있음")
+            if st.button("변경사항 되돌리기", width="stretch"):
+                _restore_last_saved_state()
+                st.rerun()
         else:
             st.caption("저장됨")
+        confirm_reset = st.checkbox("현재 입력 초기화 확인", key="confirm_reset_portfolio")
+        if st.button("현재 입력 초기화", disabled=not confirm_reset, width="stretch"):
+            st.session_state.holdings_rows = []
+            st.session_state.cash_krw = 0.0
+            st.session_state.cash_usd = 0.0
+            st.session_state.price_update_statuses = []
+            st.session_state.last_price_refresh_at = None
+            st.rerun()
         with st.expander("현금 및 환율", expanded=True):
-            st.number_input("KRW 현금", min_value=0.0, step=100000.0, key="cash_krw")
-            st.number_input("USD 현금", min_value=0.0, step=100.0, key="cash_usd")
-            st.number_input("USD/KRW", min_value=0.01, step=1.0, key="usd_krw")
-            if st.button("USD/KRW 환율 갱신"):
+            st.number_input("원화 현금", min_value=0.0, step=100000.0, key="cash_krw")
+            st.number_input("달러 현금", min_value=0.0, step=100.0, key="cash_usd")
+            st.number_input("환율", min_value=0.01, step=1.0, key="usd_krw", help="USD/KRW")
+            if st.button("환율 갱신"):
                 _refresh_fx(config)
             st.caption(st.session_state.fx_status_message)
             if st.session_state.fx_fetched_at:
                 st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
         with st.expander("데이터 정보", expanded=False):
             st.caption("미국 주식은 Alpha Vantage, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
+        with st.expander("가격 조회 옵션", expanded=False):
+            st.radio(
+                "가격 새로고침 대상",
+                ["미조회/오래된 가격만", "실패 종목만", "전체 강제 재조회"],
+                key=PRICE_REFRESH_MODE_KEY,
+                help="전체 강제 재조회는 현재 세션의 가격 캐시를 우회합니다.",
+            )
 
 
 def _render_header(config: AppSecurityConfig, owner_id, store, history_store, metrics) -> None:
@@ -364,6 +411,9 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
         st.caption("저장하지 않은 변경 있음" if dirty else "저장됨")
     with right:
         if st.button("가격 새로고침", type="primary", width="stretch"):
+            _refresh_prices(config, owner_id, history_store)
+        if summary.failed and st.button("실패 종목 다시 시도", width="stretch"):
+            st.session_state[PRICE_REFRESH_MODE_KEY] = "실패 종목만"
             _refresh_prices(config, owner_id, history_store)
         save_disabled = not dirty or owner_id is None or store is None
         if st.button("현재 포트폴리오 저장", disabled=save_disabled, width="stretch"):
@@ -411,6 +461,8 @@ with history_tab:
         portfolio_name=_current_portfolio_name(),
         history_store=history_store,
         historical_schedule_store=historical_schedule_store,
+        current_cash_krw=float(st.session_state.cash_krw),
+        current_cash_usd=float(st.session_state.cash_usd),
         current_usd_krw=float(st.session_state.usd_krw),
         is_authenticated=_is_authenticated(),
     )

@@ -6,6 +6,7 @@ import streamlit as st
 from portfolio.diagnostics import calculate_diagnostics
 from portfolio.history import PortfolioHistoryRecord
 from portfolio.holdings import PortfolioMetrics
+from portfolio.sample_data import sample_portfolio
 
 from .formatters import compact_krw, full_krw, percentage, signed_krw, signed_percentage
 from .status import aggregate_price_statuses, build_price_log_rows, present_diagnostic, quote_status_label, split_diagnostics
@@ -18,8 +19,37 @@ def render_plotly_chart(fig, *, key: str) -> None:
 
 def render_empty_portfolio() -> None:
     st.info(
-        "보유자산이 아직 없습니다. 보유자산 탭에서 ticker와 수량을 입력한 뒤 가격 새로고침을 누르고 포트폴리오를 저장하세요."
+        "보유자산이 아직 없습니다. 1) 보유자산 탭에서 종목명 또는 티커와 수량을 입력하고 2) 입력 미리보기 후 적용한 뒤 3) 가격 새로고침, 현금/환율 입력, 저장 순서로 진행하세요."
     )
+    st.caption("샘플은 기능 확인용 가상 데이터이며 실제 보유 내역이 아닙니다.")
+    if st.button("샘플 불러오기", key="load_sample_portfolio"):
+        positions, quotes, usd_krw, cash_krw = sample_portfolio()
+        rows = []
+        for position in positions:
+            quote = quotes.get((position.market, position.symbol))
+            rows.append(
+                {
+                    "market": position.market,
+                    "ticker": position.symbol,
+                    "display_name": position.name,
+                    "currency": position.currency,
+                    "quantity": position.quantity,
+                    "avg_price": position.avg_price,
+                    "target_weight": position.target_weight,
+                    "strategy_tag": position.strategy_tag,
+                    "account_name": position.account_name,
+                    "current_price": quote.price if quote else None,
+                    "previous_close": quote.previous_close if quote else None,
+                    "quote_status": "manual" if quote else "missing",
+                    "fetched_at": quote.fetched_at.isoformat() if quote else None,
+                    "provider": "sample",
+                }
+            )
+        st.session_state.holdings_rows = rows
+        st.session_state.cash_krw = cash_krw
+        st.session_state.cash_usd = 0.0
+        st.session_state.usd_krw = usd_krw
+        st.rerun()
 
 
 def _history_chart_data(records: list[PortfolioHistoryRecord] | None) -> list[float] | None:

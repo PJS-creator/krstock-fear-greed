@@ -33,6 +33,8 @@ def render_history_tab(
     portfolio_name: str,
     history_store: PortfolioHistoryStore | None,
     historical_schedule_store: HistoricalScheduleStore | None = None,
+    current_cash_krw: float = 0.0,
+    current_cash_usd: float = 0.0,
     current_usd_krw: float = 1380.0,
     is_authenticated: bool = False,
 ) -> None:
@@ -43,6 +45,8 @@ def render_history_tab(
         render_historical_reconstruction_tab(
             owner_id=owner_id,
             schedule_store=historical_schedule_store,
+            current_cash_krw=current_cash_krw,
+            current_cash_usd=current_cash_usd,
             current_usd_krw=current_usd_krw,
             is_authenticated=is_authenticated,
         )

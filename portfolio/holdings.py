@@ -214,16 +214,16 @@ def normalize_holding_row(row: Mapping[str, Any]) -> dict[str, object]:
 
 def normalize_holding_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, object]]:
     normalized_rows: list[dict[str, object]] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str]] = set()
     for index, row in enumerate(rows, start=1):
         try:
             normalized = normalize_holding_row(row)
         except ValueError as exc:
             raise ValueError(f"Row {index}: {exc}") from exc
-        ticker = str(normalized["ticker"])
-        if ticker in seen:
-            raise ValueError(f"Row {index}: duplicate ticker: {ticker}")
-        seen.add(ticker)
+        key = (str(normalized["market"]), str(normalized["ticker"]))
+        if key in seen:
+            raise ValueError(f"Row {index}: duplicate ticker: {key[0]}/{key[1]}")
+        seen.add(key)
         normalized_rows.append(normalized)
     return normalized_rows
 
@@ -231,22 +231,40 @@ def normalize_holding_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, 
 def merge_quick_rows_with_existing(
     quick_rows: Iterable[Mapping[str, Any]],
     existing_rows: Iterable[Mapping[str, Any]],
+    *,
+    duplicate_policy: str = "replace",
 ) -> list[dict[str, object]]:
-    existing_by_ticker = {str(row["ticker"]): row for row in normalize_holding_rows(existing_rows)}
-    merged_rows: list[dict[str, object]] = []
-    seen: set[str] = set()
+    if duplicate_policy not in {"replace", "add"}:
+        raise ValueError("duplicate_policy must be replace or add")
+    existing_normalized = normalize_holding_rows(existing_rows)
+    existing_by_key = {(str(row["market"]), str(row["ticker"])): row for row in existing_normalized}
+    incoming_by_key: dict[tuple[str, str], dict[str, object]] = {}
     for index, row in enumerate(quick_rows, start=1):
         market = _normalize_market(row.get("market"))
         ticker = _normalize_ticker_for_market(row.get("ticker") or row.get("symbol"), market)
-        if ticker in seen:
-            raise ValueError(f"Row {index}: duplicate ticker: {ticker}")
-        seen.add(ticker)
-        base = dict(existing_by_ticker.get(ticker, {}))
+        key = (market, ticker)
+        if key in incoming_by_key and duplicate_policy == "replace":
+            raise ValueError(f"Row {index}: duplicate ticker: {market}/{ticker}")
+        base = dict(existing_by_key.get(key, {}))
         base.update({"market": market, "ticker": ticker, "quantity": row.get("quantity")})
+        if duplicate_policy == "add" and key in existing_by_key:
+            base["quantity"] = float(existing_by_key[key].get("quantity") or 0) + parse_non_negative_float("quantity", row.get("quantity"))
+        if duplicate_policy == "add" and key in incoming_by_key:
+            base = dict(incoming_by_key[key])
+            base["quantity"] = float(base.get("quantity") or 0) + parse_non_negative_float("quantity", row.get("quantity"))
         if row.get("currency"):
             base["currency"] = row.get("currency")
-        merged_rows.append(normalize_holding_row(base))
-    return merged_rows
+        if row.get("display_name"):
+            base["display_name"] = row.get("display_name")
+            base["name"] = row.get("display_name")
+        incoming_by_key[key] = normalize_holding_row(base)
+
+    output: list[dict[str, object]] = []
+    for row in existing_normalized:
+        key = (str(row["market"]), str(row["ticker"]))
+        output.append(incoming_by_key.pop(key, row))
+    output.extend(incoming_by_key.values())
+    return output
 
 
 def holding_to_position(row: Mapping[str, Any]) -> Position:
