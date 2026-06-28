@@ -160,3 +160,6 @@ def test_reconstructed_holdings_area_uses_ticker_series():
 
     assert fig is not None
     assert {trace.name.split(" · ")[0] for trace in fig.data} == {"000660", "005930"}
+    assert "수량" in fig.data[0].hovertemplate
+    assert "종가" in fig.data[0].hovertemplate
+    assert fig.data[0].customdata[0][3].startswith("₩")

@@ -194,6 +194,7 @@ def reconstruct_historical_holdings(
     daily_rows: list[DailyValuationRow] = []
     holding_valuations: list[HoldingValuationRow] = []
     last_known_price: dict[tuple[str, str], tuple[float, date]] = {}
+    missing_price_symbols: set[tuple[str, str]] = set()
 
     for current in trading_dates:
         snapshot_date = _latest_date_on_or_before(snapshot_dates, current)
@@ -228,6 +229,7 @@ def reconstruct_historical_holdings(
 
             if price is None:
                 missing_count += 1
+                missing_price_symbols.add(key)
                 holding_valuations.append(
                     HoldingValuationRow(
                         date=current,
@@ -278,6 +280,14 @@ def reconstruct_historical_holdings(
                 applied_snapshot_date=snapshot_date,
             )
         )
+    for market, ticker in sorted(missing_price_symbols):
+        warnings.append(
+            ReconstructionWarning(
+                "missing_price_excluded",
+                f"{market}/{ticker} 가격이 없는 평가일은 해당 종목을 총자산에서 제외했습니다.",
+                ticker=ticker,
+            )
+        )
     return ReconstructionResult(daily_rows, holding_valuations, warnings, failed_tickers, snapshot_dates)
 
 
@@ -308,13 +318,28 @@ def build_ticker_value_series(result: ReconstructionResult, *, top_n: int = 8) -
     top = {ticker for ticker, _ in sorted(totals.items(), key=lambda item: item[1], reverse=True)[:top_n]}
     series: dict[tuple[date, str], float] = defaultdict(float)
     labels: dict[str, str] = {}
+    detail_by_key: dict[tuple[date, str], dict[str, object]] = {}
     for row in result.holding_rows:
         if row.market_value_krw is None:
             continue
         ticker = row.ticker if row.ticker in top else "기타"
         labels[ticker] = row.display_name if ticker != "기타" else "상위 외 종목"
         series[(row.date, ticker)] += row.market_value_krw
+        if ticker != "기타":
+            detail_by_key[(row.date, ticker)] = {
+                "quantity": row.quantity,
+                "close_price": row.close_price,
+                "currency": row.currency,
+            }
     return [
-        {"date": current.isoformat(), "ticker": ticker, "display_name": labels[ticker], "market_value_krw": value}
+        {
+            "date": current.isoformat(),
+            "ticker": ticker,
+            "display_name": labels[ticker],
+            "quantity": detail_by_key.get((current, ticker), {}).get("quantity"),
+            "close_price": detail_by_key.get((current, ticker), {}).get("close_price"),
+            "currency": detail_by_key.get((current, ticker), {}).get("currency"),
+            "market_value_krw": value,
+        }
         for (current, ticker), value in sorted(series.items())
     ]

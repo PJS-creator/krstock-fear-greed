@@ -201,6 +201,7 @@ def test_missing_price_is_not_counted_as_zero():
     assert result.daily_rows[0].position_value_krw == 80000
     assert result.daily_rows[0].missing_price_count == 1
     assert any(row.ticker == "000660" and row.market_value_krw is None for row in result.holding_rows)
+    assert any(warning.code == "missing_price_excluded" and warning.ticker == "000660" for warning in result.warnings)
 
 
 def test_forward_fill_uses_last_known_price_when_enabled():
@@ -269,7 +270,9 @@ def test_daily_and_holding_rows_export_and_chart_builders():
     assert daily_rows_as_dicts(result.daily_rows)[0]["date"] == "2026-06-01"
     assert holding_rows_as_dicts(result.holding_rows)[0]["ticker"] == "005930"
     assert build_snapshot_marker_rows(result)[0] == {"snapshot_date": "2026-06-01", "applied_date": "2026-06-01"}
-    assert any(row["ticker"] == "005930" for row in build_ticker_value_series(result))
+    series_row = next(row for row in build_ticker_value_series(result) if row["ticker"] == "005930")
+    assert series_row["quantity"] == 1
+    assert series_row["close_price"] == 80000
 
 
 def test_schedule_csv_round_trip_preserves_leading_zero():

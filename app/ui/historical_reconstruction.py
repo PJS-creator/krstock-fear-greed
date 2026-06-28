@@ -301,6 +301,7 @@ def _render_result(result: ReconstructionResult) -> None:
     cols[5].metric("가격 누락 종목", f"{len(missing_tickers)}개", help=", ".join(missing_tickers) or "없음", border=True)
     for warning in result.warnings:
         st.caption(f"{warning.message}")
+    st.caption("보유현황 변경일의 급격한 변화는 매매, 입출금, 종목 교체가 섞인 스냅샷 평가액 변화일 수 있으며 투자성과 수익률로 해석하지 않습니다.")
 
     include_cash = st.toggle("총자산 기준으로 보기", value=True, key="historical_include_cash")
     total_fig = plot_reconstructed_total_value(result, include_cash=include_cash)

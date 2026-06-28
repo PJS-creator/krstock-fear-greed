@@ -357,9 +357,19 @@ def plot_reconstructed_holdings_area(result: ReconstructionResult, *, top_n: int
     tickers = sorted({str(row["ticker"]) for row in rows}, key=lambda ticker: (ticker == "기타", ticker))
     value_by_key = {(str(row["date"]), str(row["ticker"])): float(row["market_value_krw"]) for row in rows}
     display_names = {str(row["ticker"]): str(row["display_name"]) for row in rows}
+    detail_by_key = {
+        (str(row["date"]), str(row["ticker"])): [
+            str(row["display_name"]),
+            "" if row.get("quantity") is None else f"{float(row['quantity']):,.4g}",
+            "" if row.get("close_price") is None else f"{float(row['close_price']):,.2f} {row.get('currency') or ''}".strip(),
+            full_krw(float(row["market_value_krw"])),
+        ]
+        for row in rows
+    }
     fig = go.Figure()
     for ticker in tickers:
         values = [value_by_key.get((current, ticker), 0.0) for current in dates]
+        customdata = [detail_by_key.get((current, ticker), [display_names.get(ticker, ticker), "", "", full_krw(0)]) for current in dates]
         fig.add_trace(
             go.Scatter(
                 x=dates,
@@ -368,7 +378,14 @@ def plot_reconstructed_holdings_area(result: ReconstructionResult, *, top_n: int
                 mode="lines",
                 stackgroup="one",
                 line=dict(width=0.8, color=SEMANTIC_COLORS["missing"] if ticker == "기타" else deterministic_color(ticker)),
-                hovertemplate=f"{ticker}<br>%{{x}}<br>평가액 ₩%{{y:,.0f}}<extra></extra>",
+                customdata=customdata,
+                hovertemplate=(
+                    f"{ticker} · %{{customdata[0]}}<br>"
+                    "%{x}<br>"
+                    "수량 %{customdata[1]}<br>"
+                    "종가 %{customdata[2]}<br>"
+                    "평가액 %{customdata[3]}<extra></extra>"
+                ),
             )
         )
     fig.update_layout(yaxis_title="KRW", xaxis_title="", legend=dict(orientation="h", yanchor="bottom", y=-0.24, x=0))
