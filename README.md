@@ -30,6 +30,7 @@ python main.py
 - v0.5: Supabase 저장/불러오기
 - v0.6: ticker/quantity 중심 빠른 입력, KRW/USD 현금, Supabase 자산 이력, Plotly 차트, 자산 진단
 - v0.7: FinanceDataReader 기반 국내 KR/KRW 종목 최근 제공 가격 갱신과 Professional UI/UX 정리
+- v0.8: 과거 보유현황 스냅샷 기반 자산추이 재구성
 
 ### 대시보드 의존성 설치
 
@@ -50,6 +51,58 @@ streamlit run app/portfolio_dashboard.py
 ```bash
 python app/simple_dashboard.py
 ```
+
+## v0.8 과거 보유현황 재구성
+
+**자산추이** 탭은 두 영역으로 나뉩니다.
+
+- **실제 기록**: Supabase에 저장된 실제 포트폴리오 snapshot 기록입니다.
+- **과거 보유현황 재구성**: 날짜별 전체 보유현황 snapshot과 현금 snapshot을 입력해 과거 일별 평가액을 다시 계산합니다.
+
+과거 보유현황 재구성은 거래내역 입력기가 아닙니다. 각 `as_of_date`는 그 날짜부터 다음 snapshot 전까지 유효한 **전체 보유현황**입니다. 예를 들어 2026-06-01 snapshot에 `005930`, `MU`가 있고 2026-06-10 snapshot에 `005930`만 있으면, 2026-06-10부터 `MU`는 더 이상 보유하지 않는 것으로 계산합니다.
+
+### 입력 컬럼
+
+보유현황 스케줄 CSV는 아래 컬럼을 사용합니다.
+
+```text
+as_of_date,market,ticker,quantity,display_name,currency,account_name,strategy_tag,note
+```
+
+현금/환율 스케줄 CSV는 아래 컬럼을 사용합니다.
+
+```text
+as_of_date,cash_krw,cash_usd,usd_krw
+```
+
+`market`은 `KR` 또는 `US`입니다. `market`과 `currency`를 비워 두면 6자리 숫자 ticker는 `KR/KRW`, 영문 ticker는 `US/USD`로 추론합니다. 국내 종목코드는 `005930`처럼 6자리 문자열로 유지합니다.
+
+### 사용 순서
+
+1. Streamlit Cloud Secrets에 `APP_PASSWORD`가 설정되어 있어야 합니다.
+2. 앱에서 로그인합니다. `APP_AUTH_SCOPE = "manual"`인 경우에도 이 기능은 인증 후 사용할 수 있습니다.
+3. **자산추이 → 과거 보유현황 재구성**을 엽니다.
+4. 화면 표에 직접 입력하거나 CSV 템플릿을 내려받아 작성한 뒤 업로드합니다.
+5. 시작일과 종료일을 확인합니다.
+6. 필요하면 **고급 설정**에서 “가격이 없는 날짜에 전일 종가 forward-fill 사용”을 켭니다.
+7. **재구성 실행**을 누릅니다.
+8. 결과 KPI, 총자산 차트, 종목별 stacked chart, 일별 상세표를 확인합니다.
+9. 필요하면 일별 평가 CSV와 종목별 평가 CSV를 내려받습니다.
+
+Supabase v0.8 migration을 실행한 경우 **현재 스케줄 저장**, **선택 스케줄 불러오기**, **선택 스케줄 삭제**를 사용할 수 있습니다. migration을 아직 실행하지 않았거나 Supabase Secrets가 없으면 저장/불러오기는 비활성화되고 CSV 방식만 사용할 수 있습니다.
+
+### 계산 규칙
+
+- 가격 데이터는 FinanceDataReader의 `Close` 컬럼을 사용합니다.
+- 미국 주식의 과거 가격도 Alpha Vantage historical API가 아니라 FinanceDataReader를 기본값으로 사용합니다.
+- 평가일은 조회된 실제 거래일 기준입니다. 비거래일에 입력한 snapshot은 다음 거래일에 적용되고 화면에 안내가 표시됩니다.
+- 가격 조회 실패 또는 누락 가격은 0원으로 계산하지 않습니다. 해당 종목은 그 날짜의 합계에서 제외하고 누락으로 표시합니다.
+- USD 종목과 USD 현금은 `cash` snapshot의 `usd_krw`, FinanceDataReader 환율, 현재 세션의 USD/KRW 순서로 환산합니다.
+- 결과의 변화율은 입력 snapshot과 가격 데이터 기준 평가액 변화입니다. 외부 입출금과 거래내역을 분리한 투자성과 수익률이 아닙니다.
+
+### 데이터 소스 제한
+
+FinanceDataReader는 무료 데이터 소스에 의존합니다. 데이터 구조 변경, 일시 차단, 특정 ticker 누락, 환율 누락이 발생할 수 있습니다. 장기간·다종목 재구성은 느릴 수 있어 Streamlit cache를 사용하며, 필요할 때 **가격 데이터 캐시 비우기** 또는 **가격 데이터 캐시 무시하고 재조회**를 사용합니다.
 
 ## v0.7 사용법
 
@@ -213,20 +266,23 @@ Supabase 설정이 없으면 다음 안내가 표시되고 CSV 방식은 계속 
 
 ## Supabase 설정
 
-이번 UI/UX 변경에는 새 Supabase migration이 필요하지 않습니다. 기존 v0.5 저장 테이블과 v0.6 자산 이력 테이블을 그대로 사용합니다.
+v0.8 과거 보유현황 스케줄 저장/불러오기를 사용하려면 새 Supabase migration을 한 번 실행해야 합니다. 기존 v0.5 저장 테이블과 v0.6 자산 이력 테이블은 그대로 유지합니다.
 
 처음 설정하는 경우:
 
 1. Supabase 프로젝트를 만듭니다.
 2. Supabase **SQL Editor**에서 `docs/supabase_schema.sql` 파일의 내용을 복사해 실행합니다.
 3. 이어서 `docs/supabase_migration_v0_6.sql` 파일의 내용을 복사해 실행합니다.
-4. Streamlit Cloud **App settings → Secrets**에 아래 값을 추가합니다.
+4. 이어서 `docs/supabase_migration_v0_8_historical_holdings.sql` 파일의 내용을 복사해 실행합니다.
+5. Streamlit Cloud **App settings → Secrets**에 아래 값을 추가합니다.
 
 이미 v0.6까지 설정한 경우:
 
 1. 기존 `portfolio_snapshots`와 자산 이력 테이블은 유지합니다.
-2. 이번 UI 변경을 위해 SQL을 추가 실행할 필요는 없습니다.
+2. Supabase **SQL Editor**에서 `docs/supabase_migration_v0_8_historical_holdings.sql` 파일의 내용을 복사해 실행합니다.
 3. Streamlit Cloud 앱을 **Reboot** 또는 **Redeploy**합니다.
+
+SQL Editor에는 `docs/supabase_migration_v0_8_historical_holdings.sql` 같은 파일 경로를 입력하지 않습니다. GitHub에서 해당 파일을 열고 SQL 전체 내용을 복사한 뒤 Supabase SQL Editor 입력창에 붙여넣고 **Run**을 누릅니다.
 
 Streamlit Secrets 예시는 다음과 같습니다. 실제 값을 GitHub에 넣지 마세요.
 
@@ -240,6 +296,8 @@ PORTFOLIO_OWNER_ID = "jisung-main"
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY`는 Supabase 데이터에 강한 권한을 가진 비밀키입니다. 절대 GitHub 코드, README, 이슈, PR 댓글, `.env`, `.streamlit/secrets.toml`에 커밋하거나 붙여넣지 마세요. Streamlit Cloud Secrets 화면에만 입력합니다.
+
+v0.8 과거 보유현황 재구성을 위해 새 Secret은 추가하지 않습니다. Supabase 스케줄 저장/불러오기는 기존 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `PORTFOLIO_OWNER_ID`를 그대로 사용합니다.
 
 ## 저장 데이터 호환
 

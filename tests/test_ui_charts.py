@@ -1,7 +1,15 @@
+from portfolio.historical_holdings import reconstruct_historical_holdings
 from portfolio.history.models import PortfolioHistoryRecord
 from portfolio.holdings import build_portfolio_metrics
 
-from app.ui.charts import plot_allocation, plot_contribution, plot_currency_exposure, plot_total_value_history
+from app.ui.charts import (
+    plot_allocation,
+    plot_contribution,
+    plot_currency_exposure,
+    plot_reconstructed_holdings_area,
+    plot_reconstructed_total_value,
+    plot_total_value_history,
+)
 from app.ui.theme import SEMANTIC_COLORS, deterministic_color
 
 
@@ -37,6 +45,32 @@ def _history_record(captured_at: str, total: float) -> PortfolioHistoryRecord:
         stale_quote_count=0,
         payload_json={},
         fingerprint=captured_at,
+    )
+
+
+def _reconstruction_result():
+    from datetime import date
+
+    class Provider:
+        def get_close_prices(self, *, market, ticker, start_date, end_date):
+            del market, start_date, end_date
+            if ticker == "005930":
+                return {date(2026, 6, 1): 80000, date(2026, 6, 2): 81000}
+            return {date(2026, 6, 2): 280000}
+
+        def get_usd_krw_rates(self, *, start_date, end_date):
+            del start_date, end_date
+            return {}
+
+    return reconstruct_historical_holdings(
+        [
+            {"as_of_date": "2026-06-01", "ticker": "005930", "quantity": 10},
+            {"as_of_date": "2026-06-02", "ticker": "005930", "quantity": 5},
+            {"as_of_date": "2026-06-02", "ticker": "000660", "quantity": 1},
+        ],
+        [{"as_of_date": "2026-06-01", "cash_krw": 100000}],
+        Provider(),
+        end_date="2026-06-02",
     )
 
 
@@ -110,3 +144,19 @@ def test_history_chart_uses_kst_hover_data():
     assert fig.layout.hovermode == "x unified"
     assert fig.data[0].customdata[0][0] == "2026-06-23 09:00 KST"
     assert "USD/KRW" in fig.data[0].hovertemplate
+
+
+def test_reconstructed_total_chart_has_snapshot_markers_and_hover_context():
+    fig = plot_reconstructed_total_value(_reconstruction_result())
+
+    assert fig is not None
+    assert fig.layout.hovermode == "x unified"
+    assert fig.layout.shapes
+    assert "적용 스냅샷" in fig.data[0].hovertemplate
+
+
+def test_reconstructed_holdings_area_uses_ticker_series():
+    fig = plot_reconstructed_holdings_area(_reconstruction_result())
+
+    assert fig is not None
+    assert {trace.name.split(" · ")[0] for trace in fig.data} == {"000660", "005930"}

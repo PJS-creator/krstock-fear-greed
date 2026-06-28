@@ -39,6 +39,7 @@ from portfolio.auth import (
 )
 from portfolio.history import build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
+from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
 from portfolio.pricing import build_alpha_vantage_provider, build_korea_quote_provider, refresh_holding_quotes, refresh_usd_krw
 from portfolio.storage import (
     PortfolioStoreError,
@@ -187,12 +188,16 @@ def _render_security_status(config: AppSecurityConfig) -> None:
 
 def _build_stores(storage_config):
     if not should_enable_storage(storage_config):
-        return None, None
+        return None, None, None
     try:
-        return build_supabase_store(storage_config), build_supabase_history_store(storage_config)
-    except (PortfolioStoreError, RuntimeError) as exc:
+        return (
+            build_supabase_store(storage_config),
+            build_supabase_history_store(storage_config),
+            build_supabase_historical_schedule_store(storage_config),
+        )
+    except (PortfolioStoreError, HistoricalScheduleStoreError, RuntimeError) as exc:
         st.sidebar.warning(f"Supabase 저장소를 초기화할 수 없습니다: {exc}")
-        return None, None
+        return None, None, None
 
 
 def _current_metrics():
@@ -383,7 +388,7 @@ if should_lock_entire_app(security_config, is_authenticated=_is_authenticated())
     _render_login_form(security_config)
 
 storage_config = _read_storage_config()
-portfolio_store, history_store = _build_stores(storage_config)
+portfolio_store, history_store, historical_schedule_store = _build_stores(storage_config)
 owner_id = storage_config.owner_id if should_enable_storage(storage_config) else None
 _render_sidebar(security_config, owner_id, portfolio_store)
 _render_security_status(security_config)
@@ -401,7 +406,14 @@ with holdings_tab:
     metrics = _current_metrics()
     render_holdings_table(metrics)
 with history_tab:
-    render_history_tab(owner_id=owner_id, portfolio_name=_current_portfolio_name(), history_store=history_store)
+    render_history_tab(
+        owner_id=owner_id,
+        portfolio_name=_current_portfolio_name(),
+        history_store=history_store,
+        historical_schedule_store=historical_schedule_store,
+        current_usd_krw=float(st.session_state.usd_krw),
+        is_authenticated=_is_authenticated(),
+    )
 with manage_tab:
     render_csv_tools()
     metrics = _current_metrics()

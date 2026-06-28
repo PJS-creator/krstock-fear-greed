@@ -6,6 +6,7 @@ from typing import Iterable
 import plotly.graph_objects as go
 
 from portfolio.chart_data import currency_exposure_frame
+from portfolio.historical_holdings import ReconstructionResult, build_ticker_value_series
 from portfolio.history import HistoryPeriod, PortfolioHistoryRecord, period_start
 from portfolio.holdings import PortfolioMetrics
 
@@ -299,3 +300,79 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
     fig.update_layout(yaxis_title="KRW", xaxis_title="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
     fig.update_yaxes(tickformat=",.0f")
     return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
+
+
+def plot_reconstructed_total_value(result: ReconstructionResult, *, include_cash: bool = True) -> go.Figure | None:
+    if not result.daily_rows:
+        return None
+    x_values = [row.date for row in result.daily_rows]
+    y_values = [row.total_value_krw if include_cash else row.position_value_krw for row in result.daily_rows]
+    customdata = [
+        [
+            row.date.isoformat(),
+            full_krw(row.total_value_krw),
+            full_krw(row.position_value_krw),
+            full_krw(row.cash_total_krw),
+            f"{row.usd_krw:,.2f}",
+            row.applied_snapshot_date.isoformat(),
+            row.priced_count,
+            row.missing_price_count,
+        ]
+        for row in result.daily_rows
+    ]
+    fig = go.Figure(
+        go.Scatter(
+            x=x_values,
+            y=y_values,
+            name="총자산" if include_cash else "투자자산",
+            mode="lines+markers" if len(x_values) <= 12 else "lines",
+            line=dict(color=SEMANTIC_COLORS["primary"], width=2.4),
+            marker=dict(size=6 if len(x_values) <= 12 else 0),
+            fill="tozeroy",
+            fillcolor="rgba(37,99,235,0.12)",
+            customdata=customdata,
+            hovertemplate=(
+                "%{customdata[0]}<br>"
+                "총자산 %{customdata[1]}<br>"
+                "투자자산 %{customdata[2]}<br>"
+                "현금 %{customdata[3]}<br>"
+                "USD/KRW %{customdata[4]}<br>"
+                "적용 스냅샷 %{customdata[5]}<br>"
+                "평가 가능 %{customdata[6]} · 가격 누락 %{customdata[7]}<extra></extra>"
+            ),
+        )
+    )
+    for marker in sorted({row.applied_snapshot_date for row in result.daily_rows}):
+        fig.add_vline(x=marker, line_color="rgba(217,119,6,0.55)", line_width=1, line_dash="dot")
+    fig.update_layout(yaxis_title="KRW", xaxis_title="", legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
+    fig.update_yaxes(tickformat=",.0f")
+    return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
+
+
+def plot_reconstructed_holdings_area(result: ReconstructionResult, *, top_n: int = 8) -> go.Figure | None:
+    rows = build_ticker_value_series(result, top_n=top_n)
+    if not rows:
+        return None
+    dates = sorted({row["date"] for row in rows})
+    tickers = sorted({str(row["ticker"]) for row in rows}, key=lambda ticker: (ticker == "기타", ticker))
+    value_by_key = {(str(row["date"]), str(row["ticker"])): float(row["market_value_krw"]) for row in rows}
+    display_names = {str(row["ticker"]): str(row["display_name"]) for row in rows}
+    fig = go.Figure()
+    for ticker in tickers:
+        values = [value_by_key.get((current, ticker), 0.0) for current in dates]
+        fig.add_trace(
+            go.Scatter(
+                x=dates,
+                y=values,
+                name=f"{ticker} · {display_names.get(ticker, ticker)}",
+                mode="lines",
+                stackgroup="one",
+                line=dict(width=0.8, color=SEMANTIC_COLORS["missing"] if ticker == "기타" else deterministic_color(ticker)),
+                hovertemplate=f"{ticker}<br>%{{x}}<br>평가액 ₩%{{y:,.0f}}<extra></extra>",
+            )
+        )
+    fig.update_layout(yaxis_title="KRW", xaxis_title="", legend=dict(orientation="h", yanchor="bottom", y=-0.24, x=0))
+    fig.update_yaxes(tickformat=",.0f")
+    fig = apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
+    fig.update_layout(margin=dict(l=20, r=20, t=28, b=80))
+    return fig
