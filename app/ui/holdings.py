@@ -31,6 +31,18 @@ STATUS_FILTERS = {
     "미조회": "missing",
     "수동": "manual",
 }
+ADVANCED_TEXT_COLUMNS = [
+    "ticker",
+    "market",
+    "currency",
+    "display_name",
+    "account_name",
+    "strategy_tag",
+    "note",
+    "quote_status",
+    "fetched_at",
+    "provider",
+]
 
 
 @st.cache_data(ttl=60 * 60 * 12, show_spinner=False)
@@ -55,7 +67,11 @@ def _quick_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
 
 
 def _advanced_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
-    return pd.DataFrame(rows, columns=HOLDING_COLUMNS)
+    frame = pd.DataFrame(rows, columns=HOLDING_COLUMNS)
+    for column in ADVANCED_TEXT_COLUMNS:
+        if column in frame.columns:
+            frame[column] = frame[column].fillna("").astype(str)
+    return frame
 
 
 def _preview_frame(records: list[dict[str, object]]) -> pd.DataFrame:
