@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import streamlit as st
 
+from portfolio.historical_holdings import HistoricalScheduleStore
 from portfolio.history import HistoryPeriod, PortfolioHistoryRecord, PortfolioHistoryStore, PortfolioHistoryStoreError
 
 from .charts import plot_total_value_history
 from .components import render_plotly_chart
+from .historical_reconstruction import render_historical_reconstruction_tab
 
 PERIOD_OPTIONS: dict[str, HistoryPeriod] = {
     "1주": "1w",
@@ -26,6 +28,27 @@ def _list_history_cached(
 
 
 def render_history_tab(
+    *,
+    owner_id: str | None,
+    portfolio_name: str,
+    history_store: PortfolioHistoryStore | None,
+    historical_schedule_store: HistoricalScheduleStore | None = None,
+    current_usd_krw: float = 1380.0,
+    is_authenticated: bool = False,
+) -> None:
+    actual_tab, reconstructed_tab = st.tabs(["실제 기록", "과거 보유현황 재구성"])
+    with actual_tab:
+        _render_actual_history(owner_id=owner_id, portfolio_name=portfolio_name, history_store=history_store)
+    with reconstructed_tab:
+        render_historical_reconstruction_tab(
+            owner_id=owner_id,
+            schedule_store=historical_schedule_store,
+            current_usd_krw=current_usd_krw,
+            is_authenticated=is_authenticated,
+        )
+
+
+def _render_actual_history(
     *,
     owner_id: str | None,
     portfolio_name: str,
