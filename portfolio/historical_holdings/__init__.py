@@ -23,6 +23,14 @@ from .normalization import (
     normalize_holding_snapshots,
     rows_to_csv,
 )
+from .linking import (
+    current_cash_to_historical_snapshot,
+    current_holdings_to_historical_snapshot,
+    historical_cash_to_current_cash,
+    historical_snapshot_to_current_holdings,
+    upsert_cash_snapshot,
+    upsert_historical_snapshot,
+)
 from .price_provider import FinanceDataReaderHistoricalPriceProvider, HistoricalPriceProvider
 from .reconstruction import (
     build_snapshot_marker_rows,
@@ -65,9 +73,13 @@ __all__ = [
     "build_ticker_value_series",
     "cash_snapshots_to_dicts",
     "cash_template_csv",
+    "current_cash_to_historical_snapshot",
+    "current_holdings_to_historical_snapshot",
     "csv_to_rows",
     "daily_rows_as_dicts",
     "deserialize_schedule_payload",
+    "historical_cash_to_current_cash",
+    "historical_snapshot_to_current_holdings",
     "holding_rows_as_dicts",
     "holding_snapshots_to_dicts",
     "holding_template_csv",
@@ -77,4 +89,6 @@ __all__ = [
     "reconstruct_historical_holdings",
     "rows_to_csv",
     "serialize_schedule_payload",
+    "upsert_cash_snapshot",
+    "upsert_historical_snapshot",
 ]
