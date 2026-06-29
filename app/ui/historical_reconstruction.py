@@ -18,9 +18,13 @@ from portfolio.historical_holdings import (
     HistoricalScheduleStoreError,
     ReconstructionResult,
     cash_template_csv,
+    current_cash_to_historical_snapshot,
+    current_holdings_to_historical_snapshot,
     csv_to_rows,
     daily_rows_as_dicts,
     deserialize_schedule_payload,
+    historical_cash_to_current_cash,
+    historical_snapshot_to_current_holdings,
     holding_rows_as_dicts,
     holding_template_csv,
     normalize_cash_snapshots,
@@ -28,6 +32,8 @@ from portfolio.historical_holdings import (
     reconstruct_historical_holdings,
     rows_to_csv,
     serialize_schedule_payload,
+    upsert_cash_snapshot,
+    upsert_historical_snapshot,
 )
 from portfolio.historical_holdings.price_provider import HistoricalPriceProvider
 from portfolio.symbols import (
@@ -65,6 +71,8 @@ RESULT_STATE_KEY = "historical_reconstruction_result"
 RESULT_SIGNATURE_KEY = "historical_reconstruction_signature"
 SCHEDULE_NAME_KEY = "historical_schedule_name"
 NOTES_KEY = "historical_schedule_notes"
+LINK_MESSAGE_KEY = "historical_current_portfolio_link_message"
+PENDING_PORTFOLIO_STATE_KEY = "pending_portfolio_state"
 DEFAULT_HOLDING_ROWS = [
     {column: "" for column in HOLDINGS_COLUMNS},
 ]
@@ -159,6 +167,10 @@ def _rows_from_editor(value: Any) -> list[dict[str, Any]]:
 def _replace_schedule_rows(holdings: list[dict[str, Any]], cash: list[dict[str, Any]]) -> None:
     st.session_state[HOLDINGS_STATE_KEY] = list(holdings)
     st.session_state[CASH_STATE_KEY] = list(cash)
+    _clear_schedule_edit_state()
+
+
+def _clear_schedule_edit_state() -> None:
     st.session_state.pop(HOLDINGS_EDITOR_KEY, None)
     st.session_state.pop(CASH_EDITOR_KEY, None)
     st.session_state.pop(SIMPLE_EDITOR_KEY, None)
@@ -410,6 +422,104 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
             st.success("과거 보유현황 스케줄을 저장했습니다.")
         except (HistoricalScheduleStoreError, HistoricalHoldingsError) as exc:
             st.error(f"스케줄을 저장할 수 없습니다: {exc}")
+
+
+def _render_current_portfolio_link_controls(
+    *,
+    holding_rows: list[dict[str, Any]],
+    cash_rows: list[dict[str, Any]],
+    current_holdings_rows: list[dict[str, Any]],
+    current_cash_krw: float,
+    current_cash_usd: float,
+    current_usd_krw: float,
+) -> None:
+    st.subheader("현재 포트폴리오 연동")
+    message = st.session_state.pop(LINK_MESSAGE_KEY, None)
+    if message:
+        st.success(message)
+    st.caption(
+        "과거 재구성 입력과 현재 보유자산은 자동으로 덮어쓰지 않습니다. 아래 버튼으로 적용 방향을 직접 선택하세요."
+    )
+
+    latest_snapshot_date: date | None = None
+    latest_current_rows: list[dict[str, object]] = []
+    latest_error: str | None = None
+    try:
+        latest_snapshot_date, latest_current_rows = historical_snapshot_to_current_holdings(holding_rows)
+    except HistoricalHoldingsError as exc:
+        latest_error = str(exc)
+
+    import_col, apply_col = st.columns(2)
+    with import_col:
+        st.markdown("**현재 보유자산 → 과거 스케줄**")
+        st.caption("현재 보유자산과 현금/환율을 선택한 기준일의 과거 보유현황으로 추가하거나 교체합니다.")
+        snapshot_date = st.date_input("현재 보유자산을 넣을 기준일", value=date.today(), key="current_to_historical_date")
+        confirm_import = st.checkbox("현재 보유자산을 과거 스케줄에 반영 확인", key="confirm_current_to_historical")
+        if st.button(
+            "현재 보유자산을 과거 스케줄에 반영",
+            disabled=not current_holdings_rows or not confirm_import,
+            width="stretch",
+        ):
+            try:
+                snapshot_rows = current_holdings_to_historical_snapshot(current_holdings_rows, snapshot_date)
+                cash_snapshot = current_cash_to_historical_snapshot(
+                    as_of_date=snapshot_date,
+                    cash_krw=current_cash_krw,
+                    cash_usd=current_cash_usd,
+                    usd_krw=current_usd_krw,
+                )
+                st.session_state[HOLDINGS_STATE_KEY] = upsert_historical_snapshot(holding_rows, snapshot_rows)
+                st.session_state[CASH_STATE_KEY] = upsert_cash_snapshot(cash_rows, cash_snapshot)
+                _clear_schedule_edit_state()
+                st.session_state[LINK_MESSAGE_KEY] = f"{snapshot_date.isoformat()} 기준으로 현재 보유자산을 과거 스케줄에 반영했습니다."
+                st.rerun()
+            except (ValueError, HistoricalHoldingsError) as exc:
+                st.error(f"현재 보유자산을 과거 스케줄에 반영할 수 없습니다: {exc}")
+        if not current_holdings_rows:
+            st.info("현재 보유자산이 비어 있어 추가할 수 없습니다.")
+
+    with apply_col:
+        st.markdown("**과거 스케줄 → 현재 보유자산**")
+        if latest_snapshot_date is None:
+            st.caption("적용할 수 있는 과거 보유현황이 아직 없습니다.")
+            if latest_error:
+                st.caption(latest_error)
+        else:
+            st.caption(f"최신 기준일 {latest_snapshot_date.isoformat()} · {len(latest_current_rows)}종목을 현재 포트폴리오로 가져옵니다.")
+            cash_match = historical_cash_to_current_cash(cash_rows, as_of_date=latest_snapshot_date, current_usd_krw=current_usd_krw)
+            if cash_match is None:
+                st.caption("현금/환율 스케줄이 없으면 현재 사이드바 현금/환율은 유지됩니다.")
+            else:
+                cash_date, cash_state = cash_match
+                st.caption(
+                    f"현금/환율은 {cash_date.isoformat()} 기준 값을 함께 적용합니다: "
+                    f"원화 {cash_state['cash_krw']:,.0f}, 달러 {cash_state['cash_usd']:,.2f}, 환율 {cash_state['usd_krw']:,.2f}"
+                )
+            confirm_apply = st.checkbox("최신 과거 보유현황을 현재 포트폴리오로 적용 확인", key="confirm_historical_to_current")
+            if st.button("최신 기준일을 현재 포트폴리오로 적용", disabled=not confirm_apply, width="stretch"):
+                pending_state: dict[str, Any] = {
+                    "holdings_rows": latest_current_rows,
+                    "price_update_statuses": [],
+                    "last_price_refresh_at": None,
+                    "mark_clean": False,
+                }
+                if cash_match is not None:
+                    cash_date, cash_state = cash_match
+                    pending_state.update(
+                        {
+                            "cash_krw": cash_state["cash_krw"],
+                            "cash_usd": cash_state["cash_usd"],
+                            "usd_krw": cash_state["usd_krw"],
+                            "fx_status_message": f"{cash_date.isoformat()} 과거 현금/환율 스케줄에서 가져옴",
+                            "fx_fetched_at": None,
+                        }
+                    )
+                st.session_state[PENDING_PORTFOLIO_STATE_KEY] = pending_state
+                st.session_state[LINK_MESSAGE_KEY] = (
+                    f"{latest_snapshot_date.isoformat()} 기준 과거 보유현황을 현재 포트폴리오에 적용했습니다. "
+                    "가격 새로고침 후 저장하면 실제 기록에도 반영됩니다."
+                )
+                st.rerun()
 
 
 def _apply_simple_preview(preview_rows: list[dict[str, Any]], *, event_mode: bool = False) -> None:
@@ -682,6 +792,7 @@ def render_historical_reconstruction_tab(
     *,
     owner_id: str | None,
     schedule_store: HistoricalScheduleStore | None,
+    current_holdings_rows: list[dict[str, Any]],
     current_cash_krw: float,
     current_cash_usd: float,
     current_usd_krw: float,
@@ -698,6 +809,14 @@ def render_historical_reconstruction_tab(
 
     _render_schedule_controls(owner_id, schedule_store)
     holding_rows, cash_rows, has_unconfirmed_removal = _render_editors(
+        current_cash_krw=current_cash_krw,
+        current_cash_usd=current_cash_usd,
+        current_usd_krw=current_usd_krw,
+    )
+    _render_current_portfolio_link_controls(
+        holding_rows=holding_rows,
+        cash_rows=cash_rows,
+        current_holdings_rows=current_holdings_rows,
         current_cash_krw=current_cash_krw,
         current_cash_usd=current_cash_usd,
         current_usd_krw=current_usd_krw,

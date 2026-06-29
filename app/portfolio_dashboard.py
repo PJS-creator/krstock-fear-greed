@@ -131,14 +131,24 @@ def _apply_pending_portfolio_state() -> None:
     if not isinstance(pending_state, dict):
         return
     loaded_portfolio_state = "portfolio_name" in pending_state or "holdings_rows" in pending_state
+    mark_clean = bool(pending_state.pop("mark_clean", loaded_portfolio_state))
     if "portfolio_name" in pending_state:
         clean_name = _clean_portfolio_name(pending_state["portfolio_name"])
         st.session_state[PORTFOLIO_NAME_KEY] = clean_name
         st.session_state[PORTFOLIO_NAME_INPUT_KEY] = clean_name
-    for key in ("holdings_rows", "cash_krw", "cash_usd", "usd_krw", "fx_status_message", "fx_fetched_at"):
+    for key in (
+        "holdings_rows",
+        "cash_krw",
+        "cash_usd",
+        "usd_krw",
+        "fx_status_message",
+        "fx_fetched_at",
+        "price_update_statuses",
+        "last_price_refresh_at",
+    ):
         if key in pending_state:
             st.session_state[key] = pending_state[key]
-    if loaded_portfolio_state:
+    if loaded_portfolio_state and mark_clean:
         st.session_state[MARK_CLEAN_KEY] = True
 
 
@@ -461,6 +471,7 @@ with history_tab:
         portfolio_name=_current_portfolio_name(),
         history_store=history_store,
         historical_schedule_store=historical_schedule_store,
+        current_holdings_rows=list(st.session_state.holdings_rows),
         current_cash_krw=float(st.session_state.cash_krw),
         current_cash_usd=float(st.session_state.cash_usd),
         current_usd_krw=float(st.session_state.usd_krw),
