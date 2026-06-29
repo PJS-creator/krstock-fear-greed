@@ -52,7 +52,7 @@ from portfolio.symbols import (
 
 from .charts import plot_reconstructed_holdings_area, plot_reconstructed_total_value
 from .components import render_plotly_chart
-from .formatters import compact_krw, format_kst, full_krw, percentage, signed_krw, signed_percentage
+from .formatters import compact_krw, format_kst, format_number, format_price, full_krw, instrument_label, percentage, signed_krw, signed_percentage
 from .status import dirty_signature
 from .theme import DIMENSIONS
 
@@ -250,7 +250,16 @@ def _render_preview_rows(preview_rows: list[dict[str, Any]]) -> list[dict[str, A
                 "message": "메시지",
             }
         )
-        st.dataframe(frame, hide_index=True, width="stretch", height=min(DIMENSIONS.max_table_height, 90 + len(frame) * DIMENSIONS.row_height))
+        st.dataframe(
+            frame,
+            hide_index=True,
+            width="stretch",
+            height=min(DIMENSIONS.max_table_height, 90 + len(frame) * DIMENSIONS.row_height),
+            column_config={
+                "수량": st.column_config.NumberColumn("수량", format="%,.4f"),
+                "변경 후 수량": st.column_config.NumberColumn("변경 후 수량", format="%,.4f"),
+            },
+        )
     return resolved
 
 
@@ -297,7 +306,7 @@ def _render_snapshot_cards(rows: list[dict[str, Any]]) -> tuple[list[dict[str, A
                     "as_of_date": st.column_config.TextColumn("기준일"),
                     "ticker": st.column_config.TextColumn("티커"),
                     "display_name": st.column_config.TextColumn("표시명"),
-                    "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001),
+                    "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, format="%,.4f"),
                     "market": st.column_config.SelectboxColumn("시장", options=["KR", "US"]),
                     "currency": st.column_config.SelectboxColumn("통화", options=["KRW", "USD"]),
                 },
@@ -562,7 +571,7 @@ def _render_simple_snapshot_input() -> None:
         column_config={
             "as_of_date": st.column_config.TextColumn("기준일", help="YYYY-MM-DD"),
             "ticker_or_name": st.column_config.TextColumn("종목명 또는 티커", help="예: 삼성전자, 005930, MU"),
-            "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001),
+            "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, format="%,.4f"),
         },
     )
     if st.button("보유현황 미리보기", key="historical_simple_preview_button"):
@@ -591,7 +600,7 @@ def _render_event_input() -> None:
         column_config={
             "date": st.column_config.TextColumn("기준일", help="YYYY-MM-DD"),
             "ticker_or_name": st.column_config.TextColumn("종목명 또는 티커"),
-            "quantity_after": st.column_config.NumberColumn("변경 후 수량", min_value=0.0, step=0.0001),
+            "quantity_after": st.column_config.NumberColumn("변경 후 수량", min_value=0.0, step=0.0001, format="%,.4f"),
         },
     )
     if st.button("이벤트 변환 미리보기", key="historical_event_preview_button"):
@@ -694,7 +703,7 @@ def _render_editors(*, current_cash_krw: float, current_cash_usd: float, current
                 "as_of_date": st.column_config.TextColumn("기준일", help="YYYY-MM-DD"),
                 "market": st.column_config.SelectboxColumn("시장", options=["", "KR", "US"]),
                 "ticker": st.column_config.TextColumn("티커"),
-                "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001),
+                "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, format="%,.4f"),
                 "display_name": st.column_config.TextColumn("표시명"),
                 "currency": st.column_config.SelectboxColumn("통화", options=["", "KRW", "USD"]),
                 "account_name": st.column_config.TextColumn("계좌"),
@@ -715,9 +724,9 @@ def _render_editors(*, current_cash_krw: float, current_cash_usd: float, current
         width="stretch",
         column_config={
             "as_of_date": st.column_config.TextColumn("기준일", help="YYYY-MM-DD"),
-            "cash_krw": st.column_config.NumberColumn("원화 현금", min_value=0.0, step=100000.0),
-            "cash_usd": st.column_config.NumberColumn("달러 현금", min_value=0.0, step=100.0),
-            "usd_krw": st.column_config.NumberColumn("환율", min_value=0.01, step=1.0, help="USD/KRW"),
+            "cash_krw": st.column_config.NumberColumn("원화 현금", min_value=0.0, step=100000.0, format="%,.0f"),
+            "cash_usd": st.column_config.NumberColumn("달러 현금", min_value=0.0, step=100.0, format="%,.2f"),
+            "usd_krw": st.column_config.NumberColumn("환율", min_value=0.01, step=1.0, help="USD/KRW", format="%,.2f"),
         },
     )
     cash_rows = _rows_from_editor(edited_cash)
@@ -732,6 +741,47 @@ def _date_bounds(holding_rows: list[dict[str, Any]]) -> tuple[date | None, date]
     except HistoricalHoldingsError:
         return None, date.today()
     return min(row.as_of_date for row in normalized), date.today()
+
+
+def _daily_display_frame(daily: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for row in daily.to_dict("records"):
+        rows.append(
+            {
+                "날짜": row.get("date"),
+                "총자산": full_krw(row.get("total_value_krw")),
+                "투자자산": full_krw(row.get("position_value_krw")),
+                "현금": full_krw(row.get("cash_total_krw")),
+                "원화 현금": full_krw(row.get("cash_krw")),
+                "달러 현금": "$" + format_number(float(row.get("cash_usd") or 0), digits=2, trim=True),
+                "환율": format_number(float(row.get("usd_krw") or 0), digits=2, trim=True),
+                "보유 종목": f"{int(row.get('holdings_count') or 0):,}개",
+                "평가 가능": f"{int(row.get('priced_count') or 0):,}개",
+                "가격 누락": f"{int(row.get('missing_price_count') or 0):,}개",
+                "적용 스냅샷": row.get("applied_snapshot_date"),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _holding_display_frame(holdings: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for row in holdings.to_dict("records"):
+        market_value = row.get("market_value_krw")
+        rows.append(
+            {
+                "날짜": row.get("date"),
+                "종목": instrument_label(row),
+                "티커": row.get("ticker"),
+                "시장": row.get("market"),
+                "수량": format_number(float(row.get("quantity") or 0), digits=4, trim=True),
+                "종가": format_price(row.get("close_price"), row.get("currency")),
+                "평가액": full_krw(market_value) if market_value is not None else "가격 없음",
+                "가격 상태": row.get("price_status"),
+                "적용 스냅샷": row.get("applied_snapshot_date"),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def _render_result(result: ReconstructionResult) -> None:
@@ -783,9 +833,21 @@ def _render_result(result: ReconstructionResult) -> None:
         file_name="historical_holding_valuation.csv",
         mime="text/csv",
     )
-    st.dataframe(daily, hide_index=True, width="stretch", height=min(DIMENSIONS.max_table_height, 90 + len(daily) * DIMENSIONS.row_height))
+    daily_display = _daily_display_frame(daily)
+    holdings_display = _holding_display_frame(holdings)
+    st.dataframe(
+        daily_display,
+        hide_index=True,
+        width="stretch",
+        height=min(DIMENSIONS.max_table_height, 90 + len(daily_display) * DIMENSIONS.row_height),
+    )
     with st.expander("종목별 일별 평가 상세", expanded=False):
-        st.dataframe(holdings, hide_index=True, width="stretch", height=min(DIMENSIONS.max_table_height, 90 + len(holdings) * DIMENSIONS.row_height))
+        st.dataframe(
+            holdings_display,
+            hide_index=True,
+            width="stretch",
+            height=min(DIMENSIONS.max_table_height, 90 + len(holdings_display) * DIMENSIONS.row_height),
+        )
 
 
 def render_historical_reconstruction_tab(

@@ -5,10 +5,19 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
+APP_FONT_FAMILY = (
+    '"Pretendard Variable", Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", '
+    '"Malgun Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+)
 
 
 def _is_number(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (TypeError, ValueError):
+        return False
 
 
 def _coerce_datetime(value: object) -> datetime | None:
@@ -42,6 +51,15 @@ def compact_number(value: float | None, *, digits: int = 1) -> str:
     return f"{value:,.0f}"
 
 
+def format_number(value: float | None, *, digits: int = 0, trim: bool = False) -> str:
+    if value is None or not _is_number(value):
+        return "미산정"
+    text = f"{float(value):,.{digits}f}"
+    if trim and "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
 def compact_krw(value: float | None) -> str:
     if value is None or not _is_number(value):
         return "미산정"
@@ -54,6 +72,17 @@ def full_krw(value: float | None) -> str:
     if value is None or not _is_number(value):
         return "미산정"
     return f"₩{float(value):,.0f}"
+
+
+def format_price(value: float | None, currency: object = "") -> str:
+    if value is None or not _is_number(value):
+        return "미산정"
+    currency_text = str(currency or "").upper()
+    if currency_text == "KRW":
+        return f"₩{float(value):,.0f}"
+    if currency_text == "USD":
+        return f"${float(value):,.2f}"
+    return format_number(float(value), digits=2, trim=True)
 
 
 def signed_krw(value: float | None) -> str:
@@ -108,3 +137,19 @@ def format_relative_time(value: object, *, now: datetime | None = None) -> str:
         return f"{days}일 전"
     months = days // 30
     return f"{months}개월 전"
+
+
+def instrument_label(row: object, *, include_ticker: bool = False) -> str:
+    data = row if isinstance(row, dict) else {}
+    ticker = str(data.get("ticker") or data.get("symbol") or "").strip()
+    display_name = str(data.get("display_name") or data.get("name") or "").strip()
+    market = str(data.get("market") or "").strip().upper()
+    if not display_name or display_name == ticker:
+        return ticker or display_name or "-"
+    if include_ticker:
+        if market == "KR":
+            return f"{display_name} · {ticker}"
+        return f"{ticker} · {display_name}"
+    if market == "KR":
+        return display_name
+    return f"{ticker} · {display_name}"

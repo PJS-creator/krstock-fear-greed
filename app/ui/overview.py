@@ -26,6 +26,7 @@ def render_overview(metrics: PortfolioMetrics, *, history_records: list[Portfoli
         return
 
     st.subheader("자산 구성")
+    st.caption("도넛은 현금을 포함한 총자산 기준입니다. 통화 노출은 KRW 환산 금액으로 계산합니다.")
     chart_col1, chart_col2 = st.columns(2)
     allocation = plot_allocation(metrics)
     with chart_col1:
