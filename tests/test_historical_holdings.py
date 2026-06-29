@@ -12,9 +12,13 @@ from portfolio.historical_holdings import (
     build_snapshot_marker_rows,
     build_ticker_value_series,
     cash_snapshots_to_dicts,
+    current_cash_to_historical_snapshot,
+    current_holdings_to_historical_snapshot,
     csv_to_rows,
     daily_rows_as_dicts,
     deserialize_schedule_payload,
+    historical_cash_to_current_cash,
+    historical_snapshot_to_current_holdings,
     holding_rows_as_dicts,
     holding_snapshots_to_dicts,
     normalize_cash_snapshots,
@@ -22,6 +26,8 @@ from portfolio.historical_holdings import (
     reconstruct_historical_holdings,
     rows_to_csv,
     serialize_schedule_payload,
+    upsert_cash_snapshot,
+    upsert_historical_snapshot,
 )
 from portfolio.historical_holdings.normalization import CASH_COLUMNS, HOLDINGS_COLUMNS
 
@@ -315,6 +321,63 @@ def test_schedule_payload_and_memory_store_save_load_delete():
 def test_schema_version_migration_guard():
     with pytest.raises(Exception, match="schema_version"):
         deserialize_schedule_payload({"schema_version": 999, "holdings_snapshots": [], "cash_snapshots": []})
+
+
+def test_current_portfolio_can_be_added_to_historical_schedule():
+    snapshot_rows = current_holdings_to_historical_snapshot(
+        [
+            {"market": "KR", "ticker": "005930", "quantity": 200, "display_name": "삼성전자", "currency": "KRW"},
+            {"market": "US", "ticker": "mu", "quantity": 20, "display_name": "Micron", "currency": "USD"},
+        ],
+        "2026-06-29",
+    )
+    merged = upsert_historical_snapshot(
+        [{"as_of_date": "2026-04-13", "ticker": "005930", "quantity": 100}],
+        snapshot_rows,
+    )
+
+    assert [(row["as_of_date"], row["market"], row["ticker"], row["quantity"]) for row in merged] == [
+        ("2026-04-13", "KR", "005930", 100.0),
+        ("2026-06-29", "KR", "005930", 200.0),
+        ("2026-06-29", "US", "MU", 20.0),
+    ]
+
+
+def test_latest_historical_schedule_can_be_applied_to_current_portfolio():
+    snapshot_date, current_rows = historical_snapshot_to_current_holdings(
+        [
+            {"as_of_date": "2026-04-13", "ticker": "005930", "quantity": 100, "display_name": "삼성전자"},
+            {"as_of_date": "2026-06-29", "ticker": "005930", "quantity": 200, "display_name": "삼성전자"},
+            {"as_of_date": "2026-06-29", "ticker": "MU", "quantity": 20, "display_name": "Micron"},
+        ]
+    )
+
+    assert snapshot_date == date(2026, 6, 29)
+    assert [(row["market"], row["ticker"], row["quantity"], row["quote_status"]) for row in current_rows] == [
+        ("KR", "005930", 200.0, "missing"),
+        ("US", "MU", 20.0, "missing"),
+    ]
+    assert all(row["current_price"] is None for row in current_rows)
+
+
+def test_historical_cash_links_to_current_cash_and_upserts():
+    cash_snapshot = current_cash_to_historical_snapshot(
+        as_of_date="2026-06-29",
+        cash_krw=10000000,
+        cash_usd=13029.32,
+        usd_krw=1535,
+    )
+    merged = upsert_cash_snapshot(
+        [{"as_of_date": "2026-04-13", "cash_krw": 1, "cash_usd": 2, "usd_krw": 1400}],
+        cash_snapshot,
+    )
+    current_cash = historical_cash_to_current_cash(merged, as_of_date="2026-06-30", current_usd_krw=1300)
+
+    assert merged[-1] == {"as_of_date": "2026-06-29", "cash_krw": 10000000.0, "cash_usd": 13029.32, "usd_krw": 1535.0}
+    assert current_cash == (
+        date(2026, 6, 29),
+        {"cash_krw": 10000000.0, "cash_usd": 13029.32, "usd_krw": 1535.0},
+    )
 
 
 def test_snapshot_dict_helpers():
