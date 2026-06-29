@@ -15,12 +15,29 @@ def inject_styles() -> None:
     st.markdown(
         """
         <style>
+        @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/variable/pretendardvariable.css");
+        :root {
+            --app-font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        html, body, .stApp, [data-testid="stAppViewContainer"], button, input, textarea, select {
+            font-family: var(--app-font-family);
+        }
+        .stApp {
+            font-size: 17px;
+            color: #111827;
+        }
         .block-container { padding-top: 1.25rem; padding-bottom: 2rem; }
-        .block-container h1 { font-size: 3rem; line-height: 1.08; word-break: keep-all; }
+        .block-container h1 { font-size: 3rem; line-height: 1.08; word-break: keep-all; letter-spacing: 0; }
+        .block-container h2, .block-container h3 { letter-spacing: 0; }
         .section-gap { margin-top: 1.25rem; }
-        .small-muted { color: var(--text-color); opacity: 0.72; font-size: 0.88rem; }
+        .small-muted { color: var(--text-color); opacity: 0.72; font-size: 0.95rem; }
+        div[data-testid="stMetricLabel"] p { font-size: 0.98rem; }
+        div[data-testid="stMetricValue"] { font-size: 1.55rem; font-weight: 760; letter-spacing: 0; }
+        div[data-testid="stMetricDelta"] { font-size: 0.98rem; }
+        div[data-testid="stDataFrame"] { font-size: 0.98rem; }
         @media (max-width: 480px) {
             .block-container h1 { font-size: 2rem; line-height: 1.15; }
+            .stApp { font-size: 16px; }
         }
         </style>
         """,

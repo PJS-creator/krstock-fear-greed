@@ -14,7 +14,7 @@ from portfolio.symbols import (
     rows_to_csv,
 )
 
-from .formatters import format_kst, full_krw, percentage, signed_krw, signed_percentage
+from .formatters import format_kst, format_number, format_price, full_krw, instrument_label, percentage, signed_krw, signed_percentage
 from .status import ISSUE_STATUSES, quote_status_label
 from .theme import DIMENSIONS
 
@@ -149,7 +149,7 @@ def render_holdings_editor() -> None:
         width="stretch",
         column_config={
             "ticker_or_name": st.column_config.TextColumn("종목명 또는 티커", required=True, help="예: 삼성전자, 005930, MU, QURE"),
-            "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, required=True),
+            "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, required=True, format="%,.4f"),
         },
     )
     duplicate_policy = st.radio("동일 종목 입력 처리", ["새 입력값으로 교체", "기존 수량에 합산"], horizontal=True, key="quick_duplicate_policy")
@@ -161,7 +161,12 @@ def render_holdings_editor() -> None:
         st.caption("적용 전 미리보기")
         preview_rows = _candidate_resolved_rows(preview_rows)
         _render_quality_summary(preview_rows)
-        st.dataframe(_preview_frame(preview_rows), hide_index=True, width="stretch")
+        st.dataframe(
+            _preview_frame(preview_rows),
+            hide_index=True,
+            width="stretch",
+            column_config={"수량": st.column_config.NumberColumn("수량", format="%,.4f")},
+        )
         ok_rows = [row for row in preview_rows if row.get("status") == "ok"]
         if st.button("오류 없는 행 적용", disabled=not ok_rows):
             try:
@@ -204,14 +209,16 @@ def render_holdings_editor() -> None:
             width="stretch",
             column_config={
                 "ticker": st.column_config.TextColumn("티커", required=True),
-                "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, required=True),
+                "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, required=True, format="%,.4f"),
                 "market": st.column_config.SelectboxColumn("시장", options=["US", "KR"], required=True),
                 "currency": st.column_config.SelectboxColumn("통화", options=["USD", "KRW"], required=True),
                 "display_name": st.column_config.TextColumn("표시명"),
                 "account_name": st.column_config.TextColumn("계좌"),
                 "strategy_tag": st.column_config.TextColumn("전략 태그"),
-                "avg_price": st.column_config.NumberColumn("평균 매수가", min_value=0.0, step=0.01),
-                "target_weight": st.column_config.NumberColumn("목표 비중", min_value=0.0, max_value=1.0, step=0.01),
+                "avg_price": st.column_config.NumberColumn("평균 매수가", min_value=0.0, step=0.01, format="%,.2f"),
+                "target_weight": st.column_config.NumberColumn("목표 비중", min_value=0.0, max_value=1.0, step=0.01, format="%.2f"),
+                "current_price": st.column_config.NumberColumn("현재가", min_value=0.0, step=0.01, format="%,.2f"),
+                "previous_close": st.column_config.NumberColumn("전일 종가", min_value=0.0, step=0.01, format="%,.2f"),
                 "note": st.column_config.TextColumn("메모"),
             },
         )
@@ -230,11 +237,14 @@ def _holdings_table_rows(metrics: PortfolioMetrics) -> list[dict[str, object]]:
         rows.append(
             {
                 "ticker": str(holding["ticker"]),
+                "종목": instrument_label(holding),
                 "종목명": holding["display_name"],
                 "시장": holding["market"],
                 "수량": holding["quantity"],
+                "수량 표시": format_number(float(holding["quantity"]), digits=4, trim=True),
                 "통화": holding["currency"],
                 "최근 제공 가격": holding.get("current_price"),
+                "최근 제공 가격 표시": format_price(holding.get("current_price"), holding.get("currency")),
                 "평가액": item.market_value_krw or 0.0,
                 "평가액 표시": full_krw(item.market_value_krw),
                 "오늘 변동액": signed_krw(item.day_change_krw),
@@ -257,7 +267,7 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
         st.info("보유자산을 입력하면 표가 표시됩니다.")
         return
 
-    search = st.text_input("검색", placeholder="ticker 또는 종목명", key="holdings_search")
+    search = st.text_input("검색", placeholder="종목명 또는 ticker", key="holdings_search")
     filter_col1, filter_col2, filter_col3 = st.columns([1, 1, 1])
     market_label = filter_col1.selectbox("시장", list(MARKET_LABELS.keys()), key="holdings_market_filter")
     status_label = filter_col2.selectbox("가격 상태", list(STATUS_FILTERS.keys()), key="holdings_status_filter")
@@ -284,8 +294,8 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
         st.info("필터 조건에 맞는 보유자산이 없습니다.")
         return
 
-    base_columns = ["ticker", "종목명", "시장", "수량", "최근 제공 가격", "평가액 표시", "오늘 변동액", "오늘 변동률", "비중", "가격 상태", "조회 시각"]
-    detail_columns = ["통화", "provider", "비중 표시"]
+    base_columns = ["종목", "시장", "수량 표시", "최근 제공 가격 표시", "평가액 표시", "오늘 변동액", "오늘 변동률", "비중", "가격 상태", "조회 시각"]
+    detail_columns = ["ticker", "종목명", "통화", "provider", "비중 표시"]
     visible_columns = base_columns + detail_columns if show_details else base_columns
     st.dataframe(
         frame[visible_columns],
@@ -293,11 +303,12 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
         width="stretch",
         height=min(DIMENSIONS.max_table_height, 100 + len(frame) * DIMENSIONS.row_height),
         column_config={
+            "종목": st.column_config.TextColumn("종목"),
             "ticker": st.column_config.TextColumn("ticker"),
             "종목명": st.column_config.TextColumn("종목명"),
             "시장": st.column_config.TextColumn("시장"),
-            "수량": st.column_config.NumberColumn("수량", format="%.4f"),
-            "최근 제공 가격": st.column_config.NumberColumn("최근 제공 가격", format="%.2f"),
+            "수량 표시": st.column_config.TextColumn("수량"),
+            "최근 제공 가격 표시": st.column_config.TextColumn("최근 제공 가격"),
             "평가액 표시": st.column_config.TextColumn("평가액"),
             "오늘 변동액": st.column_config.TextColumn("오늘 변동액"),
             "오늘 변동률": st.column_config.TextColumn("오늘 변동률"),

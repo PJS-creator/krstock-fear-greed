@@ -8,7 +8,7 @@ from portfolio.history import PortfolioHistoryRecord
 from portfolio.holdings import PortfolioMetrics
 from portfolio.sample_data import sample_portfolio
 
-from .formatters import compact_krw, full_krw, percentage, signed_krw, signed_percentage
+from .formatters import compact_krw, full_krw, instrument_label, percentage, signed_krw, signed_percentage
 from .status import aggregate_price_statuses, build_price_log_rows, present_diagnostic, quote_status_label, split_diagnostics
 from .theme import DIMENSIONS, chart_config
 
@@ -181,16 +181,16 @@ def render_contribution_summary(metrics: PortfolioMetrics) -> None:
     col1, col2 = st.columns(2)
     col1.metric(
         "최대 상승 기여",
-        str(best.holding["ticker"]),
+        instrument_label(best.holding),
         delta=signed_krw(best.day_change_krw),
-        help=str(best.holding["display_name"]),
+        help=instrument_label(best.holding, include_ticker=True),
         border=True,
     )
     col2.metric(
         "최대 하락 기여",
-        str(worst.holding["ticker"]),
+        instrument_label(worst.holding),
         delta=signed_krw(worst.day_change_krw),
-        help=str(worst.holding["display_name"]),
+        help=instrument_label(worst.holding, include_ticker=True),
         border=True,
     )
 

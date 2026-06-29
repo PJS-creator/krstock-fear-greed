@@ -10,7 +10,19 @@ from portfolio.historical_holdings import ReconstructionResult, build_ticker_val
 from portfolio.history import HistoryPeriod, PortfolioHistoryRecord, period_start
 from portfolio.holdings import PortfolioMetrics
 
-from .formatters import KST, compact_krw, format_kst, full_krw, percentage, signed_krw, signed_percentage
+from .formatters import (
+    APP_FONT_FAMILY,
+    KST,
+    compact_krw,
+    format_kst,
+    format_number,
+    format_price,
+    full_krw,
+    instrument_label,
+    percentage,
+    signed_krw,
+    signed_percentage,
+)
 from .theme import CURRENCY_COLORS, DIMENSIONS, SEMANTIC_COLORS, deterministic_color, signed_color
 
 
@@ -29,29 +41,63 @@ def apply_chart_layout(
         hovermode=hovermode,
         showlegend=showlegend,
         legend_title_text="",
-        font=dict(size=13),
-        hoverlabel=dict(align="left"),
+        font=dict(family=APP_FONT_FAMILY, size=15, color=SEMANTIC_COLORS["ink"]),
+        hoverlabel=dict(
+            align="left",
+            bgcolor="rgba(17,24,39,0.94)",
+            bordercolor="rgba(255,255,255,0.18)",
+            font=dict(family=APP_FONT_FAMILY, size=13, color="#FFFFFF"),
+        ),
+        legend=dict(font=dict(size=13), itemclick="toggleothers", itemdoubleclick="toggle"),
     )
-    fig.update_xaxes(showgrid=True, gridcolor="rgba(100,116,139,0.18)", zerolinecolor="rgba(100,116,139,0.45)")
-    fig.update_yaxes(showgrid=False)
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor="rgba(100,116,139,0.18)",
+        zerolinecolor="rgba(100,116,139,0.45)",
+        tickfont=dict(size=12),
+        title_font=dict(size=13),
+        automargin=True,
+    )
+    fig.update_yaxes(showgrid=False, tickfont=dict(size=12), title_font=dict(size=13), automargin=True)
     return fig
 
 
-def _allocation_source_rows(metrics: PortfolioMetrics) -> list[dict[str, object]]:
+def _allocation_source_rows(metrics: PortfolioMetrics, *, include_cash: bool) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
+    total = metrics.total_value_krw if include_cash else metrics.total_position_value_krw
     for item in metrics.rows:
         if item.market_value_krw is None or item.market_value_krw <= 0:
             continue
+        label = instrument_label(item.holding)
         rows.append(
             {
                 "ticker": str(item.holding["ticker"]),
                 "display_name": str(item.holding["display_name"]),
+                "label": label,
+                "legend_label": instrument_label(item.holding, include_ticker=True),
                 "market": str(item.holding["market"]),
                 "market_value_krw": item.market_value_krw,
-                "weight": item.weight,
+                "weight": item.market_value_krw / total if total else 0.0,
                 "day_change_krw": item.day_change_krw,
                 "day_change_pct": item.day_change_pct,
                 "total_pnl_pct": item.total_pnl_pct,
+                "color_key": str(item.holding["ticker"]),
+            }
+        )
+    if include_cash and metrics.cash_total_krw > 0:
+        rows.append(
+            {
+                "ticker": "현금",
+                "display_name": "현금",
+                "label": "현금",
+                "legend_label": "현금",
+                "market": "KRW/USD",
+                "market_value_krw": metrics.cash_total_krw,
+                "weight": metrics.cash_total_krw / total if total else 0.0,
+                "day_change_krw": 0.0,
+                "day_change_pct": None,
+                "total_pnl_pct": None,
+                "color_key": "CASH",
             }
         )
     return sorted(rows, key=lambda row: float(row["market_value_krw"]), reverse=True)
@@ -62,9 +108,13 @@ def _collapse_small_allocation_rows(rows: list[dict[str, object]], *, max_slices
         return rows
     keep: list[dict[str, object]] = []
     other: list[dict[str, object]] = []
-    for index, row in enumerate(rows):
-        if index < max_slices and float(row["weight"]) >= min_weight:
+    kept_non_cash = 0
+    for row in rows:
+        if row["ticker"] == "현금":
             keep.append(row)
+        elif kept_non_cash < max_slices and float(row["weight"]) >= min_weight:
+            keep.append(row)
+            kept_non_cash += 1
         else:
             other.append(row)
     if other:
@@ -74,28 +124,50 @@ def _collapse_small_allocation_rows(rows: list[dict[str, object]], *, max_slices
             {
                 "ticker": "기타",
                 "display_name": f"{len(other)}개 종목 합산",
+                "label": "기타",
+                "legend_label": f"기타 · {len(other)}개 종목",
                 "market": "-",
                 "market_value_krw": other_value,
                 "weight": other_value / sum(float(row["market_value_krw"]) for row in rows),
                 "day_change_krw": other_day_change,
                 "day_change_pct": None,
                 "total_pnl_pct": None,
+                "color_key": "OTHER",
             }
         )
     return keep
 
 
-def plot_allocation(metrics: PortfolioMetrics, *, max_slices: int = 7, min_label_weight: float = 0.03) -> go.Figure | None:
-    source_rows = _allocation_source_rows(metrics)
+def plot_allocation(
+    metrics: PortfolioMetrics,
+    *,
+    max_slices: int = 8,
+    min_label_weight: float = 0.035,
+    include_cash: bool = True,
+) -> go.Figure | None:
+    source_rows = _allocation_source_rows(metrics, include_cash=include_cash)
     if not source_rows:
         return None
     rows = _collapse_small_allocation_rows(source_rows, max_slices=max_slices, min_weight=min_label_weight)
     values = [float(row["market_value_krw"]) for row in rows]
-    legend_labels = [f"{row['ticker']} · {row['display_name']}" for row in rows]
-    text = [f"{row['ticker']}<br>{percentage(float(row['weight']))}" if float(row["weight"]) >= min_label_weight or row["ticker"] == "기타" else "" for row in rows]
-    colors = [SEMANTIC_COLORS["missing"] if row["ticker"] == "기타" else deterministic_color(row["ticker"]) for row in rows]
+    legend_labels = [str(row["legend_label"]) for row in rows]
+    text = [
+        f"{row['label']}<br><b>{percentage(float(row['weight']))}</b>"
+        if float(row["weight"]) >= min_label_weight or row["ticker"] in {"기타", "현금"}
+        else ""
+        for row in rows
+    ]
+    colors = [
+        SEMANTIC_COLORS["cash"]
+        if row["ticker"] == "현금"
+        else SEMANTIC_COLORS["missing"]
+        if row["ticker"] == "기타"
+        else deterministic_color(row["color_key"])
+        for row in rows
+    ]
     customdata = [
         [
+            row["label"],
             row["ticker"],
             row["display_name"],
             row["market"],
@@ -117,31 +189,32 @@ def plot_allocation(metrics: PortfolioMetrics, *, max_slices: int = 7, min_label
             text=text,
             textinfo="text",
             textposition="outside",
-            textfont=dict(size=11),
+            textfont=dict(size=13, family=APP_FONT_FAMILY),
             customdata=customdata,
             marker=dict(colors=colors, line=dict(color="rgba(148,163,184,0.38)", width=1)),
+            pull=[0.025 if index == 0 else 0 for index, _ in enumerate(rows)],
             hovertemplate=(
-                "%{customdata[0]} · %{customdata[1]}<br>"
-                "시장 %{customdata[2]}<br>"
-                "평가액 %{customdata[3]}<br>"
-                "비중 %{customdata[4]}<br>"
-                "오늘 변동 %{customdata[5]} (%{customdata[6]})<br>"
-                "총수익률 %{customdata[7]}<extra></extra>"
+                "<b>%{customdata[0]}</b><br>"
+                "티커 %{customdata[1]} · 시장 %{customdata[3]}<br>"
+                "평가액 %{customdata[4]}<br>"
+                "비중 %{customdata[5]}<br>"
+                "오늘 변동 %{customdata[6]} (%{customdata[7]})<br>"
+                "총수익률 %{customdata[8]}<extra></extra>"
             ),
         )
     )
     fig.update_layout(
         annotations=[
             dict(
-                text=f"투자자산<br><b>{compact_krw(metrics.total_position_value_krw)}</b>",
+                text=f"{'총자산' if include_cash else '투자자산'}<br><b>{compact_krw(metrics.total_value_krw if include_cash else metrics.total_position_value_krw)}</b>",
                 x=0.5,
                 y=0.5,
                 showarrow=False,
-                font=dict(size=13),
+                font=dict(size=16, family=APP_FONT_FAMILY, color=SEMANTIC_COLORS["ink"]),
             )
         ],
         legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5),
-        uniformtext=dict(minsize=10, mode="hide"),
+        uniformtext=dict(minsize=12, mode="hide"),
     )
     fig = apply_chart_layout(fig, height=DIMENSIONS.tall_height, hovermode="closest")
     fig.update_layout(margin=dict(l=44, r=44, t=28, b=56))
@@ -151,7 +224,7 @@ def plot_allocation(metrics: PortfolioMetrics, *, max_slices: int = 7, min_label
 def plot_contribution(metrics: PortfolioMetrics, *, limit: int = 10, show_all: bool = False) -> go.Figure | None:
     rows = [
         {
-            "label": f"{item.holding['ticker']} · {item.holding['display_name']}",
+            "label": instrument_label(item.holding),
             "ticker": str(item.holding["ticker"]),
             "display_name": str(item.holding["display_name"]),
             "day_change_krw": item.day_change_krw,
@@ -168,7 +241,10 @@ def plot_contribution(metrics: PortfolioMetrics, *, limit: int = 10, show_all: b
     selected = sorted(selected, key=lambda row: float(row["day_change_krw"]))
     x_values = [float(row["day_change_krw"]) for row in selected]
     y_values = [str(row["label"]) for row in selected]
-    customdata = [[row["display_name"], full_krw(float(row["day_change_krw"])), signed_percentage(row["day_change_pct"])] for row in selected]
+    customdata = [
+        [row["display_name"], row["ticker"], full_krw(float(row["day_change_krw"])), signed_percentage(row["day_change_pct"])]
+        for row in selected
+    ]
     height = max(DIMENSIONS.compact_height, 110 + len(selected) * DIMENSIONS.row_height)
     fig = go.Figure(
         go.Bar(
@@ -178,14 +254,15 @@ def plot_contribution(metrics: PortfolioMetrics, *, limit: int = 10, show_all: b
             marker_color=[signed_color(value) for value in x_values],
             text=[signed_krw(value) for value in x_values],
             textposition="outside",
+            textfont=dict(size=13, family=APP_FONT_FAMILY),
             cliponaxis=False,
             customdata=customdata,
-            hovertemplate="%{y}<br>변동액 %{customdata[1]}<br>변동률 %{customdata[2]}<extra></extra>",
+            hovertemplate="<b>%{y}</b><br>티커 %{customdata[1]}<br>변동액 %{customdata[2]}<br>변동률 %{customdata[3]}<extra></extra>",
         )
     )
     fig.add_vline(x=0, line_color="rgba(100,116,139,0.65)", line_width=1)
     fig.update_layout(xaxis_title="오늘 변동액", yaxis_title="", bargap=0.32)
-    fig.update_xaxes(tickformat=",.0f")
+    fig.update_xaxes(tickformat=",.0f", tickprefix="₩")
     return apply_chart_layout(fig, height=height, hovermode="closest", showlegend=False)
 
 
@@ -207,9 +284,11 @@ def plot_currency_exposure(metrics: PortfolioMetrics) -> go.Figure | None:
                 y=["통화 노출"],
                 orientation="h",
                 name=str(row["currency"]),
-                marker_color=CURRENCY_COLORS[currency],
-                text=[percentage(ratio)],
+                marker=dict(color=CURRENCY_COLORS[currency], line=dict(color="rgba(255,255,255,0.75)", width=1)),
+                text=[f"{currency}<br>{percentage(ratio)}"],
                 textposition="inside",
+                insidetextanchor="middle",
+                textfont=dict(size=14, family=APP_FONT_FAMILY, color="#FFFFFF"),
                 customdata=[[full_krw(value), percentage(ratio)]],
                 hovertemplate="%{fullData.name}<br>KRW 환산 %{customdata[0]}<br>비중 %{customdata[1]}<extra></extra>",
             )
@@ -267,7 +346,7 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
             name="총자산",
             mode="lines+markers" if marker_size else "lines",
             marker=dict(size=marker_size),
-            line=dict(color=SEMANTIC_COLORS["primary"], width=2.4),
+            line=dict(color=SEMANTIC_COLORS["primary"], width=3.0, shape="spline", smoothing=0.35),
             fill="tozeroy",
             fillcolor="rgba(37,99,235,0.12)",
             customdata=customdata,
@@ -283,7 +362,7 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
             y=position_values,
             name="투자자산",
             mode="lines",
-            line=dict(color=SEMANTIC_COLORS["secondary"], width=1.4, dash="dot"),
+            line=dict(color=SEMANTIC_COLORS["secondary"], width=1.8, dash="dot"),
             hovertemplate="투자자산 ₩%{y:,.0f}<extra></extra>",
         )
     )
@@ -293,12 +372,12 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
             y=cash_values,
             name="총현금",
             mode="lines",
-            line=dict(color=SEMANTIC_COLORS["cash"], width=1.2, dash="dot"),
+            line=dict(color=SEMANTIC_COLORS["cash"], width=1.8, dash="dot"),
             hovertemplate="총현금 ₩%{y:,.0f}<extra></extra>",
         )
     )
     fig.update_layout(yaxis_title="KRW", xaxis_title="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
-    fig.update_yaxes(tickformat=",.0f")
+    fig.update_yaxes(tickformat=",.0f", tickprefix="₩")
     return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
 
 
@@ -326,7 +405,7 @@ def plot_reconstructed_total_value(result: ReconstructionResult, *, include_cash
             y=y_values,
             name="총자산" if include_cash else "투자자산",
             mode="lines+markers" if len(x_values) <= 12 else "lines",
-            line=dict(color=SEMANTIC_COLORS["primary"], width=2.4),
+            line=dict(color=SEMANTIC_COLORS["primary"], width=3.0, shape="spline", smoothing=0.35),
             marker=dict(size=6 if len(x_values) <= 12 else 0),
             fill="tozeroy",
             fillcolor="rgba(37,99,235,0.12)",
@@ -345,7 +424,7 @@ def plot_reconstructed_total_value(result: ReconstructionResult, *, include_cash
     for marker in sorted({row.applied_snapshot_date for row in result.daily_rows}):
         fig.add_vline(x=marker, line_color="rgba(217,119,6,0.55)", line_width=1, line_dash="dot")
     fig.update_layout(yaxis_title="KRW", xaxis_title="", legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
-    fig.update_yaxes(tickformat=",.0f")
+    fig.update_yaxes(tickformat=",.0f", tickprefix="₩")
     return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
 
 
@@ -360,8 +439,8 @@ def plot_reconstructed_holdings_area(result: ReconstructionResult, *, top_n: int
     detail_by_key = {
         (str(row["date"]), str(row["ticker"])): [
             str(row["display_name"]),
-            "" if row.get("quantity") is None else f"{float(row['quantity']):,.4g}",
-            "" if row.get("close_price") is None else f"{float(row['close_price']):,.2f} {row.get('currency') or ''}".strip(),
+            "" if row.get("quantity") is None else format_number(float(row["quantity"]), digits=4, trim=True),
+            "" if row.get("close_price") is None else format_price(float(row["close_price"]), row.get("currency")),
             full_krw(float(row["market_value_krw"])),
         ]
         for row in rows
@@ -374,13 +453,14 @@ def plot_reconstructed_holdings_area(result: ReconstructionResult, *, top_n: int
             go.Scatter(
                 x=dates,
                 y=values,
-                name=f"{ticker} · {display_names.get(ticker, ticker)}",
+                name=str(display_names.get(ticker, ticker)) if str(display_names.get(ticker, ticker)) != ticker else ticker,
                 mode="lines",
                 stackgroup="one",
-                line=dict(width=0.8, color=SEMANTIC_COLORS["missing"] if ticker == "기타" else deterministic_color(ticker)),
+                line=dict(width=1.1, color=SEMANTIC_COLORS["missing"] if ticker == "기타" else deterministic_color(ticker)),
                 customdata=customdata,
                 hovertemplate=(
-                    f"{ticker} · %{{customdata[0]}}<br>"
+                    f"<b>%{{customdata[0]}}</b><br>"
+                    f"티커 {ticker}<br>"
                     "%{x}<br>"
                     "수량 %{customdata[1]}<br>"
                     "종가 %{customdata[2]}<br>"

@@ -84,12 +84,16 @@ def test_allocation_donut_has_labels_hover_and_percent():
 
     assert fig is not None
     text = " ".join(str(item) for item in fig.data[0].text)
-    assert "005930" in text
+    assert "삼성전자" in text
     assert "%" in text
+    assert any("삼성전자 · 005930" == str(label) for label in fig.data[0].labels)
+    assert any("현금" == str(label) for label in fig.data[0].labels)
     hover = fig.data[0].hovertemplate
+    assert "티커" in hover
     assert "평가액" in hover
     assert "비중" in hover
     assert "오늘 변동" in hover
+    assert "," in fig.data[0].customdata[0][4]
 
 
 def test_allocation_donut_collapses_small_or_extra_slices_to_other():

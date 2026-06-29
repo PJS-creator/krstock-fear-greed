@@ -8,29 +8,31 @@ SEMANTIC_COLORS = {
     "positive": "#16A34A",
     "negative": "#DC2626",
     "neutral": "#64748B",
-    "primary": "#2563EB",
+    "primary": "#1D4ED8",
     "secondary": "#0F766E",
     "warning": "#D97706",
     "cash": "#F59E0B",
     "missing": "#94A3B8",
+    "surface": "#F8FAFC",
+    "ink": "#111827",
 }
 
 CATEGORY_COLORS = [
-    "#2563EB",
+    "#1D4ED8",
     "#0F766E",
-    "#F59E0B",
+    "#B45309",
     "#16A34A",
-    "#DC2626",
-    "#7C3AED",
+    "#BE123C",
+    "#6D28D9",
     "#0891B2",
-    "#DB2777",
+    "#C026D3",
     "#65A30D",
-    "#64748B",
+    "#475569",
 ]
 
 CURRENCY_COLORS = {
     "KRW": "#0F766E",
-    "USD": "#2563EB",
+    "USD": "#1D4ED8",
     "CASH": "#F59E0B",
 }
 
@@ -47,10 +49,10 @@ STATUS_COLORS = {
 
 @dataclass(frozen=True)
 class ChartDimensions:
-    compact_height: int = 280
-    default_height: int = 380
-    tall_height: int = 460
-    row_height: int = 34
+    compact_height: int = 300
+    default_height: int = 410
+    tall_height: int = 500
+    row_height: int = 38
     max_table_height: int = 520
 
 
