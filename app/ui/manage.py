@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from io import BytesIO
 from typing import Callable
 
 import pandas as pd
@@ -15,6 +14,7 @@ from portfolio.storage import (
     deserialize_portfolio_payload_v2,
     serialize_portfolio_payload,
 )
+from portfolio.transactions import TRANSACTION_COLUMNS, normalize_transaction_rows, rows_to_csv as transaction_rows_to_csv
 from .formatters import format_kst
 
 STORAGE_UNCONFIGURED_MESSAGE = "저장소가 설정되지 않아 CSV 방식만 사용할 수 있습니다"
@@ -26,11 +26,6 @@ STORAGE_STATUS_MESSAGE_KEY = "storage_status_message"
 def _holdings_csv(rows: list[dict[str, object]]) -> str:
     frame = pd.DataFrame(normalize_holding_rows(rows), columns=HOLDING_COLUMNS)
     return frame.to_csv(index=False)
-
-
-def _read_csv(uploaded_file) -> list[dict[str, object]]:
-    frame = pd.read_csv(BytesIO(uploaded_file.getvalue()), dtype=str)
-    return normalize_holding_rows(frame.to_dict("records"))
 
 
 def _queue_portfolio_name_update(portfolio_name: str) -> None:
@@ -59,6 +54,7 @@ def queue_portfolio_record_load(record: PortfolioRecord) -> None:
     cash = payload["cash_balances"]
     _queue_portfolio_state_update(
         portfolio_name=record.portfolio_name,
+        portfolio_transactions=payload.get("transactions", []),
         holdings_rows=payload["holdings"],
         usd_krw=float(payload["usd_krw"]),
         cash_krw=float(cash.get("KRW", 0.0)),
@@ -69,15 +65,17 @@ def queue_portfolio_record_load(record: PortfolioRecord) -> None:
 
 def render_csv_tools() -> None:
     st.subheader("CSV")
-    uploaded_file = st.file_uploader("CSV 업로드", type=["csv"])
-    if uploaded_file is not None:
-        try:
-            st.session_state.holdings_rows = _read_csv(uploaded_file)
-            st.success("CSV 포트폴리오를 불러왔습니다.")
-        except ValueError as exc:
-            st.error(f"CSV를 불러올 수 없습니다: {exc}")
+    st.caption("자산 입력은 보유현황 CSV가 아니라 보유자산 탭의 매입/매도 거래 CSV로 일원화했습니다.")
+    transactions = normalize_transaction_rows(st.session_state.get("portfolio_transactions", []))
     st.download_button(
-        "현재 포트폴리오 CSV 다운로드",
+        "거래내역 CSV 다운로드",
+        data=transaction_rows_to_csv(transactions, TRANSACTION_COLUMNS).encode("utf-8-sig"),
+        file_name="portfolio_transactions.csv",
+        mime="text/csv",
+        disabled=not transactions,
+    )
+    st.download_button(
+        "계산된 현재 보유현황 CSV 다운로드",
         data=_holdings_csv(st.session_state.get("holdings_rows", [])),
         file_name="portfolio_v2.csv",
         mime="text/csv",
@@ -115,6 +113,7 @@ def render_storage_tools(
                     usd_krw=st.session_state.get("usd_krw", 1380.0),
                     cash_krw=st.session_state.get("cash_krw", 0.0),
                     cash_usd=st.session_state.get("cash_usd", 0.0),
+                    transactions=st.session_state.get("portfolio_transactions", []),
                 )
                 store.save_portfolio(owner_id, clean_name, payload)
                 if history_store is not None:

@@ -3,6 +3,7 @@ from .memory_store import MemoryPortfolioStore
 from .serialization import (
     SCHEMA_VERSION,
     SCHEMA_VERSION_V1,
+    SCHEMA_VERSION_V2,
     PortfolioPayloadError,
     deserialize_portfolio_payload,
     deserialize_portfolio_payload_v2,
@@ -22,6 +23,7 @@ __all__ = [
     "SCHEMA",
     "SCHEMA_VERSION",
     "SCHEMA_VERSION_V1",
+    "SCHEMA_VERSION_V2",
     "MemoryPortfolioStore",
     "PortfolioPayloadError",
     "PortfolioRecord",
