@@ -470,7 +470,9 @@ def _auto_load_account_portfolio(owner_id, store) -> None:
 
 
 def _auto_refresh_loaded_prices(owner_id, store, history_store) -> None:
-    if owner_id is None or not st.session_state.get("holdings_rows"):
+    holdings_rows = list(st.session_state.get("holdings_rows") or [])
+    has_usd_cash = float(st.session_state.get("cash_usd") or 0.0) > 0
+    if owner_id is None or (not holdings_rows and not has_usd_cash):
         return
     refresh_key = f"{owner_id}:{_current_portfolio_name()}"
     if st.session_state.get(AUTO_PRICE_REFRESHED_KEY) == refresh_key:
@@ -478,7 +480,7 @@ def _auto_refresh_loaded_prices(owner_id, store, history_store) -> None:
     st.session_state[AUTO_PRICE_REFRESHED_KEY] = refresh_key
     fx_result = _fetch_fx_rate()
     refreshed_fx = _apply_fx_rate(*fx_result) if fx_result is not None else False
-    refreshed = _refresh_price_rows(owner_id, history_store, mode="전체 강제 재조회")
+    refreshed = _refresh_price_rows(owner_id, history_store, mode="전체 강제 재조회") if holdings_rows else False
     if not refreshed and not refreshed_fx:
         return
     if store is not None:
