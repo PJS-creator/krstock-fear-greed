@@ -18,8 +18,12 @@ class SupabaseStorageConfig:
     table_name: str = DEFAULT_TABLE_NAME
 
     @property
+    def has_credentials(self) -> bool:
+        return bool(self.supabase_url and self.service_role_key)
+
+    @property
     def is_configured(self) -> bool:
-        return bool(self.supabase_url and self.service_role_key and self.owner_id)
+        return self.has_credentials and bool(self.owner_id)
 
 
 def _clean_secret(value: object | None) -> str | None:
@@ -38,12 +42,16 @@ def supabase_config_from_secrets(secrets: Mapping[str, object] | None) -> Supaba
     )
 
 
-def should_enable_storage(config: SupabaseStorageConfig) -> bool:
-    return config.is_configured
+def has_supabase_credentials(config: SupabaseStorageConfig) -> bool:
+    return config.has_credentials
+
+
+def should_enable_storage(config: SupabaseStorageConfig, *, owner_id: str | None = None) -> bool:
+    return config.has_credentials and bool(owner_id or config.owner_id)
 
 
 def build_supabase_store(config: SupabaseStorageConfig) -> "SupabasePortfolioStore | None":
-    if not should_enable_storage(config):
+    if not has_supabase_credentials(config):
         return None
     return SupabasePortfolioStore(config)
 
@@ -67,7 +75,7 @@ def _record_from_mapping(data: Mapping[str, Any]) -> PortfolioRecord:
 
 class SupabasePortfolioStore:
     def __init__(self, config: SupabaseStorageConfig) -> None:
-        if not should_enable_storage(config):
+        if not has_supabase_credentials(config):
             raise PortfolioStoreError("Supabase storage is not configured")
         try:
             from supabase import create_client

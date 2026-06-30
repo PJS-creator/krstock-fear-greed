@@ -9,6 +9,7 @@ from portfolio.pricing import (
     ProviderQuote,
     TTLFxCache,
     TTLQuoteCache,
+    YFinanceFxProvider,
     YFinanceQuoteProvider,
     build_alpha_vantage_provider,
     parse_alpha_vantage_currency_exchange_response,
@@ -189,6 +190,31 @@ def test_yfinance_provider_uses_configured_history_loader():
     assert calls == [("AAPL", "5d", "1d", 10.0)]
     assert quote.symbol == "AAPL"
     assert quote.price == 101
+
+
+def test_yfinance_fx_provider_uses_krw_equals_symbol():
+    calls = []
+
+    def history_loader(symbol, *, period, interval, timeout_seconds):
+        calls.append((symbol, period, interval, timeout_seconds))
+        return pd.DataFrame({"Close": [1375.25, 1380.5]}, index=pd.to_datetime(["2026-06-29", "2026-06-30"]))
+
+    provider = YFinanceFxProvider(history_loader=history_loader)
+
+    rate = provider.get_exchange_rate("usd", "krw")
+
+    assert calls == [("KRW=X", "5d", "1d", 10.0)]
+    assert rate.from_currency == "USD"
+    assert rate.to_currency == "KRW"
+    assert rate.rate == pytest.approx(1380.5)
+    assert rate.provider == "yfinance"
+
+
+def test_yfinance_fx_provider_rejects_unsupported_pair():
+    provider = YFinanceFxProvider(history_loader=lambda *args, **kwargs: pd.DataFrame())
+
+    with pytest.raises(PriceProviderError, match="USD/KRW"):
+        provider.get_exchange_rate("EUR", "KRW")
 
 
 def test_missing_us_provider_does_not_fail_and_keeps_manual_quotes():

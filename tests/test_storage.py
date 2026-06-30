@@ -5,6 +5,7 @@ from portfolio.storage import (
     PortfolioPayloadError,
     deserialize_portfolio_payload,
     deserialize_portfolio_payload_v2,
+    has_supabase_credentials,
     migrate_v1_payload_to_v2,
     serialize_portfolio_payload,
     should_enable_storage,
@@ -114,14 +115,15 @@ def test_memory_store_overwrites_same_portfolio_name():
 
 def test_missing_supabase_secrets_disable_storage_policy():
     assert not should_enable_storage(supabase_config_from_secrets({}))
-    assert not should_enable_storage(
-        supabase_config_from_secrets(
-            {
-                "SUPABASE_URL": "https://example.supabase.co",
-                "SUPABASE_SERVICE_ROLE_KEY": "placeholder-service-role-key",
-            }
-        )
+    credentials_only = supabase_config_from_secrets(
+        {
+            "SUPABASE_URL": "https://example.supabase.co",
+            "SUPABASE_SERVICE_ROLE_KEY": "placeholder-service-role-key",
+        }
     )
+    assert has_supabase_credentials(credentials_only)
+    assert not should_enable_storage(credentials_only)
+    assert should_enable_storage(credentials_only, owner_id="account-owner")
     assert should_enable_storage(
         supabase_config_from_secrets(
             {

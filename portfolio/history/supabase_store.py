@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from portfolio.storage.supabase_store import SupabaseStorageConfig, should_enable_storage
+from portfolio.storage.supabase_store import SupabaseStorageConfig, has_supabase_credentials
 
 from .base import HistoryPeriod, PortfolioHistoryStoreError, period_start
 from .models import PortfolioHistoryRecord
@@ -57,7 +57,7 @@ def _record_from_row(row: Mapping[str, Any]) -> PortfolioHistoryRecord:
 
 class SupabasePortfolioHistoryStore:
     def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_HISTORY_TABLE_NAME) -> None:
-        if not should_enable_storage(config):
+        if not has_supabase_credentials(config):
             raise PortfolioHistoryStoreError("Supabase storage is not configured")
         try:
             from supabase import create_client
@@ -116,6 +116,6 @@ class SupabasePortfolioHistoryStore:
 
 
 def build_supabase_history_store(config: SupabaseStorageConfig) -> SupabasePortfolioHistoryStore | None:
-    if not should_enable_storage(config):
+    if not has_supabase_credentials(config):
         return None
     return SupabasePortfolioHistoryStore(config)
