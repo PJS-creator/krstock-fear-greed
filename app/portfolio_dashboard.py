@@ -19,6 +19,7 @@ from app.ui.components import render_price_update_log
 from app.ui.formatters import format_kst, format_relative_time
 from app.ui.holdings import render_holdings_editor, render_holdings_table
 from app.ui.history import render_history_tab
+from app.ui.investment_summary_card import render_investment_summary_card
 from app.ui.manage import (
     list_portfolios_cached,
     queue_portfolio_record_load,
@@ -458,7 +459,13 @@ metrics = _current_metrics()
 _render_header(security_config, owner_id, portfolio_store, history_store, metrics)
 _render_status_messages()
 
-overview_tab, holdings_tab, history_tab, manage_tab = st.tabs(["개요", "보유자산", "자산추이", "관리"])
+summary_card_tab, overview_tab, holdings_tab, history_tab, manage_tab = st.tabs(["투자 총괄 카드", "개요", "보유자산", "자산추이", "관리"])
+with summary_card_tab:
+    render_investment_summary_card(
+        metrics,
+        portfolio_name=_current_portfolio_name(),
+        last_refresh=metrics.last_price_refresh_at or st.session_state.last_price_refresh_at,
+    )
 with overview_tab:
     render_overview(metrics)
 with holdings_tab:
