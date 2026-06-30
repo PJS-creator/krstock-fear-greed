@@ -9,6 +9,7 @@ from portfolio.chart_data import currency_exposure_frame
 from portfolio.historical_holdings import ReconstructionResult, build_ticker_value_series
 from portfolio.history import HistoryPeriod, PortfolioHistoryRecord, period_start
 from portfolio.holdings import PortfolioMetrics
+from portfolio.transactions import transaction_cashflow_rows
 
 from .formatters import (
     APP_FONT_FAMILY,
@@ -378,6 +379,63 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
     )
     fig.update_layout(yaxis_title="KRW", xaxis_title="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0))
     fig.update_yaxes(tickformat=",.0f", tickprefix="₩")
+    return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
+
+
+def plot_transaction_cashflow(transactions: list[dict[str, object]], *, usd_krw: float) -> go.Figure | None:
+    rows = transaction_cashflow_rows(transactions, usd_krw=usd_krw)
+    if not rows:
+        return None
+    x_values = [row["date"] for row in rows]
+    net_values = [float(row["net_delta_krw"]) for row in rows]
+    cumulative_values = [float(row["cumulative_net_invested_krw"]) for row in rows]
+    customdata = [
+        [
+            full_krw(float(row["buy_amount_krw"])),
+            full_krw(float(row["sell_amount_krw"])),
+            full_krw(float(row["net_delta_krw"])),
+            full_krw(float(row["cumulative_net_invested_krw"])),
+            f"매입 {int(row['buy_count'])}건 · 매도 {int(row['sell_count'])}건",
+        ]
+        for row in rows
+    ]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=x_values,
+            y=net_values,
+            name="일별 순매입",
+            marker_color=[signed_color(value) for value in net_values],
+            customdata=customdata,
+            hovertemplate=(
+                "%{x}<br>"
+                "%{customdata[4]}<br>"
+                "매입 %{customdata[0]}<br>"
+                "매도 %{customdata[1]}<br>"
+                "순매입 %{customdata[2]}<extra></extra>"
+            ),
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=cumulative_values,
+            name="누적 순매입",
+            mode="lines+markers",
+            line=dict(color=SEMANTIC_COLORS["primary"], width=3.0, shape="spline", smoothing=0.25),
+            marker=dict(size=6),
+            customdata=customdata,
+            hovertemplate="%{x}<br>누적 순매입 %{customdata[3]}<extra></extra>",
+            yaxis="y2",
+        )
+    )
+    fig.add_hline(y=0, line_color="rgba(100,116,139,0.55)", line_width=1)
+    fig.update_layout(
+        xaxis_title="거래일",
+        yaxis=dict(title="일별 순매입", tickformat=",.0f", tickprefix="₩"),
+        yaxis2=dict(title="누적 순매입", overlaying="y", side="right", tickformat=",.0f", tickprefix="₩"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0),
+    )
     return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
 
 

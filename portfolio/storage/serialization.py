@@ -6,9 +6,11 @@ from typing import Any
 
 from portfolio.holdings import normalize_holding_rows, parse_non_negative_float
 from portfolio.manual_input import normalize_portfolio_rows
+from portfolio.transactions import normalize_transaction_rows
 
 SCHEMA_VERSION_V1 = 1
-SCHEMA_VERSION = 2
+SCHEMA_VERSION_V2 = 2
+SCHEMA_VERSION = 3
 
 
 class PortfolioPayloadError(ValueError):
@@ -66,6 +68,7 @@ def serialize_portfolio_payload(
     usd_krw: object,
     cash_krw: object,
     cash_usd: object = 0.0,
+    transactions: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     try:
         holdings = normalize_holding_rows(rows)
@@ -78,9 +81,14 @@ def serialize_portfolio_payload(
     clean_usd_krw = _positive_float("usd_krw", usd_krw)
     clean_cash_krw = _non_negative_float("cash_krw", cash_krw)
     clean_cash_usd = _non_negative_float("cash_usd", cash_usd)
+    try:
+        clean_transactions = normalize_transaction_rows(transactions or [])
+    except ValueError as exc:
+        raise PortfolioPayloadError(str(exc)) from exc
     return {
         "schema_version": SCHEMA_VERSION,
         "holdings": holdings,
+        "transactions": clean_transactions,
         "cash_balances": {"KRW": clean_cash_krw, "USD": clean_cash_usd},
         "last_known_quotes": _last_known_quotes(holdings),
         "quote_status": _quote_status(holdings),
@@ -114,7 +122,7 @@ def deserialize_portfolio_payload_v2(payload_json: Mapping[str, Any]) -> dict[st
     schema_version = payload_json.get("schema_version")
     if schema_version == SCHEMA_VERSION_V1:
         return migrate_v1_payload_to_v2(payload_json)
-    if schema_version != SCHEMA_VERSION:
+    if schema_version not in {SCHEMA_VERSION_V2, SCHEMA_VERSION}:
         raise PortfolioPayloadError(f"Unsupported payload schema_version: {schema_version}")
 
     holdings_value = payload_json.get("holdings")
@@ -133,6 +141,7 @@ def deserialize_portfolio_payload_v2(payload_json: Mapping[str, Any]) -> dict[st
         usd_krw=_positive_float("usd_krw", payload_json.get("usd_krw")),
         cash_krw=parse_non_negative_float("cash_krw", cash_balances.get("KRW", 0.0)),
         cash_usd=parse_non_negative_float("cash_usd", cash_balances.get("USD", 0.0)),
+        transactions=payload_json.get("transactions") if schema_version == SCHEMA_VERSION else [],
     )
     last_known_quotes = payload_json.get("last_known_quotes")
     quote_status = payload_json.get("quote_status")

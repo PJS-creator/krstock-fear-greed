@@ -17,7 +17,7 @@ import streamlit as st
 
 from app.ui.components import render_price_update_log
 from app.ui.formatters import format_kst, format_relative_time
-from app.ui.holdings import render_holdings_editor, render_holdings_table
+from app.ui.holdings import render_holdings_table
 from app.ui.history import render_history_tab
 from app.ui.investment_summary_card import render_investment_summary_card
 from app.ui.manage import (
@@ -30,6 +30,7 @@ from app.ui.manage import (
 from app.ui.overview import render_overview
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
 from app.ui.styles import inject_styles
+from app.ui.transactions import render_transaction_cashflow, render_transaction_editor
 from portfolio.auth import (
     AppSecurityConfig,
     config_from_secrets,
@@ -74,6 +75,7 @@ def _current_portfolio_signature() -> str:
 def _current_portfolio_state() -> dict[str, object]:
     return {
         "portfolio_name": _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_KEY)),
+        "portfolio_transactions": st.session_state.get("portfolio_transactions", []),
         "holdings_rows": st.session_state.get("holdings_rows", []),
         "cash_krw": st.session_state.get("cash_krw", 0.0),
         "cash_usd": st.session_state.get("cash_usd", 0.0),
@@ -96,6 +98,7 @@ def _restore_last_saved_state() -> None:
         return
     st.session_state[PORTFOLIO_NAME_KEY] = _clean_portfolio_name(state.get("portfolio_name"))
     st.session_state[PORTFOLIO_NAME_INPUT_KEY] = st.session_state[PORTFOLIO_NAME_KEY]
+    st.session_state.portfolio_transactions = list(state.get("portfolio_transactions") or [])
     st.session_state.holdings_rows = list(state.get("holdings_rows") or [])
     st.session_state.cash_krw = float(state.get("cash_krw") or 0.0)
     st.session_state.cash_usd = float(state.get("cash_usd") or 0.0)
@@ -131,7 +134,7 @@ def _apply_pending_portfolio_state() -> None:
     pending_state = st.session_state.pop(PENDING_PORTFOLIO_STATE_KEY, None)
     if not isinstance(pending_state, dict):
         return
-    loaded_portfolio_state = "portfolio_name" in pending_state or "holdings_rows" in pending_state
+    loaded_portfolio_state = "portfolio_name" in pending_state or "holdings_rows" in pending_state or "portfolio_transactions" in pending_state
     mark_clean = bool(pending_state.pop("mark_clean", loaded_portfolio_state))
     if "portfolio_name" in pending_state:
         clean_name = _clean_portfolio_name(pending_state["portfolio_name"])
@@ -139,6 +142,7 @@ def _apply_pending_portfolio_state() -> None:
         st.session_state[PORTFOLIO_NAME_INPUT_KEY] = clean_name
     for key in (
         "holdings_rows",
+        "portfolio_transactions",
         "cash_krw",
         "cash_usd",
         "usd_krw",
@@ -164,6 +168,7 @@ def _initialize_session_state() -> None:
         st.session_state[MARK_CLEAN_KEY] = True
     _apply_pending_portfolio_state()
     st.session_state.setdefault(PORTFOLIO_NAME_INPUT_KEY, st.session_state[PORTFOLIO_NAME_KEY])
+    st.session_state.setdefault("portfolio_transactions", [])
     st.session_state.setdefault("holdings_rows", [])
     st.session_state.setdefault("cash_krw", 0.0)
     st.session_state.setdefault("cash_usd", 0.0)
@@ -250,6 +255,7 @@ def _save_current_portfolio(owner_id, store, history_store, metrics) -> None:
             usd_krw=st.session_state.usd_krw,
             cash_krw=st.session_state.cash_krw,
             cash_usd=st.session_state.cash_usd,
+            transactions=st.session_state.get("portfolio_transactions", []),
         )
         store.save_portfolio(owner_id, portfolio_name, payload)
         if history_store is not None:
@@ -379,6 +385,7 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store) -> None:
         confirm_reset = st.checkbox("현재 입력 초기화 확인", key="confirm_reset_portfolio")
         if st.button("현재 입력 초기화", disabled=not confirm_reset, width="stretch"):
             st.session_state.holdings_rows = []
+            st.session_state.portfolio_transactions = []
             st.session_state.cash_krw = 0.0
             st.session_state.cash_usd = 0.0
             st.session_state.price_update_statuses = []
@@ -469,7 +476,11 @@ with summary_card_tab:
 with overview_tab:
     render_overview(metrics)
 with holdings_tab:
-    render_holdings_editor()
+    render_transaction_editor()
+    render_transaction_cashflow(
+        list(st.session_state.get("portfolio_transactions", [])),
+        usd_krw=float(st.session_state.usd_krw),
+    )
     metrics = _current_metrics()
     render_holdings_table(metrics)
 with history_tab:

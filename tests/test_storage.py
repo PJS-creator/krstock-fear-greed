@@ -30,28 +30,54 @@ def _row(**overrides):
 
 
 def test_portfolio_payload_round_trip():
-    payload = serialize_portfolio_payload([_row(symbol="abc")], usd_krw=1300, cash_krw=10000, cash_usd=5)
+    payload = serialize_portfolio_payload(
+        [_row(symbol="abc")],
+        usd_krw=1300,
+        cash_krw=10000,
+        cash_usd=5,
+        transactions=[
+            {"transaction_type": "매입", "ticker_or_name": "ABC", "unit_price": "100", "quantity": "2", "occurred_at": "2026-01-01"}
+        ],
+    )
 
     rows, usd_krw, cash_krw = deserialize_portfolio_payload(payload)
     v2 = deserialize_portfolio_payload_v2(payload)
 
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert rows[0]["ticker"] == "ABC"
     assert rows[0]["quantity"] == 2.0
     assert usd_krw == 1300.0
     assert cash_krw == 10000.0
     assert v2["cash_balances"]["USD"] == 5.0
     assert v2["last_known_quotes"]["ABC"]["current_price"] == 125.0
+    assert v2["transactions"][0]["transaction_type"] == "buy"
+    assert v2["transactions"][0]["ticker"] == "ABC"
 
 
-def test_v1_payload_migrates_to_v2():
+def test_v1_payload_migrates_to_current_schema():
     v1 = {"schema_version": 1, "rows": [_row(symbol="abc")], "usd_krw": 1300, "cash_krw": 10000}
 
     migrated = migrate_v1_payload_to_v2(v1)
 
-    assert migrated["schema_version"] == 2
+    assert migrated["schema_version"] == 3
     assert migrated["holdings"][0]["ticker"] == "ABC"
     assert migrated["cash_balances"] == {"KRW": 10000.0, "USD": 0.0}
+    assert migrated["transactions"] == []
+
+
+def test_v2_payload_loads_without_transactions_for_backward_compatibility():
+    v2 = {
+        "schema_version": 2,
+        "holdings": [_row(symbol="abc")],
+        "cash_balances": {"KRW": 10000, "USD": 5},
+        "usd_krw": 1300,
+    }
+
+    payload = deserialize_portfolio_payload_v2(v2)
+
+    assert payload["schema_version"] == 3
+    assert payload["holdings"][0]["ticker"] == "ABC"
+    assert payload["transactions"] == []
 
 
 def test_memory_store_save_load_and_delete():
