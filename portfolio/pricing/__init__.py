@@ -26,7 +26,9 @@ from .service import (
     update_us_quotes,
 )
 from .yahoo_finance import (
+    YFinanceFxProvider,
     YFinanceQuoteProvider,
+    build_yfinance_fx_provider,
     build_yfinance_provider,
     normalize_yfinance_symbol,
     parse_yfinance_history_frame,
@@ -44,9 +46,11 @@ __all__ = [
     "ProviderQuote",
     "TTLFxCache",
     "TTLQuoteCache",
+    "YFinanceFxProvider",
     "YFinanceQuoteProvider",
     "build_alpha_vantage_provider",
     "build_korea_quote_provider",
+    "build_yfinance_fx_provider",
     "build_yfinance_provider",
     "is_alpha_vantage_target",
     "is_auto_update_target",

@@ -5,7 +5,7 @@ from copy import deepcopy
 from datetime import date, datetime, timezone
 from typing import Any, Protocol
 
-from portfolio.storage.supabase_store import SupabaseStorageConfig, should_enable_storage
+from portfolio.storage.supabase_store import SupabaseStorageConfig, has_supabase_credentials
 
 from .models import HistoricalScheduleRecord, SCHEMA_VERSION
 from .normalization import (
@@ -146,7 +146,7 @@ def _record_from_row(row: Mapping[str, Any]) -> HistoricalScheduleRecord:
 
 class SupabaseHistoricalScheduleStore:
     def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_SCHEDULE_TABLE_NAME) -> None:
-        if not should_enable_storage(config):
+        if not has_supabase_credentials(config):
             raise HistoricalScheduleStoreError("Supabase storage is not configured")
         try:
             from supabase import create_client
@@ -218,6 +218,6 @@ class SupabaseHistoricalScheduleStore:
 
 
 def build_supabase_historical_schedule_store(config: SupabaseStorageConfig) -> SupabaseHistoricalScheduleStore | None:
-    if not should_enable_storage(config):
+    if not has_supabase_credentials(config):
         return None
     return SupabaseHistoricalScheduleStore(config)

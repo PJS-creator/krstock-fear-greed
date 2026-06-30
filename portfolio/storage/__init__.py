@@ -15,6 +15,7 @@ from .supabase_store import (
     SupabasePortfolioStore,
     SupabaseStorageConfig,
     build_supabase_store,
+    has_supabase_credentials,
     should_enable_storage,
     supabase_config_from_secrets,
 )
@@ -32,6 +33,7 @@ __all__ = [
     "SupabasePortfolioStore",
     "SupabaseStorageConfig",
     "build_supabase_store",
+    "has_supabase_credentials",
     "deserialize_portfolio_payload",
     "deserialize_portfolio_payload_v2",
     "init_db",
