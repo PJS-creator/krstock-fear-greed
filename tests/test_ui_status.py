@@ -31,8 +31,8 @@ def test_price_status_aggregation_and_log_rows():
     rows = build_price_log_rows(
         statuses,
         [
-            {"ticker": "MU", "display_name": "Micron", "provider": "alpha_vantage"},
-            {"ticker": "GOOG", "display_name": "Alphabet", "provider": "alpha_vantage"},
+            {"ticker": "MU", "display_name": "Micron", "provider": "yfinance"},
+            {"ticker": "GOOG", "display_name": "Alphabet", "provider": "yfinance"},
             {"ticker": "005930", "display_name": "삼성전자", "provider": "finance_datareader"},
         ],
     )

@@ -34,7 +34,6 @@ from app.ui.transactions import render_transaction_cashflow, render_transaction_
 from portfolio.auth import (
     AppSecurityConfig,
     config_from_secrets,
-    should_disable_price_update,
     should_lock_entire_app,
     should_lock_manual_mode,
     verify_password,
@@ -42,7 +41,14 @@ from portfolio.auth import (
 from portfolio.history import build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
-from portfolio.pricing import TTLQuoteCache, build_alpha_vantage_provider, build_korea_quote_provider, refresh_holding_quotes, refresh_usd_krw
+from portfolio.pricing import (
+    TTLQuoteCache,
+    build_alpha_vantage_provider,
+    build_korea_quote_provider,
+    build_yfinance_provider,
+    refresh_holding_quotes,
+    refresh_usd_krw,
+)
 from portfolio.storage import (
     PortfolioStoreError,
     build_supabase_store,
@@ -61,7 +67,7 @@ LAST_SAVED_STATE_KEY = "last_saved_portfolio_state"
 MARK_CLEAN_KEY = "mark_portfolio_clean"
 SAVE_STATUS_KEY = "portfolio_save_status_message"
 PRICE_REFRESH_MODE_KEY = "price_refresh_mode"
-UNPROTECTED_WARNING = "공개 앱에서 API key quota 보호를 위해 APP_PASSWORD 설정을 권장합니다."
+UNPROTECTED_WARNING = "공개 앱에서 저장소와 직접 입력 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 
 
 def _clean_portfolio_name(value: object) -> str:
@@ -193,7 +199,7 @@ def _is_authenticated() -> bool:
 def _render_login_form(config: AppSecurityConfig) -> None:
     st.title("포트폴리오 대시보드")
     st.subheader("비밀번호가 필요합니다")
-    st.caption("공개 앱의 포트폴리오 입력, 가격 API quota, Supabase 저장소를 보호하기 위한 개인용 보호입니다.")
+    st.caption("공개 앱의 포트폴리오 입력과 Supabase 저장소를 보호하기 위한 개인용 보호입니다.")
     with st.form("password_form"):
         candidate_password = st.text_input("APP_PASSWORD", type="password")
         submitted = st.form_submit_button("로그인")
@@ -275,11 +281,8 @@ def _save_current_portfolio(owner_id, store, history_store, metrics) -> None:
         st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
 
 
-def _refresh_prices(config: AppSecurityConfig, owner_id, history_store) -> None:
-    if should_disable_price_update(config):
-        st.warning(f"{UNPROTECTED_WARNING} APP_PASSWORD가 없어 가격 새로고침을 비활성화했습니다.")
-        return
-    alpha_provider = build_alpha_vantage_provider(config.alpha_vantage_api_key)
+def _refresh_prices(_config: AppSecurityConfig, owner_id, history_store) -> None:
+    us_provider = build_yfinance_provider()
     korea_provider = build_korea_quote_provider()
     progress = st.progress(0, text="최근 제공 가격 조회 준비 중")
 
@@ -297,7 +300,7 @@ def _refresh_prices(config: AppSecurityConfig, owner_id, history_store) -> None:
 
     updated_rows, statuses = refresh_holding_quotes(
         target_rows,
-        alpha_provider,
+        us_provider,
         korea_provider=korea_provider,
         cache=TTLQuoteCache() if mode == "전체 강제 재조회" else None,
         on_progress=update_progress,
@@ -401,7 +404,7 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store) -> None:
             if st.session_state.fx_fetched_at:
                 st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
         with st.expander("데이터 정보", expanded=False):
-            st.caption("미국 주식은 Alpha Vantage, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
+            st.caption("미국 주식은 yfinance, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
         with st.expander("가격 조회 옵션", expanded=False):
             st.radio(
                 "가격 새로고침 대상",

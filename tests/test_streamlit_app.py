@@ -71,7 +71,7 @@ def test_price_log_detail_expander_is_rendered_collapsed_by_default():
             "display_name": "Micron",
             "current_price": 120,
             "previous_close": 119,
-            "provider": "alpha_vantage",
+            "provider": "yfinance",
             "fetched_at": "2026-06-23T03:00:00+00:00",
         }
     ]
