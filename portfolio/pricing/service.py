@@ -395,7 +395,7 @@ def refresh_usd_krw(
     if provider is None:
         return current_usd_krw, FxUpdateStatus(
             status=QUOTE_STATUS_MISSING,
-            message="Alpha Vantage API key가 없어 수동 USD/KRW 환율을 유지했습니다.",
+            message="USD/KRW 환율 provider를 사용할 수 없어 수동 환율을 유지했습니다.",
         )
     fx_cache = cache or DEFAULT_FX_CACHE
     try:

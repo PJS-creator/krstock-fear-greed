@@ -4,9 +4,10 @@ import math
 from collections.abc import Callable
 from typing import Any
 
-from .base import PriceProviderError, ProviderQuote
+from .base import PriceProviderError, ProviderFxRate, ProviderQuote
 
 YFINANCE_PROVIDER_NAME = "yfinance"
+YFINANCE_USD_KRW_SYMBOL = "KRW=X"
 
 
 def normalize_yfinance_symbol(symbol: object) -> str:
@@ -129,3 +130,39 @@ class YFinanceQuoteProvider:
 
 def build_yfinance_provider() -> YFinanceQuoteProvider:
     return YFinanceQuoteProvider()
+
+
+class YFinanceFxProvider:
+    def __init__(
+        self,
+        *,
+        history_loader: Callable[..., Any] | None = None,
+        period: str = "5d",
+        interval: str = "1d",
+        timeout_seconds: float = 10.0,
+    ) -> None:
+        self._quote_provider = YFinanceQuoteProvider(
+            history_loader=history_loader,
+            period=period,
+            interval=interval,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def get_exchange_rate(self, from_currency: str, to_currency: str) -> ProviderFxRate:
+        normalized_from = str(from_currency or "").strip().upper()
+        normalized_to = str(to_currency or "").strip().upper()
+        if (normalized_from, normalized_to) != ("USD", "KRW"):
+            raise PriceProviderError("yfinance FX provider는 USD/KRW만 지원합니다.")
+        quote = self._quote_provider.get_quote(YFINANCE_USD_KRW_SYMBOL)
+        if quote.price <= 0:
+            raise PriceProviderError("yfinance USD/KRW 환율 값이 유효하지 않습니다.")
+        return ProviderFxRate.now(
+            from_currency=normalized_from,
+            to_currency=normalized_to,
+            rate=quote.price,
+            provider=YFINANCE_PROVIDER_NAME,
+        )
+
+
+def build_yfinance_fx_provider() -> YFinanceFxProvider:
+    return YFinanceFxProvider()

@@ -2,11 +2,13 @@ from portfolio.auth import (
     AUTH_SCOPE_ALL,
     AUTH_SCOPE_MANUAL,
     AppSecurityConfig,
+    available_account_ids,
     config_from_secrets,
     normalize_auth_scope,
     should_disable_price_update,
     should_lock_entire_app,
     should_lock_manual_mode,
+    verify_account,
     verify_password,
 )
 
@@ -26,6 +28,45 @@ def test_password_verification_accepts_only_correct_password():
 
     assert verify_password("expected-password", expected_password)
     assert not verify_password("wrong-password", expected_password)
+
+
+def test_account_config_from_nested_secrets_verifies_owner_and_default_portfolio():
+    config = config_from_secrets(
+        {
+            "ACCOUNTS": {
+                "jisung": {
+                    "password": "expected-password",
+                    "owner_id": "jisung-main",
+                    "default_portfolio": "main",
+                }
+            }
+        }
+    )
+
+    account = verify_account("jisung", "expected-password", config)
+
+    assert available_account_ids(config) == ("jisung",)
+    assert account is not None
+    assert account.owner_id == "jisung-main"
+    assert account.default_portfolio == "main"
+    assert verify_account("jisung", "wrong-password", config) is None
+
+
+def test_legacy_app_password_verifies_as_default_account():
+    config = config_from_secrets(
+        {
+            "APP_PASSWORD": "expected-password",
+            "PORTFOLIO_OWNER_ID": "legacy-owner",
+            "DEFAULT_PORTFOLIO_NAME": "core",
+        }
+    )
+
+    account = verify_account("ignored", "expected-password", config)
+
+    assert account is not None
+    assert account.account_id == "legacy-owner"
+    assert account.owner_id == "legacy-owner"
+    assert account.default_portfolio == "core"
 
 
 def test_empty_password_input_fails():
