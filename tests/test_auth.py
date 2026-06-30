@@ -34,10 +34,10 @@ def test_empty_password_input_fails():
     assert not verify_password(None, "expected-password")
 
 
-def test_price_update_is_disabled_when_api_key_exists_without_app_password():
+def test_price_update_is_not_disabled_when_api_key_exists_without_app_password():
     config = AppSecurityConfig(app_password=None, alpha_vantage_api_key="demo-api-key")
 
-    assert should_disable_price_update(config)
+    assert not should_disable_price_update(config)
 
 
 def test_price_update_policy_allows_no_key_or_password_protected_key():

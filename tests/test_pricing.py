@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+import pandas as pd
 import pytest
 
 from portfolio.pricing import (
@@ -8,9 +9,11 @@ from portfolio.pricing import (
     ProviderQuote,
     TTLFxCache,
     TTLQuoteCache,
+    YFinanceQuoteProvider,
     build_alpha_vantage_provider,
     parse_alpha_vantage_currency_exchange_response,
     parse_alpha_vantage_global_quote_response,
+    parse_yfinance_history_frame,
     refresh_usd_krw,
     update_us_quotes,
 )
@@ -158,7 +161,37 @@ def test_alpha_vantage_symbol_mismatch_is_rejected():
         )
 
 
-def test_missing_api_key_does_not_fail_and_keeps_manual_quotes():
+def test_yfinance_history_frame_parsing_uses_latest_and_previous_close():
+    frame = pd.DataFrame(
+        {"Close": [180.5, 182.25, 181.75]},
+        index=pd.to_datetime(["2026-06-26", "2026-06-29", "2026-06-30"]),
+    )
+
+    quote = parse_yfinance_history_frame("googl", frame)
+
+    assert quote.symbol == "GOOGL"
+    assert quote.price == pytest.approx(181.75)
+    assert quote.previous_close == pytest.approx(182.25)
+    assert quote.provider == "yfinance"
+
+
+def test_yfinance_provider_uses_configured_history_loader():
+    calls = []
+
+    def history_loader(symbol, *, period, interval, timeout_seconds):
+        calls.append((symbol, period, interval, timeout_seconds))
+        return pd.DataFrame({"Close": [100, 101]}, index=pd.to_datetime(["2026-06-29", "2026-06-30"]))
+
+    provider = YFinanceQuoteProvider(history_loader=history_loader)
+
+    quote = provider.get_quote(" aapl ")
+
+    assert calls == [("AAPL", "5d", "1d", 10.0)]
+    assert quote.symbol == "AAPL"
+    assert quote.price == 101
+
+
+def test_missing_us_provider_does_not_fail_and_keeps_manual_quotes():
     rows = [_row(symbol="MSFT"), _row(market="KR", symbol="005930", currency="KRW")]
 
     provider = build_alpha_vantage_provider(None)
@@ -167,7 +200,7 @@ def test_missing_api_key_does_not_fail_and_keeps_manual_quotes():
     assert provider is None
     assert updated_rows[0]["current_price"] == 120.0
     assert updated_rows[0]["previous_close"] == 118.0
-    assert statuses[0].status == "missing_api_key"
+    assert statuses[0].status == "missing"
     assert statuses[1].status == "manual"
 
 

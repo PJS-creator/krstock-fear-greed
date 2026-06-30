@@ -12,16 +12,17 @@ from portfolio.holdings import (
     QUOTE_STATUS_FAILED,
     QUOTE_STATUS_MANUAL,
     QUOTE_STATUS_MISSING,
-    QUOTE_STATUS_MISSING_API_KEY,
     QUOTE_STATUS_STALE,
     QUOTE_STATUS_UPDATED,
     normalize_holding_rows,
 )
 from portfolio.manual_input import normalize_portfolio_rows
 
-ALPHA_VANTAGE_TARGET_MARKETS = {"US", "USA"}
+US_QUOTE_TARGET_MARKETS = {"US", "USA"}
+ALPHA_VANTAGE_TARGET_MARKETS = US_QUOTE_TARGET_MARKETS
 KOREA_TARGET_MARKETS = {"KR", "KRX", "KOSPI", "KOSDAQ"}
-ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS = 1.1
+US_QUOTE_REQUEST_INTERVAL_SECONDS = 0.2
+ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS = US_QUOTE_REQUEST_INTERVAL_SECONDS
 DEFAULT_QUOTE_CACHE = TTLQuoteCache(ttl_seconds=600)
 DEFAULT_FX_CACHE = TTLFxCache(ttl_seconds=600)
 
@@ -67,10 +68,14 @@ class _ProviderRequestPacer:
         self.last_request_started_at = now
 
 
-def is_alpha_vantage_target(row: Mapping[str, Any]) -> bool:
+def is_us_quote_target(row: Mapping[str, Any]) -> bool:
     market = str(row.get("market", "")).strip().upper()
     currency = str(row.get("currency", "")).strip().upper()
-    return currency == "USD" and market in ALPHA_VANTAGE_TARGET_MARKETS
+    return currency == "USD" and market in US_QUOTE_TARGET_MARKETS
+
+
+def is_alpha_vantage_target(row: Mapping[str, Any]) -> bool:
+    return is_us_quote_target(row)
 
 
 def is_korea_update_target(row: Mapping[str, Any]) -> bool:
@@ -80,7 +85,7 @@ def is_korea_update_target(row: Mapping[str, Any]) -> bool:
 
 
 def is_auto_update_target(row: Mapping[str, Any]) -> bool:
-    return is_alpha_vantage_target(row)
+    return is_us_quote_target(row)
 
 
 def update_us_quotes(
@@ -100,7 +105,7 @@ def update_us_quotes(
         market = str(row["market"])
         currency = str(row["currency"])
 
-        if not is_alpha_vantage_target(row):
+        if not is_us_quote_target(row):
             statuses.append(
                 PriceUpdateStatus(
                     symbol=symbol,
@@ -119,8 +124,8 @@ def update_us_quotes(
                     symbol=symbol,
                     market=market,
                     currency=currency,
-                    status="missing_api_key",
-                    message="Alpha Vantage API key가 없어 수동 입력 가격을 유지했습니다.",
+                    status="missing",
+                    message="미국 주식 가격 provider를 사용할 수 없어 수동 입력 가격을 유지했습니다.",
                 )
             )
             updated_rows.append(updated_row)
@@ -135,7 +140,7 @@ def update_us_quotes(
                     market=market,
                     currency=currency,
                     status="failed",
-                    message=f"Alpha Vantage 업데이트 실패: {exc}. 기존 입력 가격을 유지했습니다.",
+                    message=f"미국 주식 가격 업데이트 실패: {exc}. 기존 입력 가격을 유지했습니다.",
                 )
             )
             updated_rows.append(updated_row)
@@ -149,7 +154,7 @@ def update_us_quotes(
                 market=market,
                 currency=currency,
                 status="updated",
-                message="Alpha Vantage 가격으로 current_price와 previous_close를 업데이트했습니다.",
+                message="미국 주식 최근 제공 가격으로 current_price와 previous_close를 업데이트했습니다.",
                 fetched_at=quote.fetched_at.isoformat(),
             )
         )
@@ -261,9 +266,9 @@ def refresh_holding_quotes(
         currency = str(row["currency"])
         has_last_price = row.get("current_price") is not None
 
-        if is_alpha_vantage_target(row):
+        if is_us_quote_target(row):
             if provider is None:
-                status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_MISSING_API_KEY
+                status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_MISSING
                 updated_row["quote_status"] = status
                 statuses.append(
                     PriceUpdateStatus(
@@ -271,7 +276,7 @@ def refresh_holding_quotes(
                         market=market,
                         currency=currency,
                         status=status,
-                        message="Alpha Vantage API key가 없어 최근 제공 가격을 갱신하지 못했습니다.",
+                        message="미국 주식 가격 provider를 사용할 수 없어 최근 제공 가격을 갱신하지 못했습니다.",
                         fetched_at=updated_row.get("fetched_at"),
                     )
                 )

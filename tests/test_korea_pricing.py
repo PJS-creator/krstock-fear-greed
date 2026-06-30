@@ -11,6 +11,7 @@ from portfolio.pricing import (
     TTLQuoteCache,
     is_alpha_vantage_target,
     is_korea_update_target,
+    is_us_quote_target,
     normalize_korea_symbol,
     parse_finance_data_reader_price_frame,
     refresh_holding_quotes,
@@ -97,6 +98,8 @@ def test_korea_target_routing_and_us_target_routing():
     assert is_korea_update_target({"market": "KR", "currency": "KRW"})
     assert is_korea_update_target({"market": "KOSPI", "currency": "KRW"})
     assert not is_korea_update_target({"market": "US", "currency": "USD"})
+    assert is_us_quote_target({"market": "US", "currency": "USD"})
+    assert not is_us_quote_target({"market": "KR", "currency": "KRW"})
     assert is_alpha_vantage_target({"market": "US", "currency": "USD"})
     assert not is_alpha_vantage_target({"market": "KR", "currency": "KRW"})
 
@@ -116,7 +119,7 @@ class MixedUsProvider:
             symbol=symbol,
             price=200,
             previous_close=190,
-            provider="alpha_vantage",
+            provider="yfinance",
             fetched_at=datetime.now(timezone.utc),
         )
 

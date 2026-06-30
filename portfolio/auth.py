@@ -64,4 +64,6 @@ def should_lock_manual_mode(config: AppSecurityConfig, *, is_authenticated: bool
 
 
 def should_disable_price_update(config: AppSecurityConfig) -> bool:
-    return config.has_alpha_vantage_api_key and not config.has_password
+    # Recent stock price refresh uses keyless providers. Alpha Vantage is only
+    # used by the separate USD/KRW refresh button, so it should not block quotes.
+    return False
