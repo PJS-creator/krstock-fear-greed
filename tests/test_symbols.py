@@ -50,18 +50,19 @@ def test_resolver_keeps_ambiguous_partial_matches_unresolved():
 
 
 def test_bulk_paste_and_simple_csv_preview_preserve_leading_zero():
-    pasted = parse_symbol_quantity_lines("삼성전자 10\n005930,5\nMU 20\n")
+    pasted = parse_symbol_quantity_lines("삼성전자 10 72300\n005930,5\nMU 20 120.5\n")
     preview = build_input_preview(pasted, korea_listing_records=KRX_RECORDS)
     holdings = preview_rows_to_holdings(preview.rows)
     csv_rows = csv_to_rows(rows_to_csv([{"ticker_or_name": "005930", "quantity": "3"}], SIMPLE_PORTFOLIO_COLUMNS))
 
     assert preview.summary == {"total": 3, "ok": 3, "candidate_required": 0, "error": 0}
-    assert [(row["market"], row["ticker"], row["quantity"]) for row in holdings] == [
-        ("KR", "005930", 10.0),
-        ("KR", "005930", 5.0),
-        ("US", "MU", 20.0),
+    assert [(row["market"], row["ticker"], row["quantity"], row["avg_price"]) for row in holdings] == [
+        ("KR", "005930", 10.0, 72300.0),
+        ("KR", "005930", 5.0, None),
+        ("US", "MU", 20.0, 120.5),
     ]
     assert csv_rows[0]["ticker_or_name"] == "005930"
+    assert "avg_price" in csv_rows[0]
 
 
 def test_preview_reports_row_number_and_column_errors():
@@ -73,6 +74,17 @@ def test_preview_reports_row_number_and_column_errors():
     assert preview.summary["error"] == 1
     assert preview.errors == ["7행: quantity must be a number"]
     assert preview.rows[0]["row_number"] == 7
+
+
+def test_optional_average_price_does_not_break_multi_word_names():
+    parsed = parse_symbol_quantity_lines("삼성전자 보통주 200\n삼성전자 보통주 200 72300\n")
+
+    assert parsed[0]["ticker_or_name"] == "삼성전자 보통주"
+    assert parsed[0]["quantity"] == "200"
+    assert "avg_price" not in parsed[0]
+    assert parsed[1]["ticker_or_name"] == "삼성전자 보통주"
+    assert parsed[1]["quantity"] == "200"
+    assert parsed[1]["avg_price"] == "72300"
 
 
 def test_simple_historical_csv_and_snapshot_helpers():

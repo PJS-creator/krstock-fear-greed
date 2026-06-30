@@ -15,7 +15,7 @@ from .korea_listing import search_korea_listing
 from .models import InputPreviewResult, SymbolCandidate, SymbolResolution
 
 
-SIMPLE_PORTFOLIO_COLUMNS = ["ticker_or_name", "quantity"]
+SIMPLE_PORTFOLIO_COLUMNS = ["ticker_or_name", "quantity", "avg_price"]
 SIMPLE_HISTORICAL_COLUMNS = ["as_of_date", "ticker_or_name", "quantity"]
 EVENT_COLUMNS = ["date", "ticker_or_name", "quantity_after"]
 
@@ -45,6 +45,20 @@ def _parse_non_negative(value: object, field_name: str) -> float:
     if not math.isfinite(number) or number < 0:
         raise ValueError(f"{field_name} must be non-negative")
     return number
+
+
+def _parse_optional_non_negative(value: object, field_name: str) -> float | None:
+    if clean_symbol_input(value) == "":
+        return None
+    return _parse_non_negative(value, field_name)
+
+
+def _looks_like_number(value: object) -> bool:
+    try:
+        _parse_non_negative(value, "value")
+    except ValueError:
+        return False
+    return True
 
 
 def _resolution_from_candidate(raw_input: str, candidate: SymbolCandidate, *, confidence: float, message: str) -> SymbolResolution:
@@ -134,7 +148,15 @@ def parse_symbol_quantity_lines(text: str, *, with_date: bool = False, quantity_
             if len(parts) < 2:
                 rows.append({"row_number": str(line_number), "error": "종목명 또는 티커와 수량을 입력하세요."})
                 continue
-            rows.append({"row_number": str(line_number), "ticker_or_name": " ".join(parts[:-1]), quantity_name: parts[-1]})
+            row = {"row_number": str(line_number), "ticker_or_name": " ".join(parts[:-1]), quantity_name: parts[-1]}
+            if len(parts) >= 3 and _looks_like_number(parts[-2]) and _looks_like_number(parts[-1]):
+                row = {
+                    "row_number": str(line_number),
+                    "ticker_or_name": " ".join(parts[:-2]),
+                    quantity_name: parts[-2],
+                    "avg_price": parts[-1],
+                }
+            rows.append(row)
     return rows
 
 
@@ -173,7 +195,7 @@ def build_input_preview(
             counts["error"] += 1
             continue
         raw_input = row.get("ticker_or_name") or row.get("ticker") or row.get("symbol")
-        if not any(clean_symbol_input(row.get(field)) for field in ("as_of_date", "ticker_or_name", "ticker", "symbol", quantity_field)):
+        if not any(clean_symbol_input(row.get(field)) for field in ("as_of_date", "ticker_or_name", "ticker", "symbol", quantity_field, "avg_price")):
             continue
         as_of_date = ""
         if require_date:
@@ -192,6 +214,13 @@ def build_input_preview(
             preview_rows.append({"row_number": row_number, "status": "error", "message": str(exc), "raw_input": clean_symbol_input(raw_input)})
             counts["error"] += 1
             continue
+        try:
+            avg_price = _parse_optional_non_negative(row.get("avg_price"), "avg_price")
+        except ValueError as exc:
+            errors.append(f"{row_number}행: {exc}")
+            preview_rows.append({"row_number": row_number, "status": "error", "message": str(exc), "raw_input": clean_symbol_input(raw_input)})
+            counts["error"] += 1
+            continue
         resolution = resolve_symbol(raw_input, korea_listing_records)
         status = "ok" if resolution.is_resolved else ("candidate_required" if resolution.status == "ambiguous" else "error")
         if status == "error":
@@ -205,6 +234,7 @@ def build_input_preview(
             "market": resolution.market,
             "currency": resolution.currency,
             quantity_field: quantity,
+            "avg_price": avg_price,
             "status": status,
             "message": resolution.message,
             "candidates": [candidate.__dict__ for candidate in resolution.candidates],
@@ -232,6 +262,7 @@ def preview_rows_to_holdings(rows: Iterable[Mapping[str, Any]]) -> list[dict[str
                 "currency": row.get("currency"),
                 "display_name": row.get("display_name") or row.get("ticker"),
                 "quantity": row.get("quantity"),
+                "avg_price": row.get("avg_price"),
             }
         )
     return holdings

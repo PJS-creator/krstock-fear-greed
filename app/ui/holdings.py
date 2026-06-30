@@ -18,7 +18,7 @@ from .formatters import format_kst, format_number, format_price, full_krw, instr
 from .status import ISSUE_STATUSES, quote_status_label
 from .theme import DIMENSIONS
 
-QUICK_EDITOR_COLUMNS = ["ticker_or_name", "quantity"]
+QUICK_EDITOR_COLUMNS = ["ticker_or_name", "quantity", "avg_price"]
 QUICK_PREVIEW_STATE_KEY = "quick_holdings_preview_rows"
 MARKET_LABELS = {"전체": None, "미국": "US", "국내": "KR"}
 STATUS_FILTERS = {
@@ -61,7 +61,14 @@ def _quick_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=QUICK_EDITOR_COLUMNS)
     return pd.DataFrame(
-        [{"ticker_or_name": row.get("display_name") or row.get("ticker") or row.get("symbol"), "quantity": row.get("quantity")} for row in rows],
+        [
+            {
+                "ticker_or_name": row.get("display_name") or row.get("ticker") or row.get("symbol"),
+                "quantity": row.get("quantity"),
+                "avg_price": row.get("avg_price"),
+            }
+            for row in rows
+        ],
         columns=QUICK_EDITOR_COLUMNS,
     )
 
@@ -75,7 +82,7 @@ def _advanced_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
 
 
 def _preview_frame(records: list[dict[str, object]]) -> pd.DataFrame:
-    frame = pd.DataFrame(records, columns=["row_number", "raw_input", "ticker", "display_name", "market", "currency", "quantity", "status", "message"])
+    frame = pd.DataFrame(records, columns=["row_number", "raw_input", "ticker", "display_name", "market", "currency", "quantity", "avg_price", "status", "message"])
     return frame.rename(
         columns={
             "row_number": "행",
@@ -85,6 +92,7 @@ def _preview_frame(records: list[dict[str, object]]) -> pd.DataFrame:
             "market": "시장",
             "currency": "통화",
             "quantity": "수량",
+            "avg_price": "평단가",
             "status": "상태",
             "message": "메시지",
         }
@@ -140,7 +148,7 @@ def _render_quality_summary(preview_rows: list[dict[str, object]]) -> None:
 
 def render_holdings_editor() -> None:
     st.subheader("빠른 입력")
-    st.caption("종목명 또는 티커와 수량만 입력해도 됩니다. 국내 종목명은 KRX 목록에서 찾고, 가격 조회는 버튼을 눌렀을 때만 실행됩니다.")
+    st.caption("종목명 또는 티커와 수량만 입력해도 됩니다. 평단가는 선택 입력이며, 입력하면 평가이익과 수익률을 계산합니다.")
     rows = st.session_state.get("holdings_rows", [])
     quick_frame = st.data_editor(
         _quick_frame(rows),
@@ -150,6 +158,7 @@ def render_holdings_editor() -> None:
         column_config={
             "ticker_or_name": st.column_config.TextColumn("종목명 또는 티커", required=True, help="예: 삼성전자, 005930, MU, QURE"),
             "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, required=True, format="%,.4f"),
+            "avg_price": st.column_config.NumberColumn("매입 평단가", min_value=0.0, step=0.01, format="%,.2f", help="국내 종목은 원화, 미국 종목은 달러 기준입니다."),
         },
     )
     duplicate_policy = st.radio("동일 종목 입력 처리", ["새 입력값으로 교체", "기존 수량에 합산"], horizontal=True, key="quick_duplicate_policy")
@@ -165,7 +174,10 @@ def render_holdings_editor() -> None:
             _preview_frame(preview_rows),
             hide_index=True,
             width="stretch",
-            column_config={"수량": st.column_config.NumberColumn("수량", format="%,.4f")},
+            column_config={
+                "수량": st.column_config.NumberColumn("수량", format="%,.4f"),
+                "평단가": st.column_config.NumberColumn("평단가", format="%,.2f"),
+            },
         )
         ok_rows = [row for row in preview_rows if row.get("status") == "ok"]
         if st.button("오류 없는 행 적용", disabled=not ok_rows):
@@ -179,14 +191,17 @@ def render_holdings_editor() -> None:
                 st.error(f"입력값을 적용할 수 없습니다: {exc}")
 
     with st.expander("다중 붙여넣기", expanded=False):
-        bulk_text = st.text_area("한 줄에 종목명 또는 티커와 수량 붙여넣기", placeholder="삼성전자 10\n005930,10\nMU 20\nQURE,500", height=110)
+        bulk_text = st.text_area("한 줄에 종목명 또는 티커, 수량, 선택 평단가 붙여넣기", placeholder="삼성전자 10 72300\n005930,10,72300\nMU 20 120.5\nQURE,500", height=110)
         if st.button("붙여넣기 미리보기", disabled=not bulk_text.strip()):
             _build_preview(parse_symbol_quantity_lines(bulk_text))
 
     with st.expander("CSV 업로드", expanded=False):
         st.download_button(
             "간편 CSV 템플릿",
-            data=rows_to_csv([{"ticker_or_name": "삼성전자", "quantity": "10"}, {"ticker_or_name": "MU", "quantity": "20"}], SIMPLE_PORTFOLIO_COLUMNS).encode("utf-8-sig"),
+            data=rows_to_csv(
+                [{"ticker_or_name": "삼성전자", "quantity": "10", "avg_price": "72300"}, {"ticker_or_name": "MU", "quantity": "20", "avg_price": "120.5"}],
+                SIMPLE_PORTFOLIO_COLUMNS,
+            ).encode("utf-8-sig"),
             file_name="portfolio_simple_template.csv",
             mime="text/csv",
         )
@@ -243,6 +258,7 @@ def _holdings_table_rows(metrics: PortfolioMetrics) -> list[dict[str, object]]:
                 "수량": holding["quantity"],
                 "수량 표시": format_number(float(holding["quantity"]), digits=4, trim=True),
                 "통화": holding["currency"],
+                "평단가 표시": format_price(holding.get("avg_price"), holding.get("currency")),
                 "최근 제공 가격": holding.get("current_price"),
                 "최근 제공 가격 표시": format_price(holding.get("current_price"), holding.get("currency")),
                 "평가액": item.market_value_krw or 0.0,
@@ -295,7 +311,7 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
         return
 
     base_columns = ["종목", "시장", "수량 표시", "최근 제공 가격 표시", "평가액 표시", "오늘 변동액", "오늘 변동률", "비중", "가격 상태", "조회 시각"]
-    detail_columns = ["ticker", "종목명", "통화", "provider", "비중 표시"]
+    detail_columns = ["ticker", "종목명", "통화", "평단가 표시", "provider", "비중 표시"]
     visible_columns = base_columns + detail_columns if show_details else base_columns
     st.dataframe(
         frame[visible_columns],
@@ -308,6 +324,7 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
             "종목명": st.column_config.TextColumn("종목명"),
             "시장": st.column_config.TextColumn("시장"),
             "수량 표시": st.column_config.TextColumn("수량"),
+            "평단가 표시": st.column_config.TextColumn("평단가"),
             "최근 제공 가격 표시": st.column_config.TextColumn("최근 제공 가격"),
             "평가액 표시": st.column_config.TextColumn("평가액"),
             "오늘 변동액": st.column_config.TextColumn("오늘 변동액"),

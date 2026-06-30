@@ -41,7 +41,7 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
 
     assert not at.exception
     text = _app_text(at)
-    for label in ("개요", "보유자산", "자산추이", "관리"):
+    for label in ("투자 총괄 카드", "개요", "보유자산", "자산추이", "관리"):
         assert label in text
     metric_labels = _element_texts(at.metric)
     for label in ("총자산", "오늘 변동", "총현금", "USD 노출도"):
