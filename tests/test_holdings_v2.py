@@ -104,6 +104,19 @@ class FailingProvider:
         raise PriceProviderError("provider unavailable")
 
 
+class BurstLimitThenSuccessProvider:
+    def __init__(self) -> None:
+        self.calls = []
+        self.failed_symbols = set()
+
+    def get_quote(self, symbol):
+        self.calls.append(symbol)
+        if symbol == "BBB" and symbol not in self.failed_symbols:
+            self.failed_symbols.add(symbol)
+            raise PriceProviderError("Alpha Vantage 무료 API 요청 간격 제한에 걸렸습니다. 잠시 후 다시 시도하세요.")
+        return ProviderQuote.now(symbol=symbol, price=12, previous_close=10, provider="fake")
+
+
 def test_quote_refresh_updates_only_explicit_call_and_reports_cached():
     provider = FakeProvider()
     cache = TTLQuoteCache()
@@ -143,6 +156,36 @@ def test_quote_refresh_paces_uncached_provider_calls():
 
     assert provider.calls == ["AAA", "BBB"]
     assert sleeps == [pytest.approx(1.1)]
+
+
+def test_quote_refresh_retries_alpha_vantage_burst_limit_once():
+    provider = BurstLimitThenSuccessProvider()
+    current_time = [100.0]
+    sleeps = []
+
+    def now_fn():
+        return current_time[0]
+
+    def sleep_fn(seconds):
+        sleeps.append(seconds)
+        current_time[0] += seconds
+
+    rows = [{"ticker": "AAA", "quantity": 1}, {"ticker": "BBB", "quantity": 1}]
+
+    updated_rows, statuses = refresh_holding_quotes(
+        rows,
+        provider,
+        cache=TTLQuoteCache(),
+        request_interval_seconds=1.1,
+        burst_retry_delay_seconds=3.0,
+        sleep_fn=sleep_fn,
+        now_fn=now_fn,
+    )
+
+    assert provider.calls == ["AAA", "BBB", "BBB"]
+    assert sleeps == [pytest.approx(1.1), pytest.approx(3.0)]
+    assert [status.status for status in statuses] == ["updated", "updated"]
+    assert updated_rows[1]["current_price"] == 12
 
 
 def test_quote_failure_keeps_last_price_as_stale_and_missing_price_as_failed():
