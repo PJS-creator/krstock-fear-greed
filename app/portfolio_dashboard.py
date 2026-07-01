@@ -357,11 +357,12 @@ def _refresh_price_rows(
     history_store,
     *,
     mode: str,
+    include_intraday: bool = False,
     on_progress=None,
 ) -> bool:
     us_provider = build_yfinance_provider()
     korea_provider = build_korea_quote_provider()
-    intraday_provider = build_yfinance_intraday_provider()
+    intraday_provider = build_yfinance_intraday_provider() if include_intraday else None
     all_rows = list(st.session_state.holdings_rows)
     target_rows = list(select_price_refresh_rows(all_rows, mode))
     if not target_rows:
@@ -403,7 +404,7 @@ def _refresh_prices(_config: AppSecurityConfig, owner_id, history_store) -> None
         progress.progress(percent, text=f"최근 제공 가격 조회 중: {symbol} ({completed}/{total})")
 
     mode = st.session_state.get(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
-    refreshed = _refresh_price_rows(owner_id, history_store, mode=mode, on_progress=update_progress)
+    refreshed = _refresh_price_rows(owner_id, history_store, mode=mode, include_intraday=True, on_progress=update_progress)
     progress.empty()
     if not refreshed:
         st.info("새로 조회할 대상 종목이 없습니다.")
@@ -483,7 +484,7 @@ def _auto_refresh_loaded_prices(owner_id, store, history_store) -> None:
     st.session_state[AUTO_PRICE_REFRESHED_KEY] = refresh_key
     fx_result = _fetch_fx_rate()
     refreshed_fx = _apply_fx_rate(*fx_result) if fx_result is not None else False
-    refreshed = _refresh_price_rows(owner_id, history_store, mode="전체 강제 재조회") if holdings_rows else False
+    refreshed = _refresh_price_rows(owner_id, history_store, mode="전체 강제 재조회", include_intraday=False) if holdings_rows else False
     if not refreshed and not refreshed_fx:
         return
     if store is not None:
