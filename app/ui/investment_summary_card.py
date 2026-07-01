@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
+import math
+from datetime import date, datetime
 from html import escape
 from typing import Any
 
 import streamlit as st
 
 from portfolio.holdings import PortfolioMetrics
+from portfolio.transactions import normalize_transaction_rows
 
 from .formatters import KST, format_kst, format_number, format_price, instrument_label, percentage, signed_krw, signed_percentage
 from .theme import SEMANTIC_COLORS, deterministic_color
@@ -51,6 +53,169 @@ def _sort_key(row: dict[str, Any]) -> float:
     return float(row.get("value_krw") or 0)
 
 
+def _holding_day_change_pct(item) -> float | None:
+    holding = item.holding
+    current_price = holding.get("current_price")
+    previous_close = holding.get("previous_close")
+    if current_price is None or previous_close is None:
+        return None
+    previous_value = float(previous_close)
+    if previous_value <= 0:
+        return None
+    return (float(current_price) - previous_value) / previous_value
+
+
+def _holding_day_change_price(holding: dict[str, Any]) -> float | None:
+    current_price = holding.get("current_price")
+    previous_close = holding.get("previous_close")
+    if current_price is None or previous_close is None:
+        return None
+    return float(current_price) - float(previous_close)
+
+
+def _signed_price(value: float, currency: object) -> str:
+    if value == 0:
+        return format_price(0.0, currency)
+    sign = "+" if value > 0 else "-"
+    return f"{sign}{format_price(abs(value), currency)}"
+
+
+def _price_change_text(holding: dict[str, Any]) -> str:
+    change = _holding_day_change_price(holding)
+    pct = None
+    previous_close = holding.get("previous_close")
+    if change is not None and previous_close is not None and float(previous_close) > 0:
+        pct = change / float(previous_close)
+    if change is None:
+        return "-"
+    return f"{_signed_price(change, holding.get('currency'))} ({signed_percentage(pct) if pct is not None else '-'})"
+
+
+def _heatmap_tone(change_pct: float | None) -> str:
+    if change_pct is None or abs(change_pct) < 1e-12:
+        return "#374151"
+    return "#D94B4B" if change_pct > 0 else "#2F80ED"
+
+
+def _font_size_for_weight(weight: float) -> float:
+    return max(0.78, min(1.85, 0.72 + math.sqrt(max(weight, 0.0)) * 2.15))
+
+
+def _safe_date(value: object | None) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+    except ValueError:
+        try:
+            return date.fromisoformat(text[:10])
+        except ValueError:
+            return None
+
+
+def _as_of_date(last_refresh: object = None) -> date:
+    return _safe_date(last_refresh) or datetime.now(KST).date()
+
+
+def _xnpv(rate: float, cashflows: list[tuple[date, float]]) -> float:
+    base_date = min(day for day, _ in cashflows)
+    return sum(amount / ((1.0 + rate) ** ((day - base_date).days / 365.25)) for day, amount in cashflows)
+
+
+def _xirr(cashflows: list[tuple[date, float]]) -> float | None:
+    if len(cashflows) < 2:
+        return None
+    amounts = [amount for _, amount in cashflows]
+    if not any(amount < 0 for amount in amounts) or not any(amount > 0 for amount in amounts):
+        return None
+    if len({day for day, _ in cashflows}) < 2:
+        return None
+
+    low = -0.9999
+    high = 10.0
+    low_value = _xnpv(low, cashflows)
+    high_value = _xnpv(high, cashflows)
+    while low_value * high_value > 0 and high < 1_000:
+        high *= 2
+        high_value = _xnpv(high, cashflows)
+    if low_value * high_value > 0:
+        return None
+
+    for _ in range(90):
+        mid = (low + high) / 2
+        mid_value = _xnpv(mid, cashflows)
+        if abs(mid_value) < 1e-7:
+            return mid
+        if low_value * mid_value <= 0:
+            high = mid
+            high_value = mid_value
+        else:
+            low = mid
+            low_value = mid_value
+    return (low + high) / 2
+
+
+def _normalized_transactions(transactions: list[dict[str, Any]] | None) -> list[dict[str, object]]:
+    if not transactions:
+        return []
+    try:
+        return normalize_transaction_rows(transactions)
+    except ValueError:
+        return []
+
+
+def _holding_irr(
+    holding: dict[str, Any],
+    transactions: list[dict[str, object]],
+    *,
+    as_of_date: date,
+) -> float | None:
+    ticker = str(holding.get("ticker") or holding.get("symbol") or "")
+    market = str(holding.get("market") or "")
+    current_price = holding.get("current_price")
+    quantity = float(holding.get("quantity") or 0.0)
+    if not ticker or not market or current_price is None or quantity <= 0:
+        return None
+
+    cashflows: list[tuple[date, float]] = []
+    for transaction in transactions:
+        if str(transaction.get("ticker")) != ticker or str(transaction.get("market")) != market:
+            continue
+        occurred_at = _safe_date(transaction.get("occurred_at"))
+        if occurred_at is None:
+            continue
+        amount = float(transaction.get("unit_price") or 0.0) * float(transaction.get("quantity") or 0.0)
+        if amount <= 0:
+            continue
+        cashflows.append((occurred_at, -amount if transaction.get("transaction_type") == "buy" else amount))
+    cashflows.append((as_of_date, float(current_price) * quantity))
+    return _xirr(cashflows)
+
+
+def _portfolio_irr(metrics: PortfolioMetrics, transactions: list[dict[str, object]], *, as_of_date: date) -> float | None:
+    if not transactions or metrics.total_position_value_krw <= 0:
+        return None
+    cashflows: list[tuple[date, float]] = []
+    for transaction in transactions:
+        occurred_at = _safe_date(transaction.get("occurred_at"))
+        if occurred_at is None:
+            continue
+        fx_rate = 1.0 if transaction.get("currency") == "KRW" else metrics.usd_krw
+        amount = float(transaction.get("unit_price") or 0.0) * float(transaction.get("quantity") or 0.0) * fx_rate
+        if amount <= 0:
+            continue
+        cashflows.append((occurred_at, -amount if transaction.get("transaction_type") == "buy" else amount))
+    cashflows.append((as_of_date, metrics.total_position_value_krw))
+    return _xirr(cashflows)
+
+
 def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     total = metrics.total_value_krw
@@ -58,6 +223,7 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
         value = item.market_value_krw
         if value is None or value <= 0:
             continue
+        day_change_pct = _holding_day_change_pct(item)
         rows.append(
             {
                 "label": instrument_label(item.holding),
@@ -65,6 +231,9 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
                 "value_krw": value,
                 "weight": value / total if total else 0.0,
                 "color": deterministic_color(item.holding.get("ticker") or index),
+                "heat_color": _heatmap_tone(day_change_pct),
+                "day_change_pct": day_change_pct,
+                "day_change_krw": item.day_change_krw,
                 "kind": "holding",
             }
         )
@@ -76,6 +245,9 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
                 "value_krw": metrics.cash_total_krw,
                 "weight": metrics.cash_total_krw / total if total else 0.0,
                 "color": "#8C99A8",
+                "heat_color": "#374151",
+                "day_change_pct": 0.0,
+                "day_change_krw": 0.0,
                 "kind": "cash",
             }
         )
@@ -85,6 +257,9 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
     kept = rows[: max_items - 1]
     other = rows[max_items - 1 :]
     other_value = sum(float(row["value_krw"]) for row in other)
+    other_day_change_krw = sum(float(row.get("day_change_krw") or 0.0) for row in other)
+    other_previous_value = other_value - other_day_change_krw
+    other_day_change_pct = other_day_change_krw / other_previous_value if other_previous_value else None
     kept.append(
         {
             "label": "기타",
@@ -92,20 +267,84 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
             "value_krw": other_value,
             "weight": other_value / total if total else 0.0,
             "color": "#64748B",
+            "heat_color": _heatmap_tone(other_day_change_pct),
+            "day_change_pct": other_day_change_pct,
+            "day_change_krw": other_day_change_krw,
             "kind": "other",
         }
     )
     return kept
 
 
-def _donut_gradient(rows: list[dict[str, Any]]) -> str:
+def _split_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    total = sum(float(row["value_krw"]) for row in rows)
     cursor = 0.0
-    stops = []
-    for row in rows:
-        start = cursor
-        cursor += max(float(row["weight"]) * 100, 0)
-        stops.append(f"{row['color']} {start:.4f}% {cursor:.4f}%")
-    return ", ".join(stops) or f"{SEMANTIC_COLORS['missing']} 0% 100%"
+    split_index = 1
+    for index, row in enumerate(rows[:-1], start=1):
+        cursor += float(row["value_krw"])
+        if cursor >= total / 2:
+            split_index = index
+            break
+    return rows[:split_index], rows[split_index:]
+
+
+def _treemap_layout(
+    rows: list[dict[str, Any]],
+    *,
+    x: float = 0.0,
+    y: float = 0.0,
+    width: float = 100.0,
+    height: float = 100.0,
+) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    if len(rows) == 1:
+        row = dict(rows[0])
+        row.update({"x": x, "y": y, "width": width, "height": height})
+        return [row]
+
+    first, second = _split_rows(rows)
+    first_value = sum(float(row["value_krw"]) for row in first)
+    total_value = first_value + sum(float(row["value_krw"]) for row in second)
+    first_ratio = first_value / total_value if total_value else 0.5
+    if width >= height:
+        first_width = width * first_ratio
+        return _treemap_layout(first, x=x, y=y, width=first_width, height=height) + _treemap_layout(
+            second,
+            x=x + first_width,
+            y=y,
+            width=width - first_width,
+            height=height,
+        )
+    first_height = height * first_ratio
+    return _treemap_layout(first, x=x, y=y, width=width, height=first_height) + _treemap_layout(
+        second,
+        x=x,
+        y=y + first_height,
+        width=width,
+        height=height - first_height,
+    )
+
+
+def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
+    tiles = []
+    for row in _treemap_layout(rows):
+        weight = float(row.get("weight") or 0.0)
+        change_pct = row.get("day_change_pct")
+        change_text = signed_percentage(change_pct) if change_pct is not None else "-"
+        font_size = _font_size_for_weight(weight)
+        tiles.append(
+            "<div class='summary-heatmap-tile' "
+            f"style='left:{row['x']:.4f}%;top:{row['y']:.4f}%;width:{row['width']:.4f}%;height:{row['height']:.4f}%;"
+            f"background:{row['heat_color']};font-size:{font_size:.2f}rem;'>"
+            f"<div class='summary-heatmap-name'>{escape(str(row['label']))}</div>"
+            f"<div class='summary-heatmap-change'>{escape(change_text)}</div>"
+            "</div>"
+        )
+    return "".join(tiles) or (
+        "<div class='summary-heatmap-empty' "
+        f"style='background:{SEMANTIC_COLORS['missing']}'>보유자산 없음</div>"
+    )
 
 
 def _coverage_label(metrics: PortfolioMetrics) -> str:
@@ -115,22 +354,42 @@ def _coverage_label(metrics: PortfolioMetrics) -> str:
     return f"평단가 입력 {covered_count:,}/{metrics.holdings_count:,}종목"
 
 
-def _holding_table_rows(metrics: PortfolioMetrics) -> list[str]:
+def _holding_table_rows(
+    metrics: PortfolioMetrics,
+    *,
+    transactions: list[dict[str, Any]] | None = None,
+    as_of_date: date | None = None,
+) -> list[str]:
     rows = []
+    normalized_transactions = _normalized_transactions(transactions)
+    irr_date = as_of_date or datetime.now(KST).date()
     for item in sorted(metrics.rows, key=lambda row: row.market_value_krw or 0.0, reverse=True):
         holding = item.holding
         label = escape(instrument_label(holding))
         color = deterministic_color(holding.get("ticker") or label)
         quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
         avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
+        purchase_amount = "-"
+        if holding.get("avg_price") is not None:
+            purchase_amount = format_price(float(holding.get("avg_price") or 0.0) * float(holding.get("quantity") or 0.0), holding.get("currency"))
+        current_price = format_price(holding.get("current_price"), holding.get("currency"))
+        day_change = _price_change_text(holding)
         pnl_pct = signed_percentage(item.total_pnl_pct) if item.total_pnl_pct is not None else "-"
         pnl_class = _signed_class(item.total_pnl_pct)
+        day_change_class = _signed_class(_holding_day_change_price(holding))
+        irr = _holding_irr(holding, normalized_transactions, as_of_date=irr_date)
+        irr_text = signed_percentage(irr) if irr is not None else "-"
+        irr_class = _signed_class(irr)
         rows.append(
             "<tr>"
             f"<td class='summary-name'><span style='background:{color}'></span>{label}</td>"
             f"<td>{escape(quantity)}</td>"
             f"<td>{escape(avg_price)}</td>"
+            f"<td>{escape(purchase_amount)}</td>"
+            f"<td>{escape(current_price)}</td>"
+            f"<td class='{day_change_class}'>{escape(day_change)}</td>"
             f"<td class='{pnl_class}'>{escape(pnl_pct)}</td>"
+            f"<td class='{irr_class}'>{escape(irr_text)}</td>"
             f"<td>{escape(_krw(item.market_value_krw))}</td>"
             f"<td>{escape(percentage(item.weight, digits=2))}</td>"
             "</tr>"
@@ -139,14 +398,20 @@ def _holding_table_rows(metrics: PortfolioMetrics) -> list[str]:
         rows.append(
             "<tr>"
             "<td class='summary-name'><span style='background:#8C99A8'></span>현금</td>"
-            "<td>-</td><td>-</td><td>-</td>"
+            "<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>"
             f"<td>{escape(_krw(metrics.cash_total_krw))}</td>"
             f"<td>{escape(percentage(metrics.cash_total_krw / metrics.total_value_krw if metrics.total_value_krw else 0, digits=2))}</td>"
             "</tr>"
         )
+    portfolio_irr = _portfolio_irr(metrics, normalized_transactions, as_of_date=irr_date)
     rows.append(
         "<tr class='summary-total-row'>"
-        "<td>합계 (주식 평가금액 + 현금)</td><td>-</td><td>-</td><td>-</td>"
+        "<td>합계 (주식 평가금액 + 현금)</td><td>-</td><td>-</td>"
+        f"<td>{escape(_krw(metrics.total_cost_krw) if metrics.total_cost_krw else '-')}</td>"
+        "<td>-</td>"
+        f"<td class='{_signed_class(metrics.day_change_krw)}'>{escape(_signed_text(metrics.day_change_krw, signed_krw))} ({escape(_signed_text(metrics.day_change_pct, signed_percentage))})</td>"
+        f"<td class='{_signed_class(metrics.total_pnl_pct)}'>{escape(_signed_text(metrics.total_pnl_pct, signed_percentage))}</td>"
+        f"<td class='{_signed_class(portfolio_irr)}'>{escape(signed_percentage(portfolio_irr) if portfolio_irr is not None else '-')}</td>"
         f"<td>{escape(_krw(metrics.total_value_krw))}</td><td>100.00%</td>"
         "</tr>"
     )
@@ -199,7 +464,7 @@ def _render_styles() -> None:
             grid-template-columns: 360px minmax(360px, 1fr);
             gap: 18px;
             margin-top: 16px;
-            align-items: center;
+            align-items: stretch;
         }
         .summary-panel { padding: 18px; }
         .summary-panel h3, .summary-table-wrap h3 { margin: 0 0 16px; color: #F8FAFC; font-size: 1.18rem; }
@@ -216,40 +481,69 @@ def _render_styles() -> None:
         .summary-legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .summary-legend-pct { text-align: right; font-variant-numeric: tabular-nums; }
         .summary-legend-total { border-top: 1px solid rgba(148, 163, 184, 0.24); margin-top: 12px; padding-top: 14px; color: #11E6D5; text-align: center; font-size: 1.15rem; }
-        .summary-donut-area { display: flex; justify-content: center; align-items: center; min-height: 480px; }
-        .summary-donut {
-            --donut: #334155 0% 100%;
-            width: min(500px, 92vw);
-            aspect-ratio: 1;
-            border-radius: 50%;
-            position: relative;
-            background: conic-gradient(var(--donut));
-            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.42), 0 28px 70px rgba(0, 0, 0, 0.34);
+        .summary-heatmap-card {
+            padding: 18px;
+            min-height: 430px;
+            display: flex;
+            flex-direction: column;
         }
-        .summary-donut:after {
+        .summary-heatmap-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .summary-heatmap-head h3 { margin: 0; }
+        .summary-heatmap-legend { display: flex; gap: 12px; color: #CBD5E1; font-size: 0.9rem; }
+        .summary-heatmap-legend span:before {
             content: "";
-            position: absolute;
-            inset: 31%;
+            width: 9px;
+            height: 9px;
             border-radius: 50%;
-            background: #06111D;
-            border: 1px solid rgba(148, 163, 184, 0.26);
+            display: inline-block;
+            margin-right: 5px;
         }
-        .summary-donut-center {
+        .summary-heatmap-legend .up:before { background: #D94B4B; }
+        .summary-heatmap-legend .down:before { background: #2F80ED; }
+        .summary-heatmap-area {
+            position: relative;
+            flex: 1;
+            min-height: 360px;
+            width: 100%;
+            background: #020817;
+            border: 1px solid #000;
+            border-radius: 7px;
+            overflow: hidden;
+            box-shadow: 0 24px 58px rgba(0, 0, 0, 0.26);
+        }
+        .summary-heatmap-tile {
             position: absolute;
-            z-index: 1;
-            inset: 35%;
+            border: 1px solid #000;
+            color: #F8FAFC;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             text-align: center;
+            line-height: 1.15;
+            padding: 6px;
+            overflow: hidden;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
         }
-        .summary-donut-center .label { color: #E5E7EB; font-size: 1.2rem; }
-        .summary-donut-center .value { color: #11E6D5; font-size: 1.55rem; margin: 8px 0; font-variant-numeric: tabular-nums; }
-        .summary-donut-center .split { color: #CBD5E1; border-top: 1px solid rgba(148, 163, 184, 0.30); padding-top: 10px; width: 100%; }
+        .summary-heatmap-name {
+            font-weight: 850;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .summary-heatmap-change { font-size: 0.78em; margin-top: 6px; font-variant-numeric: tabular-nums; }
+        .summary-heatmap-empty { position: absolute; inset: 0; display: grid; place-items: center; color: #CBD5E1; }
         .summary-table-wrap { margin-top: 16px; overflow: hidden; }
         .summary-table-wrap h3 { padding: 14px 18px; margin: 0; border-bottom: 1px solid rgba(148, 163, 184, 0.26); }
-        .summary-table { width: 100%; border-collapse: collapse; font-size: 0.96rem; }
+        .summary-table-scroll { overflow-x: auto; }
+        .summary-table { width: 100%; min-width: 1120px; border-collapse: collapse; font-size: 0.93rem; }
         .summary-table th, .summary-table td { border-bottom: 1px solid rgba(148, 163, 184, 0.18); padding: 10px 12px; text-align: right; font-variant-numeric: tabular-nums; }
         .summary-table th { color: #CBD5E1; font-weight: 650; background: rgba(15, 23, 42, 0.58); }
         .summary-table th:first-child, .summary-table td:first-child { text-align: left; }
@@ -268,8 +562,8 @@ def _render_styles() -> None:
         .summary-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; color: #94A3B8; font-size: 0.9rem; }
         @media (max-width: 980px) {
             .summary-top, .summary-main, .summary-kpi-grid { grid-template-columns: 1fr; }
-            .summary-donut-area { min-height: 360px; }
-            .summary-table-wrap { overflow-x: auto; }
+            .summary-heatmap-card { min-height: 360px; }
+            .summary-heatmap-area { min-height: 300px; }
         }
         </style>
         """,
@@ -282,9 +576,11 @@ def render_investment_summary_card(
     *,
     portfolio_name: str,
     last_refresh: object = None,
+    transactions: list[dict[str, Any]] | None = None,
 ) -> None:
     _render_styles()
     allocation_rows = _allocation_rows(metrics)
+    as_of_date = _as_of_date(last_refresh)
     stock_pct = metrics.total_position_value_krw / metrics.total_value_krw if metrics.total_value_krw else 0.0
     cash_pct = metrics.cash_total_krw / metrics.total_value_krw if metrics.total_value_krw else 0.0
     day_class = _signed_class(metrics.day_change_krw)
@@ -310,7 +606,8 @@ def render_investment_summary_card(
         "</div>"
         for row in allocation_rows
     )
-    table_rows = "".join(_holding_table_rows(metrics))
+    heatmap_tiles = _heatmap_tiles(allocation_rows)
+    table_rows = "".join(_holding_table_rows(metrics, transactions=transactions, as_of_date=as_of_date))
     html = f"""
     <div class="summary-card">
         <div class="summary-top">
@@ -335,31 +632,35 @@ def render_investment_summary_card(
                 {legend_rows}
                 <div class="summary-legend-total">총 100%</div>
             </div>
-            <div class="summary-donut-area">
-                <div class="summary-donut" style="--donut: {_donut_gradient(allocation_rows)}">
-                    <div class="summary-donut-center">
-                        <div class="label">총 자산</div>
-                        <div class="value">{escape(_krw(metrics.total_value_krw))}</div>
-                        <div class="split">주식 {escape(percentage(stock_pct, digits=2))}<br>현금 {escape(percentage(cash_pct, digits=2))}</div>
-                    </div>
+            <div class="summary-panel summary-heatmap-card">
+                <div class="summary-heatmap-head">
+                    <h3>자산 구성 및 성과 <span class="summary-sub">(전일 대비 기준)</span></h3>
+                    <div class="summary-heatmap-legend"><span class="up">상승</span><span class="down">하락</span></div>
                 </div>
+                <div class="summary-heatmap-area">{heatmap_tiles}</div>
             </div>
         </div>
         <div class="summary-table-wrap">
             <h3>보유 종목 현황</h3>
-            <table class="summary-table">
-                <thead>
-                    <tr>
-                        <th>종목명</th>
-                        <th>보유 수량</th>
-                        <th>평단가 (원/달러)</th>
-                        <th>평가 수익률 (%)</th>
-                        <th>평가금액 (원)</th>
-                        <th>자산 비중 (%)</th>
-                    </tr>
-                </thead>
-                <tbody>{table_rows}</tbody>
-            </table>
+            <div class="summary-table-scroll">
+                <table class="summary-table">
+                    <thead>
+                        <tr>
+                            <th>종목명</th>
+                            <th>보유 수량</th>
+                            <th>평단가 (원/달러)</th>
+                            <th>매입금액</th>
+                            <th>현재 주가</th>
+                            <th>전일 대비 증감</th>
+                            <th>평가 수익률 (%)</th>
+                            <th>연환산수익률 (IRR)</th>
+                            <th>평가금액 (원)</th>
+                            <th>자산 비중 (%)</th>
+                        </tr>
+                    </thead>
+                    <tbody>{table_rows}</tbody>
+                </table>
+            </div>
         </div>
         <div class="summary-kpi-grid">
             {''.join(kpi_cards)}
