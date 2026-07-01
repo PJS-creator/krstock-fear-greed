@@ -119,18 +119,42 @@ def quote_status_label(status: object) -> str:
     return STATUS_LABELS.get(str(status or "").lower(), str(status or "미조회"))
 
 
-def select_price_refresh_rows(rows: Iterable[Mapping[str, Any]], mode: str) -> list[Mapping[str, Any]]:
+def _has_intraday_prices(row: Mapping[str, Any]) -> bool:
+    values = row.get("intraday_prices")
+    return isinstance(values, (list, tuple)) and len(values) >= 2
+
+
+def _row_key(row: Mapping[str, Any]) -> tuple[str, str]:
+    return (str(row.get("market") or ""), str(row.get("ticker") or row.get("symbol") or ""))
+
+
+def select_price_refresh_rows(
+    rows: Iterable[Mapping[str, Any]],
+    mode: str,
+    *,
+    include_missing_intraday: bool = False,
+) -> list[Mapping[str, Any]]:
     all_rows = list(rows)
     if mode == "실패 종목만":
         return [row for row in all_rows if str(row.get("quote_status") or "").lower() == QUOTE_STATUS_FAILED]
     if mode == "전체 강제 재조회":
         return all_rows
-    return [
+    selected = [
         row
         for row in all_rows
         if str(row.get("quote_status") or "").lower() in DEFAULT_PRICE_REFRESH_STATUSES
         or row.get("current_price") is None
     ]
+    if not include_missing_intraday:
+        return selected
+
+    selected_keys = {_row_key(row) for row in selected}
+    for row in all_rows:
+        key = _row_key(row)
+        if key not in selected_keys and not _has_intraday_prices(row):
+            selected.append(row)
+            selected_keys.add(key)
+    return selected
 
 
 def build_price_log_rows(statuses: Iterable[object], holdings_rows: Iterable[Mapping[str, Any]]) -> list[dict[str, object]]:
