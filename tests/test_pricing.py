@@ -10,11 +10,13 @@ from portfolio.pricing import (
     TTLFxCache,
     TTLQuoteCache,
     YFinanceFxProvider,
+    YFinanceIntradayPriceProvider,
     YFinanceQuoteProvider,
     build_alpha_vantage_provider,
     parse_alpha_vantage_currency_exchange_response,
     parse_alpha_vantage_global_quote_response,
     parse_yfinance_history_frame,
+    parse_yfinance_intraday_frame,
     refresh_usd_krw,
     update_us_quotes,
 )
@@ -190,6 +192,35 @@ def test_yfinance_provider_uses_configured_history_loader():
     assert calls == [("AAPL", "5d", "1d", 10.0)]
     assert quote.symbol == "AAPL"
     assert quote.price == 101
+
+
+def test_yfinance_intraday_frame_parsing_downsamples_close_prices():
+    frame = pd.DataFrame(
+        {"Close": [100, 101, 102, 103, 104]},
+        index=pd.to_datetime(["2026-06-30 09:30", "2026-06-30 09:31", "2026-06-30 09:32", "2026-06-30 09:33", "2026-06-30 09:34"]),
+    )
+
+    prices = parse_yfinance_intraday_frame("AAPL", frame, max_points=3)
+
+    assert prices == (100.0, 102.0, 104.0)
+
+
+def test_yfinance_intraday_provider_tries_korea_suffix_candidates():
+    calls = []
+
+    def history_loader(symbol, *, period, interval, timeout_seconds):
+        calls.append((symbol, period, interval, timeout_seconds))
+        if symbol.endswith(".KS"):
+            return pd.DataFrame({"Close": []})
+        return pd.DataFrame({"Close": [70000, 70100, 70200]}, index=pd.to_datetime(["2026-06-30 09:00", "2026-06-30 09:01", "2026-06-30 09:02"]))
+
+    provider = YFinanceIntradayPriceProvider(history_loader=history_loader)
+
+    intraday = provider.get_intraday_prices("005930", market="KR")
+
+    assert [call[0] for call in calls] == ["005930.KS", "005930.KQ"]
+    assert intraday.symbol == "005930"
+    assert intraday.prices == (70000.0, 70100.0, 70200.0)
 
 
 def test_yfinance_fx_provider_uses_krw_equals_symbol():
