@@ -273,7 +273,7 @@ def _render_security_status(config: AppSecurityConfig) -> None:
         if _is_authenticated():
             account_id = st.session_state.get(ACCOUNT_ID_KEY) or st.session_state.get(OWNER_ID_KEY) or "main"
             st.caption(f"상태: 인증됨 · {account_id}")
-            if st.button("로그아웃"):
+            if st.button("로그아웃", icon=":material/logout:"):
                 _logout()
                 st.rerun()
         else:
@@ -518,7 +518,7 @@ def _render_saved_portfolio_selector(owner_id, store) -> None:
     if selected.portfolio_name != current_name:
         if _portfolio_is_dirty():
             st.warning("저장하지 않은 변경이 있습니다. 관리 탭에서 저장한 뒤 다른 포트폴리오를 불러오세요.")
-        if st.button("선택 포트폴리오 불러오기", disabled=_portfolio_is_dirty(), width="stretch"):
+        if st.button("선택 포트폴리오 불러오기", disabled=_portfolio_is_dirty(), width="stretch", icon=":material/folder_open:"):
             try:
                 queue_portfolio_record_load(selected)
                 st.rerun()
@@ -533,20 +533,20 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store) -> None:
         _render_saved_portfolio_selector(owner_id, store)
         if _portfolio_is_dirty():
             st.caption("저장하지 않은 변경 있음")
-            if st.button("변경사항 되돌리기", width="stretch"):
+            if st.button("변경사항 되돌리기", width="stretch", icon=":material/undo:"):
                 _restore_last_saved_state()
                 st.rerun()
         else:
             st.caption("저장됨")
         confirm_reset = st.checkbox("현재 입력 초기화 확인", key="confirm_reset_portfolio")
-        if st.button("현재 입력 초기화", disabled=not confirm_reset, width="stretch"):
+        if st.button("현재 입력 초기화", disabled=not confirm_reset, width="stretch", icon=":material/delete:"):
             _reset_current_portfolio_state(_current_portfolio_name())
             st.rerun()
         with st.expander("현금 및 환율", expanded=True):
             st.number_input("원화 현금", min_value=0.0, step=100000.0, key="cash_krw")
             st.number_input("달러 현금", min_value=0.0, step=100.0, key="cash_usd")
             st.number_input("환율", min_value=0.01, step=1.0, key="usd_krw", help="USD/KRW")
-            if st.button("환율 갱신"):
+            if st.button("환율 갱신", icon=":material/currency_exchange:"):
                 _refresh_fx(config)
             st.caption(st.session_state.fx_status_message)
             if st.session_state.fx_fetched_at:
@@ -579,13 +579,13 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
         st.caption(f"정상 {metrics.priced_count} · 캐시 {summary.cached} · 이전 가격 {metrics.stale_quote_count} · 실패 {metrics.failed_quote_count} · 미조회 {metrics.missing_quote_count}")
         st.caption("저장하지 않은 변경 있음" if dirty else "저장됨")
     with right:
-        if st.button("가격 새로고침", type="primary", width="stretch"):
+        if st.button("현재가 갱신", type="primary", width="stretch", icon=":material/refresh:"):
             _refresh_prices(config, owner_id, history_store)
-        if summary.failed and st.button("실패 종목 다시 시도", width="stretch"):
+        if summary.failed and st.button("실패 종목 재시도", width="stretch", icon=":material/replay:"):
             st.session_state[PRICE_REFRESH_MODE_KEY] = "실패 종목만"
             _refresh_prices(config, owner_id, history_store)
         save_disabled = not dirty or owner_id is None or store is None
-        if st.button("현재 포트폴리오 저장", disabled=save_disabled, width="stretch"):
+        if st.button("포트폴리오 저장", disabled=save_disabled, width="stretch", icon=":material/save:"):
             _save_current_portfolio(owner_id, store, history_store, metrics)
 
 
