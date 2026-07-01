@@ -144,6 +144,20 @@ def test_quote_refresh_attaches_intraday_prices_when_available():
     assert rows[0]["intraday_provider"] == "fake_intraday"
 
 
+def test_quote_refresh_skips_intraday_prices_without_intraday_provider():
+    provider = FakeProvider()
+
+    rows, statuses = refresh_holding_quotes(
+        [{"ticker": "AAA", "quantity": 1}],
+        provider,
+        cache=TTLQuoteCache(),
+    )
+
+    assert statuses[0].status == "updated"
+    assert rows[0]["intraday_prices"] == []
+    assert rows[0]["intraday_provider"] is None
+
+
 def test_quote_refresh_paces_uncached_provider_calls():
     provider = FakeProvider()
     current_time = [100.0]
