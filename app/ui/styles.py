@@ -35,6 +35,20 @@ def inject_styles() -> None:
         div[data-testid="stMetricValue"] { font-size: 1.55rem; font-weight: 760; letter-spacing: 0; }
         div[data-testid="stMetricDelta"] { font-size: 0.98rem; }
         div[data-testid="stDataFrame"] { font-size: 0.98rem; }
+        div[data-testid="stButton"] button {
+            border-radius: 8px;
+            font-weight: 720;
+            letter-spacing: 0;
+        }
+        div[data-testid="stButton"] button[kind="primary"] {
+            background: linear-gradient(135deg, #2563EB, #1D4ED8);
+            border: 1px solid #3B82F6;
+            color: #FFFFFF;
+            box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
+        }
+        div[data-testid="stButton"] button[kind="secondary"] {
+            border-color: rgba(100, 116, 139, 0.38);
+        }
         @media (max-width: 480px) {
             .block-container h1 { font-size: 2rem; line-height: 1.15; }
             .stApp { font-size: 16px; }
