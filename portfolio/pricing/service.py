@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from time import monotonic, sleep
 from typing import Any, Mapping
 
-from .base import FxProvider, PriceProvider, PriceProviderError, ProviderQuote
+from .base import FxProvider, IntradayPriceProvider, PriceProvider, PriceProviderError, ProviderQuote
 from .cache import TTLFxCache, TTLQuoteCache
 from portfolio.holdings import (
     QUOTE_STATUS_CACHED,
@@ -237,11 +237,34 @@ def _update_row_from_quote(
     return updated_row
 
 
+def _attach_intraday_prices(
+    row: dict[str, object],
+    intraday_provider: IntradayPriceProvider | None,
+    *,
+    symbol: str,
+    market: str,
+) -> dict[str, object]:
+    if intraday_provider is None:
+        return row
+    try:
+        intraday = intraday_provider.get_intraday_prices(symbol, market=market)
+    except PriceProviderError:
+        return row
+    if len(intraday.prices) < 2:
+        return row
+    updated_row = dict(row)
+    updated_row["intraday_prices"] = list(intraday.prices)
+    updated_row["intraday_provider"] = intraday.provider
+    updated_row["intraday_fetched_at"] = intraday.fetched_at.isoformat()
+    return updated_row
+
+
 def refresh_holding_quotes(
     rows: list[Mapping[str, Any]],
     provider: PriceProvider | None,
     *,
     korea_provider: PriceProvider | None = None,
+    intraday_provider: IntradayPriceProvider | None = None,
     cache: TTLQuoteCache | None = None,
     on_progress: Callable[[int, int, str], None] | None = None,
     request_interval_seconds: float = ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS,
@@ -302,7 +325,8 @@ def refresh_holding_quotes(
                 _report_progress(on_progress, len(updated_rows), total_rows, symbol)
                 continue
             status = QUOTE_STATUS_CACHED if was_cached else QUOTE_STATUS_UPDATED
-            updated_rows.append(_update_row_from_quote(updated_row, quote, status=status, provider=provider))
+            quoted_row = _update_row_from_quote(updated_row, quote, status=status, provider=provider)
+            updated_rows.append(_attach_intraday_prices(quoted_row, intraday_provider, symbol=quote.symbol, market=market))
             statuses.append(
                 PriceUpdateStatus(
                     symbol=quote.symbol,
@@ -352,7 +376,8 @@ def refresh_holding_quotes(
                 _report_progress(on_progress, len(updated_rows), total_rows, symbol)
                 continue
             status = QUOTE_STATUS_CACHED if was_cached else QUOTE_STATUS_UPDATED
-            updated_rows.append(_update_row_from_quote(updated_row, quote, status=status, provider=korea_provider))
+            quoted_row = _update_row_from_quote(updated_row, quote, status=status, provider=korea_provider)
+            updated_rows.append(_attach_intraday_prices(quoted_row, intraday_provider, symbol=quote.symbol, market=market))
             statuses.append(
                 PriceUpdateStatus(
                     symbol=quote.symbol,
