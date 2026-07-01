@@ -628,6 +628,7 @@ with summary_card_tab:
         metrics,
         portfolio_name=_current_portfolio_name(),
         last_refresh=metrics.last_price_refresh_at or st.session_state.last_price_refresh_at,
+        transactions=list(st.session_state.get("portfolio_transactions", [])),
     )
 with overview_tab:
     render_overview(metrics)
