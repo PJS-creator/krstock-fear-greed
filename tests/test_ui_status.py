@@ -67,15 +67,17 @@ def test_bulk_input_parsing_validation_and_duplicate_policy():
 
 def test_price_refresh_target_selection_modes():
     rows = [
-        {"ticker": "A", "quote_status": "updated", "current_price": 1},
-        {"ticker": "B", "quote_status": "cached", "current_price": 2},
+        {"ticker": "A", "quote_status": "updated", "current_price": 1, "intraday_prices": []},
+        {"ticker": "B", "quote_status": "cached", "current_price": 2, "intraday_prices": [1, 2]},
         {"ticker": "C", "quote_status": "failed", "current_price": None},
         {"ticker": "D", "quote_status": "manual", "current_price": 3},
         {"ticker": "E", "quote_status": "missing", "current_price": None},
     ]
 
     assert [row["ticker"] for row in select_price_refresh_rows(rows, "미조회/오래된 가격만")] == ["C", "D", "E"]
+    assert [row["ticker"] for row in select_price_refresh_rows(rows, "미조회/오래된 가격만", include_missing_intraday=True)] == ["C", "D", "E", "A"]
     assert [row["ticker"] for row in select_price_refresh_rows(rows, "실패 종목만")] == ["C"]
+    assert [row["ticker"] for row in select_price_refresh_rows(rows, "실패 종목만", include_missing_intraday=True)] == ["C"]
     assert [row["ticker"] for row in select_price_refresh_rows(rows, "전체 강제 재조회")] == ["A", "B", "C", "D", "E"]
 
 
