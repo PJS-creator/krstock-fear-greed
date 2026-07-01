@@ -29,6 +29,23 @@ class ProviderQuote:
 
 
 @dataclass(frozen=True)
+class ProviderIntradayPrices:
+    symbol: str
+    prices: tuple[float, ...]
+    provider: str
+    fetched_at: datetime
+
+    @classmethod
+    def now(cls, *, symbol: str, prices: tuple[float, ...], provider: str) -> "ProviderIntradayPrices":
+        return cls(
+            symbol=symbol,
+            prices=prices,
+            provider=provider,
+            fetched_at=datetime.now(timezone.utc),
+        )
+
+
+@dataclass(frozen=True)
 class ProviderFxRate:
     from_currency: str
     to_currency: str
@@ -50,6 +67,11 @@ class ProviderFxRate:
 class PriceProvider(Protocol):
     def get_quote(self, symbol: str) -> ProviderQuote:
         """Return the latest provider quote for a symbol or raise PriceProviderError."""
+
+
+class IntradayPriceProvider(Protocol):
+    def get_intraday_prices(self, symbol: str, *, market: str | None = None) -> ProviderIntradayPrices:
+        """Return today's minute-level prices for a symbol or raise PriceProviderError."""
 
 
 class FxProvider(Protocol):
