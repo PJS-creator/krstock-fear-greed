@@ -102,6 +102,58 @@ def _badge_html(value: float | None, text: str) -> str:
     return f"<span class='summary-badge {_signed_class(value)}'>{escape(text)}</span>"
 
 
+def _intraday_price_values(holding: dict[str, Any]) -> list[float]:
+    raw_values = holding.get("intraday_prices") or []
+    if not isinstance(raw_values, (list, tuple)):
+        return []
+    values = []
+    for value in raw_values:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number) and number >= 0:
+            values.append(number)
+    return values
+
+
+def _sparkline_points(values: list[float], *, width: int = 86, height: int = 26, padding: int = 3) -> str:
+    if len(values) < 2:
+        return ""
+    min_value = min(values)
+    max_value = max(values)
+    spread = max_value - min_value
+    x_step = (width - padding * 2) / (len(values) - 1)
+    points = []
+    for index, value in enumerate(values):
+        x = padding + index * x_step
+        y = height / 2 if spread == 0 else padding + (max_value - value) / spread * (height - padding * 2)
+        points.append(f"{x:.1f},{y:.1f}")
+    return " ".join(points)
+
+
+def _sparkline_html(holding: dict[str, Any]) -> str:
+    values = _intraday_price_values(holding)
+    if len(values) < 2:
+        return "<div class='summary-sparkline summary-sparkline-empty' title='당일 분봉 데이터 없음'></div>"
+    first = values[0]
+    last = values[-1]
+    tone = "up" if last > first else "down" if last < first else "neutral"
+    volatility = (max(values) - min(values)) / first if first else 0.0
+    title = f"당일 분봉 {len(values)}개 · 변동폭 {percentage(volatility, digits=2)}"
+    points = _sparkline_points(values)
+    end_x, end_y = points.split()[-1].split(",")
+    return (
+        f"<div class='summary-sparkline summary-sparkline-{tone}' title='{escape(title)}'>"
+        "<svg viewBox='0 0 86 26' aria-hidden='true' focusable='false'>"
+        "<line x1='3' y1='13' x2='83' y2='13' class='summary-sparkline-baseline'></line>"
+        f"<polyline points='{points}'></polyline>"
+        f"<circle cx='{end_x}' cy='{end_y}' r='2.2'></circle>"
+        "</svg>"
+        "</div>"
+    )
+
+
 def _heatmap_tone(change_pct: float | None) -> str:
     if change_pct is None or abs(change_pct) < 1e-12:
         return "#4B5563"
@@ -400,6 +452,7 @@ def _holding_table_rows(
             f"<td>{escape(avg_price)}</td>"
             f"<td>{escape(purchase_amount)}</td>"
             f"<td>{escape(current_price)}</td>"
+            f"<td class='summary-sparkline-cell'>{_sparkline_html(holding)}</td>"
             f"<td class='{day_change_class}'>{_badge_html(day_change_value, day_change)}</td>"
             f"<td>{_badge_html(item.total_pnl_pct, pnl_pct)}</td>"
             f"<td>{_badge_html(irr, irr_text)}</td>"
@@ -411,7 +464,7 @@ def _holding_table_rows(
         rows.append(
             "<tr>"
             "<td class='summary-name'><span style='background:#8C99A8'></span>현금</td>"
-            "<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>"
+            "<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>"
             f"<td>{escape(_krw(metrics.cash_total_krw))}</td>"
             f"<td>{escape(percentage(metrics.cash_total_krw / metrics.total_value_krw if metrics.total_value_krw else 0, digits=2))}</td>"
             "</tr>"
@@ -422,6 +475,7 @@ def _holding_table_rows(
         "<tr class='summary-total-row'>"
         "<td>합계 (주식 평가금액 + 현금)</td><td>-</td><td>-</td>"
         f"<td>{escape(_krw(metrics.total_cost_krw) if metrics.total_cost_krw else '-')}</td>"
+        "<td>-</td>"
         "<td>-</td>"
         f"<td>{_badge_html(metrics.day_change_krw, total_day_text)}</td>"
         f"<td>{_badge_html(metrics.total_pnl_pct, _signed_text(metrics.total_pnl_pct, signed_percentage))}</td>"
@@ -563,13 +617,41 @@ def _render_styles() -> None:
         .summary-table-wrap { margin-top: 16px; overflow: hidden; }
         .summary-table-wrap h3 { padding: 16px 20px; margin: 0; border-bottom: 1px solid rgba(148, 163, 184, 0.24); }
         .summary-table-scroll { overflow-x: auto; }
-        .summary-table { width: 100%; min-width: 1120px; border-collapse: collapse; font-size: 0.93rem; }
+        .summary-table { width: 100%; min-width: 1220px; border-collapse: collapse; font-size: 0.93rem; }
         .summary-table th, .summary-table td { border-bottom: 1px solid rgba(148, 163, 184, 0.20); padding: 11px 12px; text-align: right; font-variant-numeric: tabular-nums; }
         .summary-table th { color: #CBD5E1; font-weight: 760; background: rgba(15, 23, 42, 0.72); }
         .summary-table tbody tr:not(.summary-total-row):hover td { background: rgba(59, 130, 246, 0.10); }
         .summary-table th:first-child, .summary-table td:first-child { text-align: left; }
         .summary-name { min-width: 220px; }
         .summary-name span { width: 13px; height: 13px; display: inline-block; border-radius: 50%; margin-right: 9px; vertical-align: -1px; }
+        .summary-sparkline-th, .summary-sparkline-cell { text-align: center !important; width: 112px; }
+        .summary-sparkline {
+            width: 92px;
+            height: 32px;
+            display: inline-grid;
+            place-items: center;
+            border-radius: 8px;
+            background: rgba(15, 23, 42, 0.62);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+        }
+        .summary-sparkline svg { width: 86px; height: 26px; display: block; overflow: visible; }
+        .summary-sparkline polyline {
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2.2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .summary-sparkline circle { fill: currentColor; }
+        .summary-sparkline-baseline { stroke: rgba(148, 163, 184, 0.22); stroke-width: 1; stroke-dasharray: 3 4; }
+        .summary-sparkline-up { color: #F87171; background: rgba(220, 90, 94, 0.10); }
+        .summary-sparkline-down { color: #60A5FA; background: rgba(59, 130, 246, 0.10); }
+        .summary-sparkline-neutral { color: #CBD5E1; }
+        .summary-sparkline-empty:before {
+            content: "";
+            width: 54px;
+            border-top: 1px dashed rgba(148, 163, 184, 0.36);
+        }
         .summary-badge {
             display: inline-flex;
             align-items: center;
@@ -702,6 +784,7 @@ def render_investment_summary_card(
                             <th>평단가 (원/달러)</th>
                             <th>매입금액</th>
                             <th>현재 주가</th>
+                            <th class="summary-sparkline-th">당일 변동성</th>
                             <th>전일 대비 증감</th>
                             <th>평가 수익률 (%)</th>
                             <th>연환산수익률 (IRR)</th>
