@@ -4,7 +4,8 @@ import math
 from collections.abc import Callable
 from typing import Any
 
-from .base import PriceProviderError, ProviderFxRate, ProviderQuote
+from .base import PriceProviderError, ProviderFxRate, ProviderIntradayPrices, ProviderQuote
+from .korea import normalize_korea_symbol
 
 YFINANCE_PROVIDER_NAME = "yfinance"
 YFINANCE_USD_KRW_SYMBOL = "KRW=X"
@@ -74,6 +75,34 @@ def parse_yfinance_history_frame(symbol: object, frame: Any) -> ProviderQuote:
     )
 
 
+def _downsample_prices(values: list[float], *, max_points: int) -> tuple[float, ...]:
+    if max_points <= 0:
+        raise ValueError("max_points must be positive")
+    if len(values) <= max_points:
+        return tuple(values)
+    last_index = len(values) - 1
+    selected = []
+    for index in range(max_points):
+        source_index = round(index * last_index / (max_points - 1))
+        selected.append(values[source_index])
+    return tuple(selected)
+
+
+def parse_yfinance_intraday_frame(symbol: object, frame: Any, *, max_points: int = 64) -> tuple[float, ...]:
+    normalized_symbol = str(symbol or "").strip().upper()
+    if not normalized_symbol:
+        raise PriceProviderError("yfinance 분봉 ticker가 비어 있습니다.")
+    close_series = _select_close_series(frame).dropna()
+    if close_series.empty:
+        raise PriceProviderError("yfinance 응답에 당일 분봉 데이터가 없습니다.")
+    try:
+        close_series = close_series.sort_index()
+    except Exception:
+        pass
+    prices = [_as_non_negative_float(value, "intraday Close") for value in close_series.tolist()]
+    return _downsample_prices(prices, max_points=max_points)
+
+
 class YFinanceQuoteProvider:
     def __init__(
         self,
@@ -130,6 +159,85 @@ class YFinanceQuoteProvider:
 
 def build_yfinance_provider() -> YFinanceQuoteProvider:
     return YFinanceQuoteProvider()
+
+
+def _intraday_symbol_candidates(symbol: object, market: str | None) -> list[str]:
+    market_text = str(market or "").strip().upper()
+    if market_text in {"KR", "KRX", "KOSPI", "KOSDAQ"}:
+        normalized = normalize_korea_symbol(symbol)
+        return [f"{normalized}.KS", f"{normalized}.KQ"]
+    return [normalize_yfinance_symbol(symbol)]
+
+
+class YFinanceIntradayPriceProvider:
+    def __init__(
+        self,
+        *,
+        history_loader: Callable[..., Any] | None = None,
+        period: str = "1d",
+        interval: str = "1m",
+        timeout_seconds: float = 10.0,
+        max_points: int = 64,
+    ) -> None:
+        if max_points <= 1:
+            raise ValueError("max_points must be greater than 1")
+        self._history_loader = history_loader
+        self._period = period
+        self._interval = interval
+        self._timeout_seconds = timeout_seconds
+        self._max_points = max_points
+
+    def _load_history(self, symbol: str):
+        if self._history_loader is not None:
+            return self._history_loader(
+                symbol,
+                period=self._period,
+                interval=self._interval,
+                timeout_seconds=self._timeout_seconds,
+            )
+        try:
+            import yfinance as yf
+        except ImportError as exc:
+            raise PriceProviderError("yfinance 패키지가 설치되어 있지 않습니다.") from exc
+
+        kwargs = {
+            "period": self._period,
+            "interval": self._interval,
+            "auto_adjust": False,
+            "progress": False,
+            "threads": False,
+            "timeout": self._timeout_seconds,
+        }
+        try:
+            return yf.download(symbol, multi_level_index=False, **kwargs)
+        except TypeError:
+            return yf.download(symbol, **kwargs)
+
+    def get_intraday_prices(self, symbol: str, *, market: str | None = None) -> ProviderIntradayPrices:
+        try:
+            candidates = _intraday_symbol_candidates(symbol, market)
+        except ValueError as exc:
+            raise PriceProviderError(str(exc)) from exc
+
+        errors = []
+        for candidate in candidates:
+            try:
+                frame = self._load_history(candidate)
+                prices = parse_yfinance_intraday_frame(candidate, frame, max_points=self._max_points)
+            except PriceProviderError as exc:
+                errors.append(str(exc))
+                continue
+            except Exception as exc:
+                errors.append(str(exc))
+                continue
+            return ProviderIntradayPrices.now(symbol=str(symbol).strip().upper(), prices=prices, provider=YFINANCE_PROVIDER_NAME)
+
+        suffix = f": {'; '.join(errors)}" if errors else ""
+        raise PriceProviderError(f"yfinance 당일 분봉 데이터 조회 실패{suffix}")
+
+
+def build_yfinance_intraday_provider() -> YFinanceIntradayPriceProvider:
+    return YFinanceIntradayPriceProvider()
 
 
 class YFinanceFxProvider:

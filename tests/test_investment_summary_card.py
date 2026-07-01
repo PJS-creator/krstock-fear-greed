@@ -1,6 +1,6 @@
 from portfolio.holdings import build_portfolio_metrics
 
-from app.ui.investment_summary_card import _allocation_rows, _heatmap_tiles, _holding_table_rows
+from app.ui.investment_summary_card import _allocation_rows, _heatmap_tiles, _holding_table_rows, _sparkline_html
 
 
 def _metrics():
@@ -14,6 +14,7 @@ def _metrics():
                 "avg_price": 72300,
                 "current_price": 80000,
                 "previous_close": 79000,
+                "intraday_prices": [79000, 79300, 79200, 79800, 80000],
             },
             {
                 "market": "US",
@@ -23,6 +24,7 @@ def _metrics():
                 "avg_price": 100,
                 "current_price": 120,
                 "previous_close": 125,
+                "intraday_prices": [125, 124, 122, 121, 120],
             },
         ],
         cash_krw=1_000_000,
@@ -55,6 +57,8 @@ def test_summary_holding_table_contains_average_price_and_return_rate():
     assert "₩723,000" in html_rows
     assert "$100.00" in html_rows
     assert "$120.00" in html_rows
+    assert "당일 변동성" not in html_rows
+    assert "summary-sparkline" in html_rows
     assert "-$5.00 (-4.0%)" in html_rows
     assert "%" in html_rows
     assert "IRR" not in html_rows
@@ -69,3 +73,13 @@ def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels():
     assert "height:" in tiles
     assert "삼성전자" in tiles
     assert "+1.3%" in tiles
+
+
+def test_summary_sparkline_uses_intraday_prices_and_handles_missing_data():
+    chart = _sparkline_html({"intraday_prices": [10, 12, 11, 13]})
+    empty = _sparkline_html({})
+
+    assert "summary-sparkline-up" in chart
+    assert "<polyline" in chart
+    assert "당일 분봉 4개" in chart
+    assert "summary-sparkline-empty" in empty

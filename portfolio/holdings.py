@@ -153,6 +153,17 @@ def parse_optional_non_negative_float(field_name: str, value: object) -> float |
     return parse_non_negative_float(field_name, value)
 
 
+def _normalize_intraday_prices(value: object) -> list[float]:
+    if value is None or clean_text(value) == "":
+        return []
+    if isinstance(value, (str, bytes)) or not isinstance(value, Iterable):
+        raise ValueError("intraday_prices must be a list of numbers")
+    prices = []
+    for index, item in enumerate(value, start=1):
+        prices.append(parse_non_negative_float(f"intraday_prices[{index}]", item))
+    return prices
+
+
 def _normalize_market(value: object | None) -> str:
     market = clean_text(value).upper() or "US"
     if market == "USA":
@@ -190,6 +201,7 @@ def normalize_holding_row(row: Mapping[str, Any]) -> dict[str, object]:
     avg_price = parse_optional_non_negative_float("avg_price", row.get("avg_price"))
     target_weight = parse_optional_non_negative_float("target_weight", row.get("target_weight")) or 0.0
     quote_status = _normalize_quote_status(row.get("quote_status"), current_price)
+    intraday_prices = _normalize_intraday_prices(row.get("intraday_prices"))
 
     return {
         "ticker": ticker,
@@ -209,6 +221,9 @@ def normalize_holding_row(row: Mapping[str, Any]) -> dict[str, object]:
         "quote_status": quote_status,
         "fetched_at": clean_text(row.get("fetched_at")) or None,
         "provider": clean_text(row.get("provider")) or ("manual" if current_price is not None else None),
+        "intraday_prices": intraday_prices,
+        "intraday_provider": clean_text(row.get("intraday_provider")) or None,
+        "intraday_fetched_at": clean_text(row.get("intraday_fetched_at")) or None,
     }
 
 

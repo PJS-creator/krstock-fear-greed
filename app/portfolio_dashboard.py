@@ -47,6 +47,7 @@ from portfolio.pricing import (
     TTLQuoteCache,
     build_korea_quote_provider,
     build_yfinance_fx_provider,
+    build_yfinance_intraday_provider,
     build_yfinance_provider,
     refresh_holding_quotes,
     refresh_usd_krw,
@@ -360,6 +361,7 @@ def _refresh_price_rows(
 ) -> bool:
     us_provider = build_yfinance_provider()
     korea_provider = build_korea_quote_provider()
+    intraday_provider = build_yfinance_intraday_provider()
     all_rows = list(st.session_state.holdings_rows)
     target_rows = list(select_price_refresh_rows(all_rows, mode))
     if not target_rows:
@@ -369,6 +371,7 @@ def _refresh_price_rows(
         target_rows,
         us_provider,
         korea_provider=korea_provider,
+        intraday_provider=intraday_provider,
         cache=TTLQuoteCache() if mode == "전체 강제 재조회" else None,
         on_progress=on_progress,
     )
