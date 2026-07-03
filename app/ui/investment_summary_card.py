@@ -627,7 +627,7 @@ def _render_styles() -> None:
         }
         .summary-heatmap-tile {
             position: absolute;
-            border: 1px solid var(--summary-heatmap-border);
+            border: 2px solid var(--summary-heatmap-tile-border);
             color: #F8FAFC;
             display: flex;
             flex-direction: column;

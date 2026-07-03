@@ -65,17 +65,27 @@ __CSS_VARS__
             border-color: var(--app-border) !important;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
         }
-        div[data-testid="stMetricLabel"] p {
-            color: var(--app-muted);
+        div[data-testid="stMetricLabel"],
+        div[data-testid="stMetricLabel"] * {
+            color: var(--app-muted) !important;
             font-size: 0.98rem;
+            opacity: 1 !important;
         }
-        div[data-testid="stMetricValue"] {
-            color: var(--app-heading);
+        div[data-testid="stMetricValue"],
+        div[data-testid="stMetricValue"] * {
+            color: var(--app-heading) !important;
             font-size: 1.55rem;
             font-weight: 760;
             letter-spacing: 0;
         }
-        div[data-testid="stMetricDelta"] { font-size: 0.98rem; }
+        div[data-testid="stMetricDelta"] {
+            color: var(--app-muted);
+            font-size: 0.98rem;
+            opacity: 1 !important;
+        }
+        div[data-testid="stMetricDelta"] * {
+            opacity: 1 !important;
+        }
         div[data-testid="stDataFrame"] { font-size: 0.98rem; }
         div[data-testid="stDataFrame"],
         div[data-testid="stDataEditor"] {
@@ -147,6 +157,15 @@ __CSS_VARS__
             background: var(--app-panel);
             color: var(--app-text);
             font-weight: 760;
+        }
+        div[role="radiogroup"] label > div:first-child {
+            display: none !important;
+        }
+        div[role="radiogroup"] label * {
+            color: inherit !important;
+        }
+        div[role="radiogroup"] label p {
+            margin: 0;
         }
         div[role="radiogroup"] label:hover {
             border-color: var(--app-primary-hover);
