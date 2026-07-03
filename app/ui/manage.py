@@ -65,7 +65,7 @@ def queue_portfolio_record_load(record: PortfolioRecord) -> None:
 
 def render_csv_tools() -> None:
     st.subheader("CSV")
-    st.caption("자산 입력은 보유현황 CSV가 아니라 보유자산 탭의 매입/매도 거래 CSV로 일원화했습니다.")
+    st.caption("자산 입력은 보유현황 CSV가 아니라 사용자 입력 탭의 매입/매도 거래 CSV로 일원화했습니다.")
     transactions = normalize_transaction_rows(st.session_state.get("portfolio_transactions", []))
     st.download_button(
         "거래내역 CSV 다운로드",

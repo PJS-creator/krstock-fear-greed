@@ -962,7 +962,7 @@ def _render_styles() -> None:
             .summary-table td:nth-child(3):before { content: "평단가"; }
             .summary-table td:nth-child(4):before { content: "매입금액"; }
             .summary-table td:nth-child(5):before { content: "현재가"; }
-            .summary-table td:nth-child(6):before { content: "당일 변동성"; }
+            .summary-table td:nth-child(6):before { content: "당일 흐름"; }
             .summary-table td:nth-child(7):before { content: "전일 대비"; }
             .summary-table td:nth-child(8):before { content: "평가 수익률"; }
             .summary-table td:nth-child(9):before { content: "IRR"; }
@@ -993,7 +993,7 @@ def _render_styles() -> None:
                 background: var(--app-panel-strong);
             }
             .summary-kpi-grid {
-                grid-template-columns: 1fr;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
                 margin-top: 12px;
             }
             .summary-kpi {
@@ -1007,6 +1007,11 @@ def _render_styles() -> None:
             .summary-foot {
                 flex-direction: column;
                 font-size: 0.82rem;
+            }
+        }
+        @media (max-width: 420px) {
+            .summary-kpi-grid {
+                grid-template-columns: 1fr;
             }
         }
         </style>
@@ -1032,15 +1037,15 @@ def render_investment_summary_card(
     seed = metrics.total_cost_krw if metrics.total_cost_krw > 0 else None
     seed_label = _krw(seed) if seed is not None else "평단가 필요"
     kpi_cards = [
-        _kpi_card("총 자산", _krw(metrics.total_value_krw), f"주식 {percentage(stock_pct, digits=2)} · 현금 {percentage(cash_pct, digits=2)}", "cyan", "₩"),
+        _kpi_card("총자산", _krw(metrics.total_value_krw), f"주식 {percentage(stock_pct, digits=2)} · 현금 {percentage(cash_pct, digits=2)}", "cyan", "₩"),
         _kpi_card("주식 평가금액", _krw(metrics.total_position_value_krw), f"{metrics.priced_count:,}/{metrics.holdings_count:,}종목 평가", "default", "주"),
         _kpi_card("현금", _krw(metrics.cash_total_krw), f"{percentage(cash_pct, digits=2)}", "default", "$"),
-        _kpi_card("주식 평가이익", _signed_text(metrics.total_pnl_krw, signed_krw), "주식 평가금액 - 총 시드", _kpi_tone(metrics.total_pnl_krw), "P/L"),
+        _kpi_card("평가이익", _signed_text(metrics.total_pnl_krw, signed_krw), "주식 평가금액 - 투자원금", _kpi_tone(metrics.total_pnl_krw), "P/L"),
         _kpi_card("주식 수익률", _signed_text(metrics.total_pnl_pct, signed_percentage), _coverage_label(metrics), _kpi_tone(metrics.total_pnl_pct), "%"),
-        _kpi_card("금일 손익", _signed_text(metrics.day_change_krw, signed_krw), "최근 제공 가격과 전일 종가 기준", _kpi_tone(metrics.day_change_krw), "D"),
-        _kpi_card("전일 대비 수익률", _signed_text(metrics.day_change_pct, signed_percentage), "전일 보유 평가액 대비", _kpi_tone(metrics.day_change_pct), "Δ"),
-        _kpi_card("총 시드", seed_label, _coverage_label(metrics), "default", "Σ"),
-        _kpi_card("적용 환율", f"{format_number(metrics.usd_krw)}원 / USD", "미국 주식 및 달러 현금 환산", "default", "FX"),
+        _kpi_card("오늘 손익", _signed_text(metrics.day_change_krw, signed_krw), "최근 가격과 전일 종가 기준", _kpi_tone(metrics.day_change_krw), "D"),
+        _kpi_card("전일대비", _signed_text(metrics.day_change_pct, signed_percentage), "전일 보유 평가액 대비", _kpi_tone(metrics.day_change_pct), "Δ"),
+        _kpi_card("투자원금", seed_label, _coverage_label(metrics), "default", "Σ"),
+        _kpi_card("환율", f"{format_number(metrics.usd_krw)}원 / USD", "미국 주식 및 달러 현금 환산", "default", "FX"),
     ]
     legend_rows = "".join(
         "<div class='summary-legend-row'>"
@@ -1057,13 +1062,13 @@ def render_investment_summary_card(
     <div class="summary-card">
         <div class="summary-top">
             <div class="summary-title">
-                <h2>포트폴리오 현황</h2>
-                <p>{escape(portfolio_name)} · 총 자산 기준 (주식 평가금액 + 현금)</p>
+                <h2>총괄현황</h2>
+                <p>{escape(portfolio_name)} · 총자산 기준</p>
             </div>
             <div class="summary-top-box">
-                <div class="summary-top-label">포트폴리오 업데이트 기준일</div>
+                <div class="summary-top-label">기준일</div>
                 <div class="summary-date">{escape(_display_date(last_refresh))}</div>
-                <div class="summary-sub">최근 제공 가격 기준</div>
+                <div class="summary-sub">최근 가격</div>
             </div>
             <div class="summary-top-box">
                 <div class="summary-top-label">전일 대비</div>
@@ -1073,13 +1078,13 @@ def render_investment_summary_card(
         </div>
         <div class="summary-main">
             <div class="summary-panel">
-                <h3>자산 구성 비중 <span class="summary-sub">(총 자산 기준)</span></h3>
+                <h3>자산 비중</h3>
                 {legend_rows}
                 <div class="summary-legend-total">총 100%</div>
             </div>
             <div class="summary-panel summary-heatmap-card">
                 <div class="summary-heatmap-head">
-                    <h3>자산 구성 및 성과 <span class="summary-sub">(전일 대비 기준)</span></h3>
+                    <h3>구성·성과</h3>
                     <div class="summary-heatmap-legend"><span class="up">상승</span><span class="down">하락</span></div>
                 </div>
                 <div class="summary-heatmap-area">{heatmap_tiles}</div>
@@ -1087,7 +1092,7 @@ def render_investment_summary_card(
         </div>
         {mobile_holding_summary}
         <div class="summary-table-wrap">
-            <h3>보유 종목 현황</h3>
+            <h3>보유 종목</h3>
             <div class="summary-table-scroll">
                 <table class="summary-table">
                     <thead>
@@ -1097,7 +1102,7 @@ def render_investment_summary_card(
                             <th>평단가 (원/달러)</th>
                             <th>매입금액</th>
                             <th>현재 주가</th>
-                            <th class="summary-sparkline-th">당일 변동성</th>
+                            <th class="summary-sparkline-th">당일 흐름</th>
                             <th>전일 대비 증감</th>
                             <th>평가 수익률 (%)</th>
                             <th>연환산수익률 (IRR)</th>
@@ -1119,6 +1124,6 @@ def render_investment_summary_card(
     </div>
     """
     if metrics.holdings_count == 0 and metrics.cash_total_krw <= 0:
-        st.info("보유자산과 현금을 입력하면 투자 총괄 카드가 표시됩니다.")
+        st.info("사용자 입력에서 보유 종목과 현금을 입력하면 총괄현황이 표시됩니다.")
         return
     st.markdown(html, unsafe_allow_html=True)

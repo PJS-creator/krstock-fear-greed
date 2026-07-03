@@ -21,7 +21,7 @@ def render_plotly_chart(fig, *, key: str) -> None:
 
 def render_empty_portfolio() -> None:
     st.info(
-        "보유자산이 아직 없습니다. 1) 보유자산 탭에서 매입/매도 거래를 입력하고 2) 거래 미리보기 후 반영한 뒤 3) 가격 새로고침, 현금/환율 입력, 저장 순서로 진행하세요."
+        "보유 종목이 아직 없습니다. 1) 사용자 입력 탭에서 매입/매도 거래를 입력하고 2) 거래 미리보기 후 반영한 뒤 3) 가격 갱신, 현금·환율 입력, 저장 순서로 진행하세요."
     )
     st.caption("샘플은 기능 확인용 가상 데이터이며 실제 보유 내역이 아닙니다.")
     if st.button("샘플 불러오기", key="load_sample_portfolio"):
