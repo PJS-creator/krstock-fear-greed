@@ -173,14 +173,15 @@ def _current_theme_mode() -> str:
 
 def _render_theme_selector() -> None:
     current_mode = _current_theme_mode()
-    st.radio(
-        "테마",
-        list(THEME_MODE_BY_LABEL.keys()),
-        index=list(THEME_MODE_BY_LABEL).index(THEME_LABEL_BY_MODE[current_mode]),
-        key=APP_THEME_CHOICE_KEY,
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    with st.container(key="app_theme_topbar"):
+        st.radio(
+            "테마",
+            list(THEME_MODE_BY_LABEL.keys()),
+            index=list(THEME_MODE_BY_LABEL).index(THEME_LABEL_BY_MODE[current_mode]),
+            key=APP_THEME_CHOICE_KEY,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
 
 
 def _clean_portfolio_name(value: object) -> str:
@@ -403,9 +404,7 @@ def _is_authenticated() -> bool:
 
 
 def _render_login_form(config: AppSecurityConfig) -> None:
-    _, theme_col = st.columns([3, 1], vertical_alignment="center")
-    with theme_col:
-        _render_theme_selector()
+    _render_theme_selector()
     st.title("포트폴리오 대시보드")
     st.subheader("로그인이 필요합니다")
     st.caption("계정별 저장 포트폴리오와 Supabase 저장소를 보호하기 위한 개인용 보호입니다.")
@@ -427,9 +426,7 @@ def _render_login_form(config: AppSecurityConfig) -> None:
 
 
 def _render_public_auth_gate(storage_config) -> None:
-    _, theme_col = st.columns([3, 1], vertical_alignment="center")
-    with theme_col:
-        _render_theme_selector()
+    _render_theme_selector()
     st.title("포트폴리오 대시보드")
     try:
         auth_store = _build_public_auth_store(storage_config)
@@ -905,6 +902,7 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
         f"갱신 {refresh_label} · 정상 {metrics.priced_count} · 캐시 {summary.cached} · "
         f"이전 {metrics.stale_quote_count} · 실패 {metrics.failed_quote_count} · 미조회 {metrics.missing_quote_count}"
     )
+    _render_theme_selector()
     left, middle, right = st.columns([2.0, 2.5, 1.35], vertical_alignment="center")
     with left:
         st.title("포트폴리오")
@@ -912,7 +910,6 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
         st.caption(status_label)
         st.caption(_current_save_status_text(public_auth_enabled=public_auth_enabled, dirty=dirty))
     with right:
-        _render_theme_selector()
         if st.button("가격·환율 갱신", type="primary", width="stretch", icon=":material/refresh:"):
             _refresh_prices(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)
         if summary.failed and st.button("실패 재시도", width="stretch", icon=":material/replay:"):

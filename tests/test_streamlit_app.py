@@ -85,6 +85,8 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert 'div[data-testid="stMetricLabel"] *' in source
     assert 'div[data-testid="stMetricValue"] *' in source
     assert 'div[role="radiogroup"] label > div:first-child' in source
+    assert "justify-content: center !important;" in source
+    assert ".st-key-app_theme_topbar" in source
 
 
 def test_price_log_detail_expander_is_rendered_collapsed_by_default():
