@@ -19,7 +19,9 @@ def test_public_cloud_chrome_guard_hides_streamlit_controls():
         'title*="Edit"',
         'title*="GitHub"',
         'title*="Manage"',
+        'title*="Manage app"',
         'aria-label*="Manage"',
+        'aria-label*="Manage app"',
         'data-testid*="manage-app"',
         'href*="streamlit.io/cloud"',
         'data-testid="appCreatorAvatar"',
@@ -34,6 +36,12 @@ def test_public_cloud_chrome_guard_reaches_streamlit_cloud_wrapper_best_effort()
 
     assert "import streamlit.components.v1 as components" in source
     assert "reachableDocuments" in source
+    assert "hideLabelledCloudControls" in source
+    assert "CLOUD_CONTROL_LABEL" in source
+    assert "Manage app" in source
+    assert "Reboot app" in source
+    assert "Delete app" in source
+    assert "Settings" in source
     assert "win.parent" in source
     assert "MutationObserver" in source
     assert "Best-effort UI cleanup only" in source
