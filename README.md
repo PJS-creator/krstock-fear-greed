@@ -40,7 +40,7 @@ python main.py
 
 ### 대시보드 의존성 설치
 
-Streamlit 대시보드는 `streamlit>=1.50`을 사용합니다. `st.metric(border=True)`, `width="stretch"`, native chart config를 사용하기 위해 최소 버전을 명시합니다.
+Streamlit 대시보드는 Cloud 프론트엔드 호환성을 위해 `streamlit==1.50.0`으로 고정합니다. `app/requirements.txt`, `requirements-dashboard.txt`, `requirements-dev.txt`의 대시보드 핵심 버전은 함께 맞춥니다.
 
 ```bash
 python -m pip install -r requirements-dashboard.txt
@@ -499,7 +499,7 @@ Streamlit Community Cloud는 실행 파일 위치 기준으로 가까운 `requir
 6. Python version은 `3.11` 또는 `3.12`를 선택합니다. 로그에 `/python3.14/`가 보이면 App settings > Advanced settings에서 `3.12`로 바꾼 뒤 저장합니다.
 7. **Deploy**를 클릭합니다.
 
-Secrets를 수정했거나 `app/requirements.txt`가 바뀐 경우 Streamlit Cloud에서 앱을 Reboot 또는 Redeploy 해야 새 설정과 의존성이 반영됩니다. 이번 UI 변경은 `streamlit>=1.50`을 요구하므로 merge 후 Reboot 또는 Redeploy가 필요합니다.
+Secrets를 수정했거나 `app/requirements.txt`가 바뀐 경우 Streamlit Cloud에서 앱을 Reboot 또는 Redeploy 해야 새 설정과 의존성이 반영됩니다. 대시보드는 `streamlit==1.50.0`으로 고정되어 있으므로 merge 후 Reboot 또는 Redeploy가 필요합니다.
 
 외부 사용자용 새 앱은 같은 절차로 만들되 Main file path에 `app/public_portfolio_dashboard.py`를 입력합니다. 기존 개인 테스트 앱 URL은 그대로 두고, 새 앱 URL만 외부 사용자에게 공유합니다.
 
@@ -533,7 +533,7 @@ Secrets를 수정했거나 `app/requirements.txt`가 바뀐 경우 Streamlit Clo
 python -m pip install -r requirements-dev.txt
 ```
 
-테스트에는 formatter/status/chart 순수 함수 테스트와 `streamlit.testing.v1.AppTest` 기반 smoke test가 포함됩니다. AppTest는 핵심 KPI 4개, 기본 탭, 가격 로그 상세 expander, raw ISO 시간 미노출을 확인합니다. `requirements-dev.txt`에는 이 테스트를 위해 `streamlit>=1.50`이 포함됩니다.
+테스트에는 formatter/status/chart 순수 함수 테스트와 `streamlit.testing.v1.AppTest` 기반 smoke test가 포함됩니다. AppTest는 핵심 KPI 4개, 기본 탭, 가격 로그 상세 expander, raw ISO 시간 미노출을 확인합니다. `requirements-dev.txt`에는 이 테스트를 위해 `streamlit==1.50.0`이 포함됩니다.
 
 테스트를 실행합니다.
 

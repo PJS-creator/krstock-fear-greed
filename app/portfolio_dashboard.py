@@ -106,6 +106,7 @@ AUTO_LOAD_ATTEMPTED_KEY = "account_auto_load_attempted"
 AUTO_PRICE_REFRESHED_KEY = "account_auto_price_refreshed"
 ACCOUNT_STATUS_KEY = "account_status_message"
 PUBLIC_SECTION_KEY = "public_dashboard_section"
+PUBLIC_HOLDINGS_VIEW_KEY = "public_holdings_view"
 CASH_FX_INPUT_SYNC_KEY = "cash_fx_inline_input_sync"
 INLINE_CASH_KRW_KEY = "cash_fx_inline_cash_krw"
 INLINE_CASH_USD_KEY = "cash_fx_inline_cash_usd"
@@ -818,6 +819,26 @@ def _render_holdings_section(config: AppSecurityConfig, *, public_auth_enabled: 
     render_holdings_table(_current_metrics())
 
 
+def _render_public_holdings_section(config: AppSecurityConfig) -> None:
+    selected_view = st.radio(
+        "보유자산 화면",
+        ["현황", "현금/환율", "거래 입력"],
+        key=PUBLIC_HOLDINGS_VIEW_KEY,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    if selected_view == "현황":
+        render_holdings_table(_current_metrics())
+    elif selected_view == "현금/환율":
+        _render_cash_fx_tools(config, public_auth_enabled=True)
+    else:
+        render_transaction_editor()
+        render_transaction_cashflow(
+            list(st.session_state.get("portfolio_transactions", [])),
+            usd_krw=float(st.session_state.usd_krw),
+        )
+
+
 def _render_history_section(owner_id, history_store, historical_schedule_store) -> None:
     render_history_tab(
         owner_id=owner_id,
@@ -871,7 +892,7 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
     elif selected_section == "개요":
         _render_overview_section(metrics)
     elif selected_section == "보유자산":
-        _render_holdings_section(security_config, public_auth_enabled=True)
+        _render_public_holdings_section(security_config)
     elif selected_section == "자산추이":
         _render_history_section(owner_id, history_store, historical_schedule_store)
     else:

@@ -96,3 +96,35 @@ def test_sample_portfolio_load_does_not_mutate_widget_keys_after_render():
     text = _app_text(at)
     assert "삼성전자" in text
     assert RAW_ISO_RE.search(text) is None
+
+
+def test_public_holdings_section_defers_transaction_editor_by_default():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo"
+    at.session_state["authenticated_owner_id"] = "public:demo"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["public_dashboard_section"] = "보유자산"
+    at.run(timeout=20)
+
+    assert not at.exception
+    text = _app_text(at)
+    assert "보유자산을 입력하면 표가 표시됩니다." in text
+    assert "거래 1건 입력" not in text
+    assert "여러 개 빠른 입력" not in text
+
+
+def test_public_holdings_transaction_input_renders_only_when_selected():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo"
+    at.session_state["authenticated_owner_id"] = "public:demo"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["public_dashboard_section"] = "보유자산"
+    at.session_state["public_holdings_view"] = "거래 입력"
+    at.run(timeout=20)
+
+    assert not at.exception
+    text = _app_text(at)
+    assert "거래 1건 입력" in text
+    assert "여러 개 빠른 입력" in text
