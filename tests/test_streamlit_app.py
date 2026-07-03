@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 from urllib.error import URLError
 
 from streamlit.testing.v1 import AppTest
@@ -57,6 +58,7 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
         assert label in text
     for label in ("현금 및 환율", "현금/환율 적용", "USD/KRW 환율 갱신", "자산 입력", "거래 1건 입력", "매입/매도 기준 자산 증감"):
         assert label in text
+    assert "현재가/환율 갱신" in text
     metric_labels = _element_texts(at.metric)
     for label in ("총자산", "오늘 변동", "총현금", "USD 노출도"):
         assert label in metric_labels
@@ -174,6 +176,19 @@ def test_public_cash_fx_refresh_button_falls_back_and_applies_rate(monkeypatch):
     ]
     assert at.session_state["usd_krw"] == 1388.25
     assert at.session_state["fx_status_message"] == "USD/KRW 환율을 갱신했습니다."
+
+
+def test_current_refresh_button_forces_all_quotes_and_fx_refresh():
+    source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+
+    assert 'st.button("현재가/환율 갱신"' in source
+    assert 'mode: str = "전체 강제 재조회"' in source
+    assert "refresh_fx: bool = True" in source
+    assert "cache = TTLFxCache() if force_refresh else None" in source
+    assert "_fetch_fx_rate(public_auth_enabled=public_auth_enabled, force_refresh=True)" in source
+    assert "_refresh_prices(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)" in source
+    assert 'mode="실패 종목만", refresh_fx=False' in source
+    assert '"가격 새로고침 대상"' not in source
 
 
 def test_public_app_hides_manual_storage_management_ui():
