@@ -248,36 +248,101 @@ __CSS_VARS__
             box-shadow: var(--app-shadow);
         }
         .st-key-public_section_tabs {
-            margin: 0.85rem 0 1.05rem;
+            margin: 0.85rem 0 1.1rem;
         }
         .st-key-public_section_tabs div[role="radiogroup"] {
             display: grid !important;
             grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 0;
-            padding: 0.22rem;
-            border: 1px solid var(--app-border);
-            border-radius: 8px;
-            background: var(--app-panel);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
-        }
-        .st-key-public_section_tabs div[role="radiogroup"] label {
             width: 100%;
-            min-width: 0;
-            min-height: 2.38rem;
-            padding: 0.34rem 0.2rem;
-            border: 0;
-            border-radius: 6px;
+            padding: 0;
+            border-bottom: 1px solid var(--app-border);
             background: transparent;
             box-shadow: none;
-            font-size: 0.94rem;
+        }
+        .st-key-public_section_tabs div[role="radiogroup"] label {
+            position: relative;
+            width: 100%;
+            min-width: 0;
+            min-height: 2.7rem;
+            padding: 0.4rem 0.16rem 0.68rem;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            box-shadow: none;
+            color: var(--app-muted);
+            font-size: 0.98rem;
+            font-weight: 820;
             white-space: nowrap;
         }
+        .st-key-public_section_tabs div[role="radiogroup"] label::after {
+            content: "";
+            position: absolute;
+            left: 0;
+            right: 0;
+            bottom: -1px;
+            height: 3px;
+            border-radius: 999px 999px 0 0;
+            background: transparent;
+        }
         .st-key-public_section_tabs div[role="radiogroup"] label:hover {
-            background: var(--app-primary-soft);
+            background: transparent;
+            color: var(--app-heading);
         }
         .st-key-public_section_tabs div[role="radiogroup"] label:has(input:checked) {
+            background: transparent;
+            color: var(--app-heading);
+        }
+        .st-key-public_section_tabs div[role="radiogroup"] label:has(input:checked)::after {
             background: var(--app-primary);
-            color: #FFFFFF;
+        }
+        .st-key-public_input_tabs {
+            margin: 0.1rem 0 0.95rem;
+        }
+        .st-key-public_input_tabs div[role="radiogroup"] {
+            display: grid !important;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0;
+            width: 100%;
+            padding: 0;
+            border-bottom: 1px solid var(--app-border);
+            background: transparent;
+        }
+        .st-key-public_input_tabs div[role="radiogroup"] label {
+            position: relative;
+            width: 100%;
+            min-width: 0;
+            min-height: 2.28rem;
+            padding: 0.32rem 0.12rem 0.52rem;
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            box-shadow: none;
+            color: var(--app-muted);
+            font-size: 0.9rem;
+            font-weight: 760;
+            white-space: nowrap;
+        }
+        .st-key-public_input_tabs div[role="radiogroup"] label::after {
+            content: "";
+            position: absolute;
+            left: 12%;
+            right: 12%;
+            bottom: -1px;
+            height: 2px;
+            border-radius: 999px 999px 0 0;
+            background: transparent;
+        }
+        .st-key-public_input_tabs div[role="radiogroup"] label:hover {
+            background: transparent;
+            color: var(--app-heading);
+        }
+        .st-key-public_input_tabs div[role="radiogroup"] label:has(input:checked) {
+            background: transparent;
+            color: var(--app-heading);
+        }
+        .st-key-public_input_tabs div[role="radiogroup"] label:has(input:checked)::after {
+            background: var(--app-primary);
         }
         .app-header-panel {
             border: 1px solid var(--app-border);
@@ -333,18 +398,29 @@ __CSS_VARS__
                 font-size: 0.82rem;
             }
             .st-key-public_section_tabs {
-                margin: 0.7rem 0 0.9rem;
+                margin: 0.7rem 0 0.95rem;
             }
             .st-key-public_section_tabs div[role="radiogroup"] {
                 grid-template-columns: repeat(4, minmax(0, 1fr));
                 gap: 0;
-                padding: 0.18rem;
+                padding: 0;
             }
             .st-key-public_section_tabs div[role="radiogroup"] label {
-                min-height: 2.28rem;
-                padding: 0.28rem 0.1rem;
-                font-size: clamp(0.72rem, 3.15vw, 0.84rem);
+                min-height: 2.44rem;
+                padding: 0.34rem 0.04rem 0.54rem;
+                font-size: clamp(0.74rem, 3.05vw, 0.84rem);
                 letter-spacing: 0;
+            }
+            .st-key-public_input_tabs {
+                margin: 0 0 0.85rem;
+            }
+            .st-key-public_input_tabs div[role="radiogroup"] {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+            .st-key-public_input_tabs div[role="radiogroup"] label {
+                min-height: 2.16rem;
+                padding: 0.28rem 0.06rem 0.46rem;
+                font-size: clamp(0.72rem, 3.0vw, 0.82rem);
             }
             div[data-testid="stTabs"] [role="tablist"] {
                 position: sticky;

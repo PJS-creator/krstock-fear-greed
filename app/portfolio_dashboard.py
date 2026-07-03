@@ -965,14 +965,15 @@ def _render_public_holdings_section(config: AppSecurityConfig) -> None:
         PUBLIC_HOLDINGS_VIEW_LEGACY_MAP,
         "holdings",
     )
-    selected_view = st.radio(
-        "사용자 입력 화면",
-        list(PUBLIC_HOLDINGS_VIEW_LABELS.keys()),
-        format_func=PUBLIC_HOLDINGS_VIEW_LABELS.get,
-        key=PUBLIC_HOLDINGS_VIEW_KEY,
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    with st.container(key="public_input_tabs"):
+        selected_view = st.radio(
+            "사용자 입력 화면",
+            list(PUBLIC_HOLDINGS_VIEW_LABELS.keys()),
+            format_func=PUBLIC_HOLDINGS_VIEW_LABELS.get,
+            key=PUBLIC_HOLDINGS_VIEW_KEY,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
     if selected_view == "holdings":
         render_holdings_table(_current_metrics())
     elif selected_view == "cash_fx":
