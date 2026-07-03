@@ -16,6 +16,24 @@ _ensure_project_root_on_path()
 
 import streamlit as st
 
+SUPPORTED_PYTHON_RUNTIMES = {(3, 11), (3, 12)}
+
+
+def _is_supported_python_runtime(version_info=sys.version_info) -> bool:
+    return (int(version_info.major), int(version_info.minor)) in SUPPORTED_PYTHON_RUNTIMES
+
+
+def _stop_if_unsupported_python_runtime() -> None:
+    if _is_supported_python_runtime():
+        return
+    st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
+    st.error("이 앱은 Python 3.11 또는 3.12 환경에서 실행해야 합니다.")
+    st.info("Streamlit Community Cloud의 App settings > Advanced settings에서 Python version을 3.12로 변경한 뒤 Reboot 또는 Redeploy를 실행하세요.")
+    st.stop()
+
+
+_stop_if_unsupported_python_runtime()
+
 from app.ui.components import render_price_update_log
 from app.ui.formatters import format_kst, format_relative_time
 from app.ui.holdings import render_holdings_table
@@ -87,6 +105,7 @@ PRICE_REFRESH_MODE_KEY = "price_refresh_mode"
 AUTO_LOAD_ATTEMPTED_KEY = "account_auto_load_attempted"
 AUTO_PRICE_REFRESHED_KEY = "account_auto_price_refreshed"
 ACCOUNT_STATUS_KEY = "account_status_message"
+PUBLIC_SECTION_KEY = "public_dashboard_section"
 CASH_FX_INPUT_SYNC_KEY = "cash_fx_inline_input_sync"
 INLINE_CASH_KRW_KEY = "cash_fx_inline_cash_krw"
 INLINE_CASH_USD_KEY = "cash_fx_inline_cash_usd"
@@ -227,6 +246,7 @@ def _read_public_auth_settings() -> tuple[bool, str]:
     return enabled, table_name
 
 
+@st.cache_resource(show_spinner=False)
 def _build_public_account_store(storage_config, *, table_name: str) -> SupabasePublicAccountStore | None:
     if not has_supabase_credentials(storage_config):
         return None
@@ -385,6 +405,7 @@ def _render_security_status(config: AppSecurityConfig, *, public_auth_enabled: b
             st.caption("직접 입력 기능은 비밀번호가 필요합니다.")
 
 
+@st.cache_resource(show_spinner=False)
 def _build_stores(storage_config):
     if not has_supabase_credentials(storage_config):
         return None, None, None
@@ -774,6 +795,89 @@ def _render_status_messages() -> None:
     )
 
 
+def _render_summary_card_section(metrics) -> None:
+    render_investment_summary_card(
+        metrics,
+        portfolio_name=_current_portfolio_name(),
+        last_refresh=metrics.last_price_refresh_at or st.session_state.last_price_refresh_at,
+        transactions=list(st.session_state.get("portfolio_transactions", [])),
+    )
+
+
+def _render_overview_section(metrics) -> None:
+    render_overview(metrics)
+
+
+def _render_holdings_section(config: AppSecurityConfig, *, public_auth_enabled: bool) -> None:
+    _render_cash_fx_tools(config, public_auth_enabled=public_auth_enabled)
+    render_transaction_editor()
+    render_transaction_cashflow(
+        list(st.session_state.get("portfolio_transactions", [])),
+        usd_krw=float(st.session_state.usd_krw),
+    )
+    render_holdings_table(_current_metrics())
+
+
+def _render_history_section(owner_id, history_store, historical_schedule_store) -> None:
+    render_history_tab(
+        owner_id=owner_id,
+        portfolio_name=_current_portfolio_name(),
+        history_store=history_store,
+        historical_schedule_store=historical_schedule_store,
+        current_holdings_rows=list(st.session_state.holdings_rows),
+        current_cash_krw=float(st.session_state.cash_krw),
+        current_cash_usd=float(st.session_state.cash_usd),
+        current_usd_krw=float(st.session_state.usd_krw),
+        is_authenticated=_is_authenticated(),
+    )
+
+
+def _render_manage_section(owner_id, portfolio_store, history_store) -> None:
+    render_csv_tools()
+    render_storage_tools(
+        owner_id=owner_id,
+        store=portfolio_store,
+        history_store=history_store,
+        metrics=_current_metrics(),
+        on_capture=lambda _: _mark_portfolio_clean(),
+    )
+    render_manual_capture(owner_id=owner_id, history_store=history_store, metrics=_current_metrics())
+
+
+def _render_private_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
+    summary_card_tab, overview_tab, holdings_tab, history_tab, manage_tab = st.tabs(["투자 총괄 카드", "개요", "보유자산", "자산추이", "관리"])
+    with summary_card_tab:
+        _render_summary_card_section(metrics)
+    with overview_tab:
+        _render_overview_section(metrics)
+    with holdings_tab:
+        _render_holdings_section(security_config, public_auth_enabled=False)
+    with history_tab:
+        _render_history_section(owner_id, history_store, historical_schedule_store)
+    with manage_tab:
+        _render_manage_section(owner_id, portfolio_store, history_store)
+
+
+def _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
+    selected_section = st.radio(
+        "화면 선택",
+        ["투자 총괄 카드", "개요", "보유자산", "자산추이", "관리"],
+        key=PUBLIC_SECTION_KEY,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+    if selected_section == "투자 총괄 카드":
+        _render_summary_card_section(metrics)
+    elif selected_section == "개요":
+        _render_overview_section(metrics)
+    elif selected_section == "보유자산":
+        _render_holdings_section(security_config, public_auth_enabled=True)
+    elif selected_section == "자산추이":
+        _render_history_section(owner_id, history_store, historical_schedule_store)
+    else:
+        _render_manage_section(owner_id, portfolio_store, history_store)
+
+
 st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
 inject_styles()
 _initialize_session_state()
@@ -798,45 +902,7 @@ metrics = _current_metrics()
 _render_header(security_config, owner_id, portfolio_store, history_store, metrics)
 _render_status_messages()
 
-summary_card_tab, overview_tab, holdings_tab, history_tab, manage_tab = st.tabs(["투자 총괄 카드", "개요", "보유자산", "자산추이", "관리"])
-with summary_card_tab:
-    render_investment_summary_card(
-        metrics,
-        portfolio_name=_current_portfolio_name(),
-        last_refresh=metrics.last_price_refresh_at or st.session_state.last_price_refresh_at,
-        transactions=list(st.session_state.get("portfolio_transactions", [])),
-    )
-with overview_tab:
-    render_overview(metrics)
-with holdings_tab:
-    _render_cash_fx_tools(security_config, public_auth_enabled=public_auth_enabled)
-    render_transaction_editor()
-    render_transaction_cashflow(
-        list(st.session_state.get("portfolio_transactions", [])),
-        usd_krw=float(st.session_state.usd_krw),
-    )
-    metrics = _current_metrics()
-    render_holdings_table(metrics)
-with history_tab:
-    render_history_tab(
-        owner_id=owner_id,
-        portfolio_name=_current_portfolio_name(),
-        history_store=history_store,
-        historical_schedule_store=historical_schedule_store,
-        current_holdings_rows=list(st.session_state.holdings_rows),
-        current_cash_krw=float(st.session_state.cash_krw),
-        current_cash_usd=float(st.session_state.cash_usd),
-        current_usd_krw=float(st.session_state.usd_krw),
-        is_authenticated=_is_authenticated(),
-    )
-with manage_tab:
-    render_csv_tools()
-    metrics = _current_metrics()
-    render_storage_tools(
-        owner_id=owner_id,
-        store=portfolio_store,
-        history_store=history_store,
-        metrics=metrics,
-        on_capture=lambda _: _mark_portfolio_clean(),
-    )
-    render_manual_capture(owner_id=owner_id, history_store=history_store, metrics=metrics)
+if public_auth_enabled:
+    _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)
+else:
+    _render_private_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)
