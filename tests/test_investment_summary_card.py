@@ -1,6 +1,6 @@
 from portfolio.holdings import build_portfolio_metrics
 
-from app.ui.investment_summary_card import _allocation_rows, _heatmap_tiles, _holding_table_rows, _sparkline_html
+from app.ui.investment_summary_card import _allocation_rows, _heatmap_tiles, _holding_table_rows, _mobile_holding_summary_cards, _sparkline_html
 
 
 def _metrics():
@@ -63,6 +63,20 @@ def test_summary_holding_table_contains_average_price_and_return_rate():
     assert "%" in html_rows
     assert "IRR" not in html_rows
     assert "합계 (주식 평가금액 + 현금)" in html_rows
+
+
+def test_mobile_holding_summary_cards_include_required_compact_fields():
+    cards = _mobile_holding_summary_cards(_metrics())
+
+    assert "summary-mobile-holdings" in cards
+    assert "삼성전자" in cards
+    assert "수량" in cards
+    assert "평단가" in cards
+    assert "매입금액" in cards
+    assert "현재가" in cards
+    assert "평가금액" in cards
+    assert "자산비중" in cards
+    assert "%" in cards
 
 
 def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels():

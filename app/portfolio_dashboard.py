@@ -77,6 +77,10 @@ PRICE_REFRESH_MODE_KEY = "price_refresh_mode"
 AUTO_LOAD_ATTEMPTED_KEY = "account_auto_load_attempted"
 AUTO_PRICE_REFRESHED_KEY = "account_auto_price_refreshed"
 ACCOUNT_STATUS_KEY = "account_status_message"
+CASH_FX_INPUT_SYNC_KEY = "cash_fx_inline_input_sync"
+INLINE_CASH_KRW_KEY = "cash_fx_inline_cash_krw"
+INLINE_CASH_USD_KEY = "cash_fx_inline_cash_usd"
+INLINE_USD_KRW_KEY = "cash_fx_inline_usd_krw"
 UNPROTECTED_WARNING = "공개 앱에서 저장소와 직접 입력 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 
 
@@ -442,6 +446,59 @@ def _refresh_fx(_config: AppSecurityConfig) -> None:
     st.rerun()
 
 
+def _cash_fx_input_signature() -> str:
+    return "|".join(
+        [
+            f"{float(st.session_state.get('cash_krw') or 0.0):.4f}",
+            f"{float(st.session_state.get('cash_usd') or 0.0):.4f}",
+            f"{float(st.session_state.get('usd_krw') or 0.0):.4f}",
+        ]
+    )
+
+
+def _sync_inline_cash_fx_inputs() -> None:
+    signature = _cash_fx_input_signature()
+    if st.session_state.get(CASH_FX_INPUT_SYNC_KEY) == signature:
+        return
+    st.session_state[INLINE_CASH_KRW_KEY] = float(st.session_state.get("cash_krw") or 0.0)
+    st.session_state[INLINE_CASH_USD_KEY] = float(st.session_state.get("cash_usd") or 0.0)
+    st.session_state[INLINE_USD_KRW_KEY] = float(st.session_state.get("usd_krw") or 1380.0)
+    st.session_state[CASH_FX_INPUT_SYNC_KEY] = signature
+
+
+def _queue_inline_cash_fx_update() -> None:
+    current_rate = float(st.session_state.get("usd_krw") or 1380.0)
+    new_rate = float(st.session_state.get(INLINE_USD_KRW_KEY) or current_rate)
+    pending_state = {
+        "cash_krw": float(st.session_state.get(INLINE_CASH_KRW_KEY) or 0.0),
+        "cash_usd": float(st.session_state.get(INLINE_CASH_USD_KEY) or 0.0),
+        "usd_krw": new_rate,
+    }
+    if abs(new_rate - current_rate) > 1e-9:
+        pending_state["fx_status_message"] = "수동 USD/KRW 환율"
+        pending_state["fx_fetched_at"] = None
+    st.session_state[PENDING_PORTFOLIO_STATE_KEY] = pending_state
+    st.rerun()
+
+
+def _render_cash_fx_tools(config: AppSecurityConfig) -> None:
+    _sync_inline_cash_fx_inputs()
+    with st.expander("현금 및 환율", expanded=True):
+        with st.form("inline_cash_fx_form"):
+            col1, col2, col3 = st.columns(3)
+            col1.number_input("원화 현금", min_value=0.0, step=100000.0, key=INLINE_CASH_KRW_KEY)
+            col2.number_input("달러 현금", min_value=0.0, step=100.0, key=INLINE_CASH_USD_KEY)
+            col3.number_input("USD/KRW 환율", min_value=0.01, step=1.0, key=INLINE_USD_KRW_KEY)
+            submitted = st.form_submit_button("현금/환율 적용", type="primary")
+        if submitted:
+            _queue_inline_cash_fx_update()
+        if st.button("USD/KRW 환율 갱신", icon=":material/currency_exchange:", key="inline_fx_refresh"):
+            _refresh_fx(config)
+        st.caption(st.session_state.fx_status_message)
+        if st.session_state.fx_fetched_at:
+            st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
+
+
 def _load_portfolio_record_now(record) -> None:
     queue_portfolio_record_load(record)
     _apply_pending_portfolio_state()
@@ -637,6 +694,7 @@ with summary_card_tab:
 with overview_tab:
     render_overview(metrics)
 with holdings_tab:
+    _render_cash_fx_tools(security_config)
     render_transaction_editor()
     render_transaction_cashflow(
         list(st.session_state.get("portfolio_transactions", [])),

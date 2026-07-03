@@ -12,6 +12,8 @@ from .formatters import compact_krw, full_krw, instrument_label, percentage, sig
 from .status import aggregate_price_statuses, build_price_log_rows, present_diagnostic, quote_status_label, split_diagnostics
 from .theme import DIMENSIONS, chart_config
 
+PENDING_PORTFOLIO_STATE_KEY = "pending_portfolio_state"
+
 
 def render_plotly_chart(fig, *, key: str) -> None:
     st.plotly_chart(fig, width="stretch", theme="streamlit", config=chart_config(), key=key)
@@ -45,11 +47,16 @@ def render_empty_portfolio() -> None:
                     "provider": "sample",
                 }
             )
-        st.session_state.holdings_rows = rows
-        st.session_state.portfolio_transactions = []
-        st.session_state.cash_krw = cash_krw
-        st.session_state.cash_usd = 0.0
-        st.session_state.usd_krw = usd_krw
+        st.session_state[PENDING_PORTFOLIO_STATE_KEY] = {
+            "holdings_rows": rows,
+            "portfolio_transactions": [],
+            "cash_krw": cash_krw,
+            "cash_usd": 0.0,
+            "usd_krw": usd_krw,
+            "fx_status_message": "샘플 USD/KRW 환율",
+            "fx_fetched_at": None,
+            "mark_clean": False,
+        }
         st.rerun()
 
 
