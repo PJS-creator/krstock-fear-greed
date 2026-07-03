@@ -9,12 +9,14 @@ from portfolio.pricing import (
     ProviderQuote,
     TTLFxCache,
     TTLQuoteCache,
+    YahooChartFxProvider,
     YFinanceFxProvider,
     YFinanceIntradayPriceProvider,
     YFinanceQuoteProvider,
     build_alpha_vantage_provider,
     parse_alpha_vantage_currency_exchange_response,
     parse_alpha_vantage_global_quote_response,
+    parse_yahoo_chart_usd_krw_response,
     parse_yfinance_history_frame,
     parse_yfinance_intraday_frame,
     refresh_usd_krw,
@@ -238,7 +240,62 @@ def test_yfinance_fx_provider_uses_krw_equals_symbol():
     assert rate.from_currency == "USD"
     assert rate.to_currency == "KRW"
     assert rate.rate == pytest.approx(1380.5)
-    assert rate.provider == "yfinance"
+
+
+def test_yahoo_chart_fx_response_uses_latest_valid_close():
+    rate = parse_yahoo_chart_usd_krw_response(
+        {
+            "chart": {
+                "result": [
+                    {
+                        "indicators": {
+                            "quote": [
+                                {
+                                    "close": [None, 1377.25, 1381.5],
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "error": None,
+            }
+        }
+    )
+
+    assert rate.from_currency == "USD"
+    assert rate.to_currency == "KRW"
+    assert rate.rate == pytest.approx(1381.5)
+    assert rate.provider == "yahoo-chart"
+
+
+def test_yahoo_chart_fx_provider_uses_short_timeout_loader():
+    calls = []
+
+    def response_loader(url, timeout_seconds):
+        calls.append((url, timeout_seconds))
+        return {
+            "chart": {
+                "result": [
+                    {
+                        "indicators": {
+                            "quote": [
+                                {
+                                    "close": [1380.0],
+                                }
+                            ]
+                        }
+                    }
+                ],
+                "error": None,
+            }
+        }
+
+    provider = YahooChartFxProvider(response_loader=response_loader, timeout_seconds=3.0)
+    rate = provider.get_exchange_rate("usd", "krw")
+
+    assert calls == [("https://query1.finance.yahoo.com/v8/finance/chart/KRW=X?range=5d&interval=1d", 3.0)]
+    assert rate.rate == pytest.approx(1380.0)
+    assert rate.provider == "yahoo-chart"
 
 
 def test_yfinance_fx_provider_rejects_unsupported_pair():

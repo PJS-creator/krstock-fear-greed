@@ -47,6 +47,7 @@ from portfolio.historical_holdings import HistoricalScheduleStoreError, build_su
 from portfolio.pricing import (
     TTLQuoteCache,
     build_korea_quote_provider,
+    build_yahoo_chart_fx_provider,
     build_yfinance_fx_provider,
     build_yfinance_intraday_provider,
     build_yfinance_provider,
@@ -515,8 +516,8 @@ def _refresh_prices(_config: AppSecurityConfig, owner_id, history_store) -> None
     st.rerun()
 
 
-def _fetch_fx_rate():
-    provider = build_yfinance_fx_provider()
+def _fetch_fx_rate(*, public_auth_enabled: bool = False):
+    provider = build_yahoo_chart_fx_provider() if public_auth_enabled else build_yfinance_fx_provider()
     try:
         new_rate, status = refresh_usd_krw(provider, float(st.session_state.usd_krw))
     except ValueError as exc:
@@ -536,9 +537,13 @@ def _apply_fx_rate(new_rate, status) -> bool:
     return status.status in {"updated", "cached"}
 
 
-def _refresh_fx(_config: AppSecurityConfig) -> None:
+def _refresh_fx(_config: AppSecurityConfig, *, public_auth_enabled: bool = False) -> None:
+    if public_auth_enabled:
+        st.session_state.fx_status_message = "공용 앱에서는 USD/KRW 환율을 직접 입력해 사용합니다. 값을 바꾼 뒤 현금/환율 적용을 눌러주세요."
+        st.info(st.session_state.fx_status_message)
+        return
     with st.spinner("USD/KRW 환율 조회 중..."):
-        result = _fetch_fx_rate()
+        result = _fetch_fx_rate(public_auth_enabled=public_auth_enabled)
     if result is None:
         return
     new_rate, status = result
@@ -585,7 +590,7 @@ def _queue_inline_cash_fx_update() -> None:
     st.rerun()
 
 
-def _render_cash_fx_tools(config: AppSecurityConfig) -> None:
+def _render_cash_fx_tools(config: AppSecurityConfig, *, public_auth_enabled: bool = False) -> None:
     _sync_inline_cash_fx_inputs()
     with st.expander("현금 및 환율", expanded=True):
         with st.form("inline_cash_fx_form"):
@@ -596,8 +601,9 @@ def _render_cash_fx_tools(config: AppSecurityConfig) -> None:
             submitted = st.form_submit_button("현금/환율 적용", type="primary")
         if submitted:
             _queue_inline_cash_fx_update()
-        if st.button("USD/KRW 환율 갱신", icon=":material/currency_exchange:", key="inline_fx_refresh"):
-            _refresh_fx(config)
+        fx_button_label = "수동 환율 안내" if public_auth_enabled else "USD/KRW 환율 갱신"
+        if st.button(fx_button_label, icon=":material/currency_exchange:", key="inline_fx_refresh"):
+            _refresh_fx(config, public_auth_enabled=public_auth_enabled)
         st.caption(st.session_state.fx_status_message)
         if st.session_state.fx_fetched_at:
             st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
@@ -692,7 +698,7 @@ def _render_saved_portfolio_selector(owner_id, store) -> None:
     st.caption("새 포트폴리오 생성과 이름 변경은 관리 탭에서 처리합니다.")
 
 
-def _render_sidebar(config: AppSecurityConfig, owner_id, store) -> None:
+def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_enabled: bool = False) -> None:
     with st.sidebar:
         st.subheader("현재 포트폴리오")
         _render_saved_portfolio_selector(owner_id, store)
@@ -711,8 +717,9 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store) -> None:
             st.number_input("원화 현금", min_value=0.0, step=100000.0, key="cash_krw")
             st.number_input("달러 현금", min_value=0.0, step=100.0, key="cash_usd")
             st.number_input("환율", min_value=0.01, step=1.0, key="usd_krw", help="USD/KRW")
-            if st.button("환율 갱신", icon=":material/currency_exchange:"):
-                _refresh_fx(config)
+            fx_button_label = "수동 환율 안내" if public_auth_enabled else "환율 갱신"
+            if st.button(fx_button_label, icon=":material/currency_exchange:"):
+                _refresh_fx(config, public_auth_enabled=public_auth_enabled)
             st.caption(st.session_state.fx_status_message)
             if st.session_state.fx_fetched_at:
                 st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
@@ -783,7 +790,7 @@ owner_id = _resolve_owner_id(storage_config)
 _auto_load_account_portfolio(owner_id, portfolio_store)
 if not public_auth_enabled:
     _auto_refresh_loaded_prices(owner_id, portfolio_store, history_store)
-_render_sidebar(security_config, owner_id, portfolio_store)
+_render_sidebar(security_config, owner_id, portfolio_store, public_auth_enabled=public_auth_enabled)
 _render_security_status(security_config, public_auth_enabled=public_auth_enabled)
 if not public_auth_enabled and should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
@@ -802,7 +809,7 @@ with summary_card_tab:
 with overview_tab:
     render_overview(metrics)
 with holdings_tab:
-    _render_cash_fx_tools(security_config)
+    _render_cash_fx_tools(security_config, public_auth_enabled=public_auth_enabled)
     render_transaction_editor()
     render_transaction_cashflow(
         list(st.session_state.get("portfolio_transactions", [])),
