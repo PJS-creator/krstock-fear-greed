@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 import pandas as pd
 import streamlit as st
 
@@ -276,6 +278,67 @@ def _holdings_table_rows(metrics: PortfolioMetrics) -> list[dict[str, object]]:
     return rows
 
 
+def _mobile_text(value: object) -> str:
+    try:
+        if pd.isna(value):
+            return "-"
+    except (TypeError, ValueError):
+        pass
+    text = str(value or "").strip()
+    return text or "-"
+
+
+def _mobile_change_text(amount: object, pct_value: object) -> str:
+    amount_text = _mobile_text(amount)
+    pct_text = _mobile_text(pct_value)
+    if amount_text == "-" and pct_text == "-":
+        return "-"
+    if pct_text == "-":
+        return amount_text
+    return f"{amount_text} ({pct_text})"
+
+
+def _mobile_change_class(value: object) -> str:
+    text = _mobile_text(value)
+    if text.startswith("+"):
+        return "mobile-holding-up"
+    if text.startswith("-"):
+        return "mobile-holding-down"
+    return "mobile-holding-neutral"
+
+
+def _mobile_holdings_cards_html(frame: pd.DataFrame) -> str:
+    cards = []
+    for _, row in frame.iterrows():
+        weight = percentage(float(row.get("비중") or 0.0) / 100.0, digits=2)
+        today_change = _mobile_change_text(row.get("오늘 변동액"), row.get("오늘 변동률"))
+        today_class = _mobile_change_class(row.get("오늘 변동액"))
+        cards.append(
+            "<article class='mobile-holding-card'>"
+            "<div class='mobile-holding-head'>"
+            f"<div class='mobile-holding-name'>{escape(_mobile_text(row.get('종목')))}</div>"
+            f"<div class='mobile-holding-weight'>{escape(weight)}</div>"
+            "</div>"
+            f"<div class='mobile-holding-value'>{escape(_mobile_text(row.get('평가액 표시')))}</div>"
+            "<div class='mobile-holding-grid'>"
+            f"<div class='mobile-holding-cell'><span>수량</span><strong>{escape(_mobile_text(row.get('수량 표시')))}</strong></div>"
+            f"<div class='mobile-holding-cell'><span>현재가</span><strong>{escape(_mobile_text(row.get('최근 제공 가격 표시')))}</strong></div>"
+            f"<div class='mobile-holding-cell'><span>시장</span><strong>{escape(_mobile_text(row.get('시장')))}</strong></div>"
+            f"<div class='mobile-holding-cell'><span>가격 상태</span><strong>{escape(_mobile_text(row.get('가격 상태')))}</strong></div>"
+            "</div>"
+            "<div class='mobile-holding-line'>"
+            "<span>오늘 변동</span>"
+            f"<strong class='{today_class}'>{escape(today_change)}</strong>"
+            "</div>"
+            "</article>"
+        )
+    return "<div class='mobile-holdings-cards'>" + "".join(cards) + "</div>"
+
+
+def _render_mobile_holdings_cards(frame: pd.DataFrame) -> None:
+    st.markdown(_mobile_holdings_cards_html(frame), unsafe_allow_html=True)
+
+
 def render_holdings_table(metrics: PortfolioMetrics) -> None:
     st.subheader("보유자산")
     rows = _holdings_table_rows(metrics)
@@ -313,6 +376,7 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
     base_columns = ["종목", "시장", "수량 표시", "최근 제공 가격 표시", "평가액 표시", "오늘 변동액", "오늘 변동률", "비중", "가격 상태", "조회 시각"]
     detail_columns = ["ticker", "종목명", "통화", "평단가 표시", "provider", "비중 표시"]
     visible_columns = base_columns + detail_columns if show_details else base_columns
+    _render_mobile_holdings_cards(frame)
     st.dataframe(
         frame[visible_columns],
         hide_index=True,

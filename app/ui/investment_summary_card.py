@@ -698,6 +698,175 @@ def _render_styles() -> None:
             .summary-heatmap-card { min-height: 360px; }
             .summary-heatmap-area { min-height: 300px; }
         }
+        @media (max-width: 720px) {
+            .summary-card {
+                padding: 12px;
+                box-shadow: 0 12px 34px rgba(2, 8, 23, 0.32);
+            }
+            .summary-title h2 {
+                font-size: 1.72rem;
+                line-height: 1.14;
+            }
+            .summary-title p {
+                margin-top: 8px;
+                font-size: 0.94rem;
+            }
+            .summary-top {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+            .summary-top-box,
+            .summary-panel,
+            .summary-table-wrap,
+            .summary-kpi {
+                border-radius: 8px;
+            }
+            .summary-top-box,
+            .summary-panel {
+                padding: 12px;
+            }
+            .summary-date,
+            .summary-delta {
+                font-size: 1.32rem;
+            }
+            .summary-main {
+                grid-template-columns: 1fr;
+                gap: 12px;
+                margin-top: 12px;
+            }
+            .summary-legend-row {
+                grid-template-columns: 18px minmax(0, 1fr) 68px;
+                font-size: 0.93rem;
+                padding: 7px 0;
+            }
+            .summary-heatmap-card {
+                min-height: 280px;
+            }
+            .summary-heatmap-head {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+            .summary-heatmap-area {
+                min-height: 240px;
+            }
+            .summary-table-wrap {
+                margin-top: 12px;
+                overflow: visible;
+            }
+            .summary-table-wrap h3 {
+                padding: 13px 14px;
+                font-size: 1.06rem;
+            }
+            .summary-table-scroll {
+                overflow: visible;
+            }
+            .summary-table {
+                display: block;
+                min-width: 0;
+                width: 100%;
+                border-collapse: separate;
+                border-spacing: 0;
+                font-size: 0.9rem;
+            }
+            .summary-table thead {
+                display: none;
+            }
+            .summary-table tbody {
+                display: grid;
+                gap: 10px;
+                padding: 10px;
+            }
+            .summary-table tr {
+                display: grid;
+                grid-template-columns: 1fr;
+                border: 1px solid rgba(148, 163, 184, 0.18);
+                border-radius: 8px;
+                overflow: hidden;
+                background: rgba(15, 23, 42, 0.56);
+            }
+            .summary-table th,
+            .summary-table td {
+                border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+                padding: 8px 10px;
+                min-height: 34px;
+                text-align: right;
+                white-space: normal;
+            }
+            .summary-table td {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+            }
+            .summary-table td:before {
+                color: #94A3B8;
+                content: "";
+                flex: 0 0 auto;
+                font-size: 0.78rem;
+                font-weight: 760;
+            }
+            .summary-table td:last-child {
+                border-bottom: 0;
+            }
+            .summary-table td:nth-child(1) {
+                justify-content: flex-start;
+                min-width: 0;
+                font-size: 1rem;
+                font-weight: 850;
+                text-align: left;
+            }
+            .summary-table td:nth-child(1):before { display: none; }
+            .summary-table td:nth-child(2):before { content: "수량"; }
+            .summary-table td:nth-child(3):before { content: "평단가"; }
+            .summary-table td:nth-child(4):before { content: "매입금액"; }
+            .summary-table td:nth-child(5):before { content: "현재가"; }
+            .summary-table td:nth-child(6):before { content: "당일 변동성"; }
+            .summary-table td:nth-child(7):before { content: "전일 대비"; }
+            .summary-table td:nth-child(8):before { content: "평가 수익률"; }
+            .summary-table td:nth-child(9):before { content: "IRR"; }
+            .summary-table td:nth-child(10):before { content: "평가금액"; }
+            .summary-table td:nth-child(11):before { content: "자산 비중"; }
+            .summary-name {
+                min-width: 0;
+            }
+            .summary-sparkline-th,
+            .summary-sparkline-cell {
+                width: auto;
+                text-align: right !important;
+            }
+            .summary-sparkline {
+                width: 86px;
+                height: 30px;
+            }
+            .summary-sparkline svg {
+                width: 80px;
+                height: 24px;
+            }
+            .summary-badge {
+                min-width: 0;
+                max-width: 100%;
+                white-space: normal;
+            }
+            .summary-total-row td {
+                background: rgba(30, 41, 59, 0.38);
+            }
+            .summary-kpi-grid {
+                grid-template-columns: 1fr;
+                margin-top: 12px;
+            }
+            .summary-kpi {
+                min-height: 96px;
+                padding: 14px;
+            }
+            .summary-kpi-value {
+                font-size: 1.32rem;
+                overflow-wrap: anywhere;
+            }
+            .summary-foot {
+                flex-direction: column;
+                font-size: 0.82rem;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
