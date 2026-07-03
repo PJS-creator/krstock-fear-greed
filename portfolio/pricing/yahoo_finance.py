@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Mapping
 from typing import Any
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from .base import PriceProviderError, ProviderFxRate, ProviderIntradayPrices, ProviderQuote
 from .korea import normalize_korea_symbol
 
 YFINANCE_PROVIDER_NAME = "yfinance"
 YFINANCE_USD_KRW_SYMBOL = "KRW=X"
+YAHOO_CHART_FX_PROVIDER_NAME = "yahoo-chart"
+YAHOO_CHART_FX_URL = "https://query1.finance.yahoo.com/v8/finance/chart/KRW=X?range=5d&interval=1d"
 
 
 def normalize_yfinance_symbol(symbol: object) -> str:
@@ -274,3 +279,60 @@ class YFinanceFxProvider:
 
 def build_yfinance_fx_provider() -> YFinanceFxProvider:
     return YFinanceFxProvider()
+
+
+def parse_yahoo_chart_usd_krw_response(payload: Mapping[str, Any]) -> ProviderFxRate:
+    try:
+        chart = payload["chart"]
+        error = chart.get("error")
+        if error:
+            raise PriceProviderError(f"Yahoo chart 응답 오류: {error}")
+        result = chart["result"][0]
+        closes = result["indicators"]["quote"][0]["close"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise PriceProviderError("Yahoo chart USD/KRW 응답 형식이 올바르지 않습니다.") from exc
+
+    values = []
+    for value in closes:
+        if value is None:
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number) and number > 0:
+            values.append(number)
+    if not values:
+        raise PriceProviderError("Yahoo chart USD/KRW 응답에 유효한 환율 값이 없습니다.")
+    return ProviderFxRate.now(from_currency="USD", to_currency="KRW", rate=values[-1], provider=YAHOO_CHART_FX_PROVIDER_NAME)
+
+
+class YahooChartFxProvider:
+    def __init__(
+        self,
+        *,
+        response_loader: Callable[[str, float], Mapping[str, Any]] | None = None,
+        timeout_seconds: float = 4.0,
+    ) -> None:
+        self._response_loader = response_loader
+        self._timeout_seconds = timeout_seconds
+
+    def _load_response(self) -> Mapping[str, Any]:
+        if self._response_loader is not None:
+            return self._response_loader(YAHOO_CHART_FX_URL, self._timeout_seconds)
+        try:
+            with urlopen(YAHOO_CHART_FX_URL, timeout=self._timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (OSError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise PriceProviderError("Yahoo chart USD/KRW 환율 조회 실패") from exc
+
+    def get_exchange_rate(self, from_currency: str, to_currency: str) -> ProviderFxRate:
+        normalized_from = str(from_currency or "").strip().upper()
+        normalized_to = str(to_currency or "").strip().upper()
+        if (normalized_from, normalized_to) != ("USD", "KRW"):
+            raise PriceProviderError("Yahoo chart FX provider는 USD/KRW만 지원합니다.")
+        return parse_yahoo_chart_usd_krw_response(self._load_response())
+
+
+def build_yahoo_chart_fx_provider() -> YahooChartFxProvider:
+    return YahooChartFxProvider()
