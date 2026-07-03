@@ -486,54 +486,39 @@ def _holding_table_rows(
     return rows
 
 
-def _mobile_holding_summary_cards(metrics: PortfolioMetrics) -> str:
-    cards = []
+def _mobile_holding_summary_table(metrics: PortfolioMetrics) -> str:
+    rows = []
     for item in sorted(metrics.rows, key=lambda row: row.market_value_krw or 0.0, reverse=True):
         holding = item.holding
         label = instrument_label(holding)
         color = deterministic_color(holding.get("ticker") or label)
         quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
         avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
-        purchase_amount = "-"
-        if holding.get("avg_price") is not None:
-            purchase_amount = format_price(float(holding.get("avg_price") or 0.0) * float(holding.get("quantity") or 0.0), holding.get("currency"))
         current_price = format_price(holding.get("current_price"), holding.get("currency"))
-        day_pct = _holding_day_change_pct(item)
-        day_class = _signed_class(day_pct)
-        day_text = signed_percentage(day_pct) if day_pct is not None else "-"
-        market_value = _krw(item.market_value_krw)
-        cards.append(
-            "<article class='summary-mobile-holding'>"
-            "<div class='summary-mobile-holding-head'>"
-            f"<div class='summary-mobile-holding-name'><span style='background:{color}'></span>{escape(label)}</div>"
-            f"<div class='summary-mobile-holding-weight'><span>자산비중</span><strong>{escape(percentage(item.weight, digits=2))}</strong></div>"
-            "</div>"
-            "<div class='summary-mobile-holding-grid'>"
-            "<div class='summary-mobile-holding-cell'>"
-            "<span>수량</span>"
-            f"<strong>{escape(quantity)}</strong>"
-            "</div>"
-            "<div class='summary-mobile-holding-cell'>"
-            "<span>평단가</span>"
-            f"<strong>{escape(avg_price)}</strong>"
-            f"<small>매입금액 {escape(purchase_amount)}</small>"
-            "</div>"
-            "<div class='summary-mobile-holding-cell summary-mobile-holding-price'>"
-            f"<span>현재가 <em class='{day_class}'>{escape(day_text)}</em></span>"
-            f"<strong>{escape(current_price)}</strong>"
-            f"<small>평가금액 {escape(market_value)}</small>"
-            "</div>"
-            "</div>"
-            "</article>"
+        rows.append(
+            "<tr>"
+            "<td>"
+            f"<div class='summary-mobile-summary-name'><span style='background:{color}'></span><strong>{escape(label)}</strong></div>"
+            "</td>"
+            f"<td>{escape(quantity)}</td>"
+            f"<td>{escape(avg_price)}</td>"
+            f"<td>{escape(current_price)}</td>"
+            f"<td class='summary-mobile-summary-weight'>{escape(percentage(item.weight, digits=2))}</td>"
+            "</tr>"
         )
-    if not cards:
+    if not rows:
         return ""
     return (
         "<div class='summary-mobile-holdings'>"
-        "<h3>보유 종목 현황</h3>"
-        "<div class='summary-mobile-holding-list'>"
-        + "".join(cards)
-        + "</div></div>"
+        "<h3>보유 종목 요약</h3>"
+        "<div class='summary-mobile-table-scroll'>"
+        "<table class='summary-mobile-holding-table'>"
+        "<thead><tr>"
+        "<th>종목명</th><th>수량</th><th>평단가</th><th>현재가</th><th>자산비중</th>"
+        "</tr></thead>"
+        "<tbody>"
+        + "".join(rows)
+        + "</tbody></table></div></div>"
     )
 
 
@@ -832,89 +817,82 @@ def _render_styles() -> None:
                 color: #F8FAFC;
                 font-size: 1.06rem;
             }
-            .summary-mobile-holding-list {
-                display: grid;
-                gap: 9px;
+            .summary-mobile-table-scroll {
+                width: 100%;
+                overflow-x: hidden;
             }
-            .summary-mobile-holding {
-                border: 1px solid rgba(148, 163, 184, 0.16);
-                border-radius: 8px;
-                padding: 10px;
-                background: rgba(15, 23, 42, 0.54);
+            .summary-mobile-holding-table {
+                width: 100%;
+                table-layout: fixed;
+                border-collapse: separate;
+                border-spacing: 0;
+                font-size: 0.72rem;
+                line-height: 1.22;
+                font-variant-numeric: tabular-nums;
             }
-            .summary-mobile-holding-head {
-                display: flex;
-                align-items: center;
-                justify-content: space-between;
-                gap: 10px;
+            .summary-mobile-holding-table th,
+            .summary-mobile-holding-table td {
+                border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+                padding: 8px 4px;
+                text-align: right;
+                vertical-align: middle;
+                overflow-wrap: anywhere;
             }
-            .summary-mobile-holding-name {
+            .summary-mobile-holding-table th {
+                color: #CBD5E1;
+                font-size: 0.68rem;
+                font-weight: 800;
+                background: rgba(15, 23, 42, 0.58);
+            }
+            .summary-mobile-holding-table th:first-child,
+            .summary-mobile-holding-table td:first-child {
+                width: 29%;
+                padding-left: 0;
+                text-align: left;
+            }
+            .summary-mobile-holding-table th:nth-child(2),
+            .summary-mobile-holding-table td:nth-child(2) {
+                width: 14%;
+            }
+            .summary-mobile-holding-table th:nth-child(3),
+            .summary-mobile-holding-table td:nth-child(3),
+            .summary-mobile-holding-table th:nth-child(4),
+            .summary-mobile-holding-table td:nth-child(4) {
+                width: 20%;
+            }
+            .summary-mobile-holding-table th:nth-child(5),
+            .summary-mobile-holding-table td:nth-child(5) {
+                width: 17%;
+                padding-right: 0;
+            }
+            .summary-mobile-holding-table tbody tr:last-child td {
+                border-bottom: 0;
+            }
+            .summary-mobile-summary-name {
                 min-width: 0;
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                gap: 5px;
                 color: #F8FAFC;
-                font-size: 1rem;
                 font-weight: 850;
             }
-            .summary-mobile-holding-name span {
-                width: 11px;
-                height: 11px;
+            .summary-mobile-summary-name span {
+                width: 9px;
+                height: 9px;
                 flex: 0 0 auto;
                 border-radius: 50%;
             }
-            .summary-mobile-holding-weight {
-                flex: 0 0 auto;
-                text-align: right;
-                font-variant-numeric: tabular-nums;
-            }
-            .summary-mobile-holding-weight span {
-                display: block;
-                color: #94A3B8;
-                font-size: 0.68rem;
-                font-weight: 760;
-            }
-            .summary-mobile-holding-weight strong {
-                display: block;
-                color: #34D399;
-                font-size: 0.95rem;
-                font-weight: 850;
-            }
-            .summary-mobile-holding-grid {
-                display: grid;
-                grid-template-columns: 0.78fr 1fr 1.2fr;
-                gap: 7px;
-                margin-top: 9px;
-            }
-            .summary-mobile-holding-cell {
+            .summary-mobile-summary-name strong {
                 min-width: 0;
-                border-radius: 7px;
-                padding: 8px;
-                background: rgba(2, 8, 23, 0.32);
-            }
-            .summary-mobile-holding-cell span,
-            .summary-mobile-holding-cell small {
-                display: block;
-                color: #94A3B8;
-                font-size: 0.72rem;
-                line-height: 1.28;
-            }
-            .summary-mobile-holding-cell strong {
-                display: block;
-                margin-top: 3px;
-                color: #F8FAFC;
-                font-size: 0.85rem;
-                line-height: 1.25;
+                font-size: 0.76rem;
+                line-height: 1.18;
                 overflow-wrap: anywhere;
-                font-variant-numeric: tabular-nums;
             }
-            .summary-mobile-holding-cell em {
-                margin-left: 4px;
-                font-style: normal;
+            .summary-mobile-summary-weight {
+                color: #34D399;
                 font-weight: 850;
             }
             .summary-table-wrap {
-                display: none;
                 margin-top: 12px;
                 overflow: visible;
             }
@@ -1074,7 +1052,7 @@ def render_investment_summary_card(
         for row in allocation_rows
     )
     heatmap_tiles = _heatmap_tiles(allocation_rows)
-    mobile_holding_cards = _mobile_holding_summary_cards(metrics)
+    mobile_holding_summary = _mobile_holding_summary_table(metrics)
     table_rows = "".join(_holding_table_rows(metrics, transactions=transactions, as_of_date=as_of_date))
     html = f"""
     <div class="summary-card">
@@ -1108,7 +1086,7 @@ def render_investment_summary_card(
                 <div class="summary-heatmap-area">{heatmap_tiles}</div>
             </div>
         </div>
-        {mobile_holding_cards}
+        {mobile_holding_summary}
         <div class="summary-table-wrap">
             <h3>보유 종목 현황</h3>
             <div class="summary-table-scroll">
