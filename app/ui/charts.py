@@ -189,8 +189,9 @@ def plot_allocation(
             sort=False,
             text=text,
             textinfo="text",
-            textposition="outside",
-            textfont=dict(size=13, family=APP_FONT_FAMILY),
+            textposition="inside",
+            insidetextorientation="radial",
+            textfont=dict(size=12, family=APP_FONT_FAMILY),
             customdata=customdata,
             marker=dict(colors=colors, line=dict(color="rgba(148,163,184,0.38)", width=1)),
             pull=[0.025 if index == 0 else 0 for index, _ in enumerate(rows)],
@@ -214,11 +215,11 @@ def plot_allocation(
                 font=dict(size=16, family=APP_FONT_FAMILY, color=SEMANTIC_COLORS["ink"]),
             )
         ],
-        legend=dict(orientation="h", yanchor="bottom", y=-0.18, xanchor="center", x=0.5),
+        legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),
         uniformtext=dict(minsize=12, mode="hide"),
     )
-    fig = apply_chart_layout(fig, height=DIMENSIONS.tall_height, hovermode="closest")
-    fig.update_layout(margin=dict(l=44, r=44, t=28, b=56))
+    fig = apply_chart_layout(fig, height=DIMENSIONS.tall_height + 70, hovermode="closest")
+    fig.update_layout(margin=dict(l=18, r=18, t=28, b=130))
     return fig
 
 
