@@ -1,4 +1,5 @@
 import re
+from urllib.error import URLError
 
 from streamlit.testing.v1 import AppTest
 
@@ -13,7 +14,7 @@ class _FakeYahooFxResponse:
         return False
 
     def read(self):
-        return b'{"chart":{"result":[{"indicators":{"quote":[{"close":[1388.25]}]}}],"error":null}}'
+        return b'{"result":"success","base_code":"USD","rates":{"KRW":1388.25}}'
 
 
 def _element_texts(elements):
@@ -141,11 +142,14 @@ def test_public_holdings_transaction_input_renders_only_when_selected():
     assert "여러 개 빠른 입력" in text
 
 
-def test_public_cash_fx_refresh_button_fetches_and_applies_rate(monkeypatch):
+def test_public_cash_fx_refresh_button_falls_back_and_applies_rate(monkeypatch):
     calls = []
 
-    def fake_urlopen(url, timeout):
+    def fake_urlopen(request, timeout):
+        url = getattr(request, "full_url", request)
         calls.append((url, timeout))
+        if "query1.finance.yahoo.com" in url:
+            raise URLError("blocked")
         return _FakeYahooFxResponse()
 
     monkeypatch.setattr("portfolio.pricing.yahoo_finance.urlopen", fake_urlopen)
@@ -164,6 +168,9 @@ def test_public_cash_fx_refresh_button_fetches_and_applies_rate(monkeypatch):
     refresh_buttons[0].click().run(timeout=20)
 
     assert not at.exception
-    assert calls == [("https://query1.finance.yahoo.com/v8/finance/chart/KRW=X?range=5d&interval=1d", 4.0)]
+    assert calls == [
+        ("https://query1.finance.yahoo.com/v8/finance/chart/KRW=X?range=5d&interval=1d", 4.0),
+        ("https://open.er-api.com/v6/latest/USD", 4.0),
+    ]
     assert at.session_state["usd_krw"] == 1388.25
     assert at.session_state["fx_status_message"] == "USD/KRW 환율을 갱신했습니다."
