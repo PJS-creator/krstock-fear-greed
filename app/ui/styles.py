@@ -35,6 +35,7 @@ __CSS_VARS__
         .block-container {
             padding-top: 1.25rem;
             padding-bottom: 2rem;
+            position: relative;
         }
         .block-container h1 {
             color: var(--app-heading);
@@ -130,6 +131,14 @@ __CSS_VARS__
             border-radius: 8px;
             font-weight: 720;
             letter-spacing: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.45rem;
+            text-align: center;
+        }
+        div[data-testid="stButton"] button p {
+            margin: 0;
         }
         div[data-testid="stButton"] button[kind="primary"] {
             background: linear-gradient(135deg, var(--app-primary), var(--app-primary-hover));
@@ -150,6 +159,10 @@ __CSS_VARS__
             gap: 0.45rem;
         }
         div[role="radiogroup"] label {
+            box-sizing: border-box;
+            display: inline-flex !important;
+            align-items: center !important;
+            justify-content: center !important;
             min-height: 2.45rem;
             padding: 0.45rem 0.74rem;
             border-radius: 8px;
@@ -157,15 +170,29 @@ __CSS_VARS__
             background: var(--app-panel);
             color: var(--app-text);
             font-weight: 760;
+            text-align: center;
         }
         div[role="radiogroup"] label > div:first-child {
             display: none !important;
         }
+        div[role="radiogroup"] label > div {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
         div[role="radiogroup"] label * {
             color: inherit !important;
         }
+        div[role="radiogroup"] label div[data-testid="stMarkdownContainer"] {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
         div[role="radiogroup"] label p {
             margin: 0;
+            width: 100%;
+            text-align: center;
         }
         div[role="radiogroup"] label:hover {
             border-color: var(--app-primary-hover);
@@ -201,6 +228,24 @@ __CSS_VARS__
             font-size: 0.82rem;
             font-weight: 760;
             margin-bottom: 0.25rem;
+        }
+        .st-key-app_theme_topbar {
+            position: absolute;
+            top: 0.95rem;
+            right: 0;
+            z-index: 30;
+            width: auto !important;
+            max-width: 11rem;
+        }
+        .st-key-app_theme_topbar div[role="radiogroup"] {
+            justify-content: flex-end;
+            gap: 0.35rem;
+        }
+        .st-key-app_theme_topbar div[role="radiogroup"] label {
+            min-height: 2.15rem;
+            padding: 0.36rem 0.58rem;
+            font-size: 0.86rem;
+            box-shadow: var(--app-shadow);
         }
         .app-header-panel {
             border: 1px solid var(--app-border);
@@ -244,6 +289,16 @@ __CSS_VARS__
             div[data-testid="stButton"] button {
                 min-height: 2.75rem;
                 width: 100%;
+            }
+            .st-key-app_theme_topbar {
+                top: 0.72rem;
+                right: 0.75rem;
+                max-width: 8.75rem;
+            }
+            .st-key-app_theme_topbar div[role="radiogroup"] label {
+                min-height: 2.15rem;
+                padding: 0.34rem 0.52rem;
+                font-size: 0.82rem;
             }
             div[data-testid="stTabs"] [role="tablist"] {
                 position: sticky;
