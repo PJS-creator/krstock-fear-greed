@@ -38,7 +38,7 @@ __CSS_VARS__
         }
         .block-container h1 {
             color: var(--app-heading);
-            font-size: 3rem;
+            font-size: 2.45rem;
             line-height: 1.08;
             word-break: keep-all;
             letter-spacing: 0;
@@ -216,7 +216,7 @@ __CSS_VARS__
                 max-width: 100%;
             }
             .block-container h1 {
-                font-size: 1.85rem;
+                font-size: 1.62rem;
                 line-height: 1.16;
                 margin-bottom: 0.25rem;
             }
@@ -225,11 +225,10 @@ __CSS_VARS__
             section[data-testid="stSidebar"] { display: none; }
             div[data-testid="stHorizontalBlock"] {
                 gap: 0.65rem;
-                flex-direction: column;
+                flex-wrap: wrap;
             }
             div[data-testid="stHorizontalBlock"] > div {
-                width: 100% !important;
-                flex: 1 1 auto !important;
+                flex: 1 1 13rem !important;
                 min-width: 0 !important;
             }
             div[data-testid="stMetric"] {
@@ -250,8 +249,9 @@ __CSS_VARS__
                 position: sticky;
                 top: 0;
                 z-index: 20;
-                display: grid;
-                grid-template-columns: repeat(3, minmax(0, 1fr));
+                display: flex;
+                flex-wrap: nowrap;
+                overflow-x: auto;
                 gap: 0.35rem;
                 padding: 0.35rem 0;
                 background: var(--app-surface);
@@ -259,7 +259,8 @@ __CSS_VARS__
                 border-bottom: 1px solid var(--app-border);
             }
             div[data-testid="stTabs"] [role="tab"] {
-                min-width: 0;
+                flex: 0 0 auto;
+                min-width: 5.8rem;
                 min-height: 2.45rem;
                 justify-content: center;
                 border-radius: 8px;
@@ -271,16 +272,6 @@ __CSS_VARS__
             div[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
                 background: var(--app-primary);
                 color: #FFFFFF;
-            }
-            div[data-testid="stTabs"] [role="tab"]:nth-of-type(n+4) {
-                display: none;
-            }
-            div[data-testid="stTabs"] [role="tab"]:nth-of-type(3) p {
-                font-size: 0;
-            }
-            div[data-testid="stTabs"] [role="tab"]:nth-of-type(3) p::after {
-                content: "보유자산 입력";
-                font-size: 0.86rem;
             }
             div[data-testid="stDataFrame"],
             div[data-testid="stDataEditor"] {

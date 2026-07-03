@@ -25,8 +25,8 @@ def render_overview(metrics: PortfolioMetrics, *, history_records: list[Portfoli
         render_empty_portfolio()
         return
 
-    st.subheader("자산 구성")
-    st.caption("도넛은 현금을 포함한 총자산 기준입니다. 통화 노출은 KRW 환산 금액으로 계산합니다.")
+    st.subheader("자산 비중")
+    st.caption("현금을 포함한 총자산 기준입니다. 통화 노출은 KRW 환산 금액입니다.")
     chart_col1, chart_col2 = st.columns(2)
     allocation = plot_allocation(metrics)
     with chart_col1:
@@ -41,7 +41,7 @@ def render_overview(metrics: PortfolioMetrics, *, history_records: list[Portfoli
         else:
             render_plotly_chart(exposure, key="currency_exposure")
 
-    st.subheader("오늘 변동 기여도")
+    st.subheader("오늘 기여도")
     render_contribution_summary(metrics)
     show_all = st.toggle("전체 종목 보기", value=False, key="show_all_contribution") if len(metrics.rows) > 10 else False
     contribution = plot_contribution(metrics, show_all=show_all)
@@ -50,5 +50,5 @@ def render_overview(metrics: PortfolioMetrics, *, history_records: list[Portfoli
     else:
         render_plotly_chart(contribution, key="contribution_chart")
 
-    st.subheader("자산 진단")
+    st.subheader("진단")
     render_diagnostics(metrics)

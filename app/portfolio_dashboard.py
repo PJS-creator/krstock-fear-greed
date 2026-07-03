@@ -121,6 +121,40 @@ PUBLIC_PORTFOLIO_NAME = "main"
 APP_THEME_CHOICE_KEY = "app_theme_choice"
 THEME_LABEL_BY_MODE = {"dark": "다크", "light": "라이트"}
 THEME_MODE_BY_LABEL = {label: mode for mode, label in THEME_LABEL_BY_MODE.items()}
+PUBLIC_SECTION_LABELS = {
+    "summary": "총괄현황",
+    "details": "세부내역",
+    "input": "사용자 입력",
+    "history": "자산추이",
+}
+PUBLIC_SECTION_LEGACY_MAP = {
+    "투자 총괄 카드": "summary",
+    "총괄현황": "summary",
+    "개요": "details",
+    "세부내역": "details",
+    "보유자산": "input",
+    "사용자 입력": "input",
+    "자산추이": "history",
+}
+PUBLIC_HOLDINGS_VIEW_LABELS = {
+    "holdings": "보유 현황",
+    "cash_fx": "현금·환율",
+    "transactions": "거래 입력",
+}
+PUBLIC_HOLDINGS_VIEW_LEGACY_MAP = {
+    "현황": "holdings",
+    "보유 현황": "holdings",
+    "현금/환율": "cash_fx",
+    "현금·환율": "cash_fx",
+    "거래 입력": "transactions",
+}
+
+
+def _normalize_radio_state(key: str, labels: dict[str, str], legacy_map: dict[str, str], default: str) -> None:
+    current = st.session_state.get(key)
+    if current in labels:
+        return
+    st.session_state[key] = legacy_map.get(str(current), default)
 
 
 def _initialize_theme_state() -> None:
@@ -139,9 +173,8 @@ def _current_theme_mode() -> str:
 
 def _render_theme_selector() -> None:
     current_mode = _current_theme_mode()
-    st.markdown("<div class='app-theme-toggle-label'>화면 테마</div>", unsafe_allow_html=True)
     st.radio(
-        "화면 테마",
+        "테마",
         list(THEME_MODE_BY_LABEL.keys()),
         index=list(THEME_MODE_BY_LABEL).index(THEME_LABEL_BY_MODE[current_mode]),
         key=APP_THEME_CHOICE_KEY,
@@ -867,23 +900,22 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
     dirty = _portfolio_is_dirty()
     summary = aggregate_price_statuses(st.session_state.get("price_update_statuses", []))
     last_refresh = metrics.last_price_refresh_at or st.session_state.last_price_refresh_at
-    left, middle, right = st.columns([2.3, 2.1, 1.4], vertical_alignment="center")
+    refresh_label = f"{format_kst(last_refresh)} · {format_relative_time(last_refresh)}" if last_refresh else "미조회"
+    status_label = (
+        f"갱신 {refresh_label} · 정상 {metrics.priced_count} · 캐시 {summary.cached} · "
+        f"이전 {metrics.stale_quote_count} · 실패 {metrics.failed_quote_count} · 미조회 {metrics.missing_quote_count}"
+    )
+    left, middle, right = st.columns([2.0, 2.5, 1.35], vertical_alignment="center")
     with left:
-        st.title("포트폴리오 대시보드")
-        st.caption("내 포트폴리오" if public_auth_enabled else f"현재 포트폴리오 · {_current_portfolio_name()}")
+        st.title("포트폴리오")
     with middle:
-        st.caption("마지막 가격 갱신")
-        if last_refresh:
-            st.write(f"**{format_kst(last_refresh)}** · {format_relative_time(last_refresh)}")
-        else:
-            st.write("**미조회**")
-        st.caption(f"정상 {metrics.priced_count} · 캐시 {summary.cached} · 이전 가격 {metrics.stale_quote_count} · 실패 {metrics.failed_quote_count} · 미조회 {metrics.missing_quote_count}")
+        st.caption(status_label)
         st.caption(_current_save_status_text(public_auth_enabled=public_auth_enabled, dirty=dirty))
     with right:
         _render_theme_selector()
-        if st.button("현재가/환율 갱신", type="primary", width="stretch", icon=":material/refresh:"):
+        if st.button("가격·환율 갱신", type="primary", width="stretch", icon=":material/refresh:"):
             _refresh_prices(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)
-        if summary.failed and st.button("실패 종목 재시도", width="stretch", icon=":material/replay:"):
+        if summary.failed and st.button("실패 재시도", width="stretch", icon=":material/replay:"):
             st.session_state[PRICE_REFRESH_MODE_KEY] = "실패 종목만"
             _refresh_prices(config, owner_id, history_store, mode="실패 종목만", refresh_fx=False, public_auth_enabled=public_auth_enabled)
         if not public_auth_enabled:
@@ -929,16 +961,23 @@ def _render_holdings_section(config: AppSecurityConfig, *, public_auth_enabled: 
 
 
 def _render_public_holdings_section(config: AppSecurityConfig) -> None:
+    _normalize_radio_state(
+        PUBLIC_HOLDINGS_VIEW_KEY,
+        PUBLIC_HOLDINGS_VIEW_LABELS,
+        PUBLIC_HOLDINGS_VIEW_LEGACY_MAP,
+        "holdings",
+    )
     selected_view = st.radio(
-        "보유자산 화면",
-        ["현황", "현금/환율", "거래 입력"],
+        "사용자 입력 화면",
+        list(PUBLIC_HOLDINGS_VIEW_LABELS.keys()),
+        format_func=PUBLIC_HOLDINGS_VIEW_LABELS.get,
         key=PUBLIC_HOLDINGS_VIEW_KEY,
         horizontal=True,
         label_visibility="collapsed",
     )
-    if selected_view == "현황":
+    if selected_view == "holdings":
         render_holdings_table(_current_metrics())
-    elif selected_view == "현금/환율":
+    elif selected_view == "cash_fx":
         _render_cash_fx_tools(config, public_auth_enabled=True)
     else:
         render_transaction_editor()
@@ -975,7 +1014,7 @@ def _render_manage_section(owner_id, portfolio_store, history_store) -> None:
 
 
 def _render_private_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
-    summary_card_tab, overview_tab, holdings_tab, history_tab, manage_tab = st.tabs(["투자 총괄 카드", "개요", "보유자산", "자산추이", "관리"])
+    summary_card_tab, overview_tab, holdings_tab, history_tab, manage_tab = st.tabs(["총괄현황", "세부내역", "사용자 입력", "자산추이", "저장 관리"])
     with summary_card_tab:
         _render_summary_card_section(metrics)
     with overview_tab:
@@ -989,18 +1028,20 @@ def _render_private_dashboard_sections(security_config, owner_id, portfolio_stor
 
 
 def _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
+    _normalize_radio_state(PUBLIC_SECTION_KEY, PUBLIC_SECTION_LABELS, PUBLIC_SECTION_LEGACY_MAP, "summary")
     selected_section = st.radio(
         "화면 선택",
-        ["투자 총괄 카드", "개요", "보유자산", "자산추이"],
+        list(PUBLIC_SECTION_LABELS.keys()),
+        format_func=PUBLIC_SECTION_LABELS.get,
         key=PUBLIC_SECTION_KEY,
         horizontal=True,
         label_visibility="collapsed",
     )
-    if selected_section == "투자 총괄 카드":
+    if selected_section == "summary":
         _render_summary_card_section(metrics)
-    elif selected_section == "개요":
+    elif selected_section == "details":
         _render_overview_section(metrics)
-    elif selected_section == "보유자산":
+    elif selected_section == "input":
         _render_public_holdings_section(security_config)
     else:
         _render_history_section(owner_id, history_store, historical_schedule_store)

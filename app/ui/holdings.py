@@ -340,10 +340,10 @@ def _render_mobile_holdings_cards(frame: pd.DataFrame) -> None:
 
 
 def render_holdings_table(metrics: PortfolioMetrics) -> None:
-    st.subheader("보유자산")
+    st.subheader("보유 현황")
     rows = _holdings_table_rows(metrics)
     if not rows:
-        st.info("보유자산을 입력하면 표가 표시됩니다.")
+        st.info("보유 종목을 입력하면 표가 표시됩니다.")
         return
 
     search = st.text_input("검색", placeholder="종목명 또는 ticker", key="holdings_search")
@@ -370,7 +370,7 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
 
     frame = frame.sort_values("평가액", ascending=False)
     if frame.empty:
-        st.info("필터 조건에 맞는 보유자산이 없습니다.")
+        st.info("필터 조건에 맞는 보유 종목이 없습니다.")
         return
 
     base_columns = ["종목", "시장", "수량 표시", "최근 제공 가격 표시", "평가액 표시", "오늘 변동액", "오늘 변동률", "비중", "가격 상태", "조회 시각"]
