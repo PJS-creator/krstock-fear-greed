@@ -247,6 +247,38 @@ __CSS_VARS__
             font-size: 0.86rem;
             box-shadow: var(--app-shadow);
         }
+        .st-key-public_section_tabs {
+            margin: 0.85rem 0 1.05rem;
+        }
+        .st-key-public_section_tabs div[role="radiogroup"] {
+            display: grid !important;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0;
+            padding: 0.22rem;
+            border: 1px solid var(--app-border);
+            border-radius: 8px;
+            background: var(--app-panel);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .st-key-public_section_tabs div[role="radiogroup"] label {
+            width: 100%;
+            min-width: 0;
+            min-height: 2.38rem;
+            padding: 0.34rem 0.2rem;
+            border: 0;
+            border-radius: 6px;
+            background: transparent;
+            box-shadow: none;
+            font-size: 0.94rem;
+            white-space: nowrap;
+        }
+        .st-key-public_section_tabs div[role="radiogroup"] label:hover {
+            background: var(--app-primary-soft);
+        }
+        .st-key-public_section_tabs div[role="radiogroup"] label:has(input:checked) {
+            background: var(--app-primary);
+            color: #FFFFFF;
+        }
         .app-header-panel {
             border: 1px solid var(--app-border);
             border-radius: 8px;
@@ -299,6 +331,20 @@ __CSS_VARS__
                 min-height: 2.15rem;
                 padding: 0.34rem 0.52rem;
                 font-size: 0.82rem;
+            }
+            .st-key-public_section_tabs {
+                margin: 0.7rem 0 0.9rem;
+            }
+            .st-key-public_section_tabs div[role="radiogroup"] {
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 0;
+                padding: 0.18rem;
+            }
+            .st-key-public_section_tabs div[role="radiogroup"] label {
+                min-height: 2.28rem;
+                padding: 0.28rem 0.1rem;
+                font-size: clamp(0.72rem, 3.15vw, 0.84rem);
+                letter-spacing: 0;
             }
             div[data-testid="stTabs"] [role="tablist"] {
                 position: sticky;

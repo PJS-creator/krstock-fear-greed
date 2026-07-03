@@ -124,7 +124,7 @@ THEME_MODE_BY_LABEL = {label: mode for mode, label in THEME_LABEL_BY_MODE.items(
 PUBLIC_SECTION_LABELS = {
     "summary": "총괄현황",
     "details": "세부내역",
-    "input": "사용자 입력",
+    "input": "사용자입력",
     "history": "자산추이",
 }
 PUBLIC_SECTION_LEGACY_MAP = {
@@ -134,6 +134,7 @@ PUBLIC_SECTION_LEGACY_MAP = {
     "세부내역": "details",
     "보유자산": "input",
     "사용자 입력": "input",
+    "사용자입력": "input",
     "자산추이": "history",
 }
 PUBLIC_HOLDINGS_VIEW_LABELS = {
@@ -1026,14 +1027,15 @@ def _render_private_dashboard_sections(security_config, owner_id, portfolio_stor
 
 def _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
     _normalize_radio_state(PUBLIC_SECTION_KEY, PUBLIC_SECTION_LABELS, PUBLIC_SECTION_LEGACY_MAP, "summary")
-    selected_section = st.radio(
-        "화면 선택",
-        list(PUBLIC_SECTION_LABELS.keys()),
-        format_func=PUBLIC_SECTION_LABELS.get,
-        key=PUBLIC_SECTION_KEY,
-        horizontal=True,
-        label_visibility="collapsed",
-    )
+    with st.container(key="public_section_tabs"):
+        selected_section = st.radio(
+            "화면 선택",
+            list(PUBLIC_SECTION_LABELS.keys()),
+            format_func=PUBLIC_SECTION_LABELS.get,
+            key=PUBLIC_SECTION_KEY,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
     if selected_section == "summary":
         _render_summary_card_section(metrics)
     elif selected_section == "details":
