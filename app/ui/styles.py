@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from .charts import plot_allocation, plot_contribution, plot_currency_exposure, plot_total_value_history
 from .formatters import compact_krw, full_krw, percentage
@@ -221,8 +222,11 @@ def inject_public_cloud_chrome_guard() -> None:
         div[data-testid="stStatusWidget"],
         div[data-testid="collapsedControl"],
         a[href*="share.streamlit.io"],
+        a[href*="share.streamlit.io/user"],
+        a[href*="streamlit.io/cloud"],
         a[href*="github.com"][href*="krstock-fear-greed"],
         a[href*="github.com/PJS-creator/krstock-fear-greed"],
+        iframe[title="Streamlit Cloud Status"],
         button[title*="Deploy"],
         button[title*="Share"],
         button[title*="Edit"],
@@ -235,9 +239,13 @@ def inject_public_cloud_chrome_guard() -> None:
         button[aria-label*="Manage"],
         a[title*="Manage"],
         a[aria-label*="Manage"],
+        [data-testid="appCreatorAvatar"],
         [data-testid*="manage-app"],
         [data-testid*="ManageApp"],
         [data-testid*="stDeployButton"],
+        [class*="viewerBadge"],
+        [class*="profileContainer"],
+        [class*="profilePreview"],
         [data-testid*="stToolbarActionButton"] {
             display: none !important;
             visibility: hidden !important;
@@ -249,6 +257,95 @@ def inject_public_cloud_chrome_guard() -> None:
         </style>
         """,
         unsafe_allow_html=True,
+    )
+    components.html(
+        """
+        <script>
+        (() => {
+            const STYLE_ID = "public-cloud-chrome-guard";
+            const CSS = `
+                a[href*="streamlit.io/cloud"],
+                a[href*="share.streamlit.io/user"],
+                iframe[title="Streamlit Cloud Status"],
+                [data-testid="appCreatorAvatar"],
+                [class*="viewerBadge"],
+                [class*="profileContainer"],
+                [class*="profilePreview"] {
+                    display: none !important;
+                    visibility: hidden !important;
+                    pointer-events: none !important;
+                }
+            `;
+            const HIDE_SELECTORS = [
+                'a[href*="streamlit.io/cloud"]',
+                'a[href*="share.streamlit.io/user"]',
+                'iframe[title="Streamlit Cloud Status"]',
+                '[data-testid="appCreatorAvatar"]',
+                '[class*="viewerBadge"]',
+                '[class*="profileContainer"]',
+                '[class*="profilePreview"]',
+            ];
+
+            function reachableDocuments() {
+                const docs = [];
+                let win = window;
+                for (let index = 0; index < 4 && win; index += 1) {
+                    try {
+                        if (win.document && !docs.includes(win.document)) {
+                            docs.push(win.document);
+                        }
+                        if (!win.parent || win.parent === win) break;
+                        win = win.parent;
+                    } catch (error) {
+                        break;
+                    }
+                }
+                return docs;
+            }
+
+            function hideElement(element) {
+                const target = element.closest(
+                    'a, button, [class*="viewerBadge"], [class*="profileContainer"], [class*="profilePreview"]'
+                ) || element;
+                target.style.setProperty("display", "none", "important");
+                target.style.setProperty("visibility", "hidden", "important");
+                target.style.setProperty("pointer-events", "none", "important");
+            }
+
+            function applyGuard(doc) {
+                if (!doc || !doc.documentElement) return;
+                if (!doc.getElementById(STYLE_ID)) {
+                    const style = doc.createElement("style");
+                    style.id = STYLE_ID;
+                    style.textContent = CSS;
+                    (doc.head || doc.documentElement).appendChild(style);
+                }
+                HIDE_SELECTORS.forEach((selector) => {
+                    doc.querySelectorAll(selector).forEach(hideElement);
+                });
+            }
+
+            function run() {
+                reachableDocuments().forEach(applyGuard);
+            }
+
+            run();
+            reachableDocuments().forEach((doc) => {
+                try {
+                    new MutationObserver(run).observe(doc.documentElement, {
+                        childList: true,
+                        subtree: true,
+                    });
+                } catch (error) {
+                    // Best-effort UI cleanup only. Security is enforced by account/storage permissions.
+                }
+            });
+            window.setInterval(run, 1500);
+        })();
+        </script>
+        """,
+        height=0,
+        width=0,
     )
 
 

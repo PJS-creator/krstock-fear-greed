@@ -21,8 +21,22 @@ def test_public_cloud_chrome_guard_hides_streamlit_controls():
         'title*="Manage"',
         'aria-label*="Manage"',
         'data-testid*="manage-app"',
+        'href*="streamlit.io/cloud"',
+        'data-testid="appCreatorAvatar"',
+        'class*="viewerBadge"',
+        'class*="profileContainer"',
     ):
         assert selector in source
+
+
+def test_public_cloud_chrome_guard_reaches_streamlit_cloud_wrapper_best_effort():
+    source = Path("app/ui/styles.py").read_text(encoding="utf-8")
+
+    assert "import streamlit.components.v1 as components" in source
+    assert "reachableDocuments" in source
+    assert "win.parent" in source
+    assert "MutationObserver" in source
+    assert "Best-effort UI cleanup only" in source
 
 
 def test_public_dashboard_applies_chrome_guard_only_in_public_mode():
