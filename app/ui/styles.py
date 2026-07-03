@@ -232,13 +232,19 @@ def inject_public_cloud_chrome_guard() -> None:
         button[title*="Edit"],
         button[title*="GitHub"],
         button[title*="Manage"],
+        button[title*="Manage app"],
         button[aria-label*="Deploy"],
         button[aria-label*="Share"],
         button[aria-label*="Edit"],
         button[aria-label*="GitHub"],
         button[aria-label*="Manage"],
+        button[aria-label*="Manage app"],
         a[title*="Manage"],
+        a[title*="Manage app"],
         a[aria-label*="Manage"],
+        a[aria-label*="Manage app"],
+        [title*="Manage app"],
+        [aria-label*="Manage app"],
         [data-testid="appCreatorAvatar"],
         [data-testid*="manage-app"],
         [data-testid*="ManageApp"],
@@ -267,7 +273,15 @@ def inject_public_cloud_chrome_guard() -> None:
                 a[href*="streamlit.io/cloud"],
                 a[href*="share.streamlit.io/user"],
                 iframe[title="Streamlit Cloud Status"],
+                button[title*="Manage app"],
+                button[aria-label*="Manage app"],
+                a[title*="Manage app"],
+                a[aria-label*="Manage app"],
+                [title*="Manage app"],
+                [aria-label*="Manage app"],
                 [data-testid="appCreatorAvatar"],
+                [data-testid*="manage-app"],
+                [data-testid*="ManageApp"],
                 [class*="viewerBadge"],
                 [class*="profileContainer"],
                 [class*="profilePreview"] {
@@ -280,11 +294,21 @@ def inject_public_cloud_chrome_guard() -> None:
                 'a[href*="streamlit.io/cloud"]',
                 'a[href*="share.streamlit.io/user"]',
                 'iframe[title="Streamlit Cloud Status"]',
+                'button[title*="Manage app"]',
+                'button[aria-label*="Manage app"]',
+                'a[title*="Manage app"]',
+                'a[aria-label*="Manage app"]',
+                '[title*="Manage app"]',
+                '[aria-label*="Manage app"]',
                 '[data-testid="appCreatorAvatar"]',
+                '[data-testid*="manage-app"]',
+                '[data-testid*="ManageApp"]',
                 '[class*="viewerBadge"]',
                 '[class*="profileContainer"]',
                 '[class*="profilePreview"]',
             ];
+            const CLOUD_CONTROL_LABEL = /(Manage app|앱 관리)/i;
+            const CLOUD_MENU_LABEL = /(Reboot app|Delete app|Settings|Cloud logs|Manage app|앱 관리|앱 재부팅|앱 삭제|설정)/i;
 
             function reachableDocuments() {
                 const docs = [];
@@ -305,11 +329,45 @@ def inject_public_cloud_chrome_guard() -> None:
 
             function hideElement(element) {
                 const target = element.closest(
-                    'a, button, [class*="viewerBadge"], [class*="profileContainer"], [class*="profilePreview"]'
+                    'a, button, [role="button"], [tabindex], [class*="viewerBadge"], [class*="profileContainer"], [class*="profilePreview"], [class*="manage"], [class*="Manage"]'
                 ) || element;
                 target.style.setProperty("display", "none", "important");
                 target.style.setProperty("visibility", "hidden", "important");
                 target.style.setProperty("pointer-events", "none", "important");
+            }
+
+            function isLowerRightControl(element) {
+                const rect = element.getBoundingClientRect();
+                const viewWidth = element.ownerDocument.defaultView.innerWidth || 0;
+                const viewHeight = element.ownerDocument.defaultView.innerHeight || 0;
+                return rect.width > 0
+                    && rect.height > 0
+                    && rect.left > viewWidth - 360
+                    && rect.top > viewHeight - 260;
+            }
+
+            function controlLabel(element) {
+                return [
+                    element.getAttribute("aria-label"),
+                    element.getAttribute("title"),
+                    element.textContent,
+                ]
+                    .filter(Boolean)
+                    .join(" ")
+                    .replace(/\\s+/g, " ")
+                    .trim();
+            }
+
+            function hideLabelledCloudControls(doc) {
+                const candidates = doc.querySelectorAll(
+                    'a, button, [role="button"], [aria-label], [title], [tabindex]'
+                );
+                candidates.forEach((element) => {
+                    const label = controlLabel(element);
+                    if (CLOUD_CONTROL_LABEL.test(label) || (CLOUD_MENU_LABEL.test(label) && isLowerRightControl(element))) {
+                        hideElement(element);
+                    }
+                });
             }
 
             function applyGuard(doc) {
@@ -323,6 +381,7 @@ def inject_public_cloud_chrome_guard() -> None:
                 HIDE_SELECTORS.forEach((selector) => {
                     doc.querySelectorAll(selector).forEach(hideElement);
                 });
+                hideLabelledCloudControls(doc);
             }
 
             function run() {
