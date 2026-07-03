@@ -63,6 +63,7 @@ from portfolio.history import build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
 from portfolio.pricing import (
+    TTLFxCache,
     TTLQuoteCache,
     build_korea_quote_provider,
     build_public_fx_provider,
@@ -580,26 +581,39 @@ def _refresh_price_rows(
     return True
 
 
-def _refresh_prices(_config: AppSecurityConfig, owner_id, history_store) -> None:
+def _refresh_prices(
+    _config: AppSecurityConfig,
+    owner_id,
+    history_store,
+    *,
+    mode: str = "전체 강제 재조회",
+    refresh_fx: bool = True,
+    public_auth_enabled: bool = False,
+) -> None:
     progress = st.progress(0, text="최근 제공 가격 조회 준비 중")
 
     def update_progress(completed: int, total: int, symbol: str) -> None:
         percent = int((completed / max(total, 1)) * 100)
         progress.progress(percent, text=f"최근 제공 가격 조회 중: {symbol} ({completed}/{total})")
 
-    mode = st.session_state.get(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
     refreshed = _refresh_price_rows(owner_id, history_store, mode=mode, include_intraday=True, on_progress=update_progress)
     progress.empty()
-    if not refreshed:
+    refreshed_fx = False
+    if refresh_fx:
+        fx_result = _fetch_fx_rate(public_auth_enabled=public_auth_enabled, force_refresh=True)
+        if fx_result is not None:
+            refreshed_fx = _apply_fx_rate(*fx_result)
+    if not refreshed and not refreshed_fx:
         st.info("새로 조회할 대상 종목이 없습니다.")
         return
     st.rerun()
 
 
-def _fetch_fx_rate(*, public_auth_enabled: bool = False):
+def _fetch_fx_rate(*, public_auth_enabled: bool = False, force_refresh: bool = False):
     provider = build_public_fx_provider() if public_auth_enabled else build_yfinance_fx_provider()
     try:
-        new_rate, status = refresh_usd_krw(provider, float(st.session_state.usd_krw))
+        cache = TTLFxCache() if force_refresh else None
+        new_rate, status = refresh_usd_krw(provider, float(st.session_state.usd_krw), cache=cache)
     except ValueError as exc:
         st.error(f"환율을 갱신할 수 없습니다: {exc}")
         return None
@@ -619,7 +633,7 @@ def _apply_fx_rate(new_rate, status) -> bool:
 
 def _refresh_fx(_config: AppSecurityConfig, *, public_auth_enabled: bool = False) -> None:
     with st.spinner("USD/KRW 환율 조회 중..."):
-        result = _fetch_fx_rate(public_auth_enabled=public_auth_enabled)
+        result = _fetch_fx_rate(public_auth_enabled=public_auth_enabled, force_refresh=True)
     if result is None:
         return
     new_rate, status = result
@@ -780,12 +794,8 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
             with st.expander("데이터 정보", expanded=False):
                 st.caption("미국 주식은 yfinance, USD/KRW 환율은 Yahoo chart와 open.er-api fallback, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
             with st.expander("가격 조회 옵션", expanded=False):
-                st.radio(
-                    "가격 새로고침 대상",
-                    ["미조회/오래된 가격만", "실패 종목만", "전체 강제 재조회"],
-                    key=PRICE_REFRESH_MODE_KEY,
-                    help="전체 강제 재조회는 현재 세션의 가격 캐시를 우회합니다.",
-                )
+                st.caption("현재가 갱신은 보유 중인 모든 종목과 USD/KRW 환율을 캐시 없이 다시 조회합니다.")
+                st.caption("실패 종목 재시도 버튼은 실패한 종목만 다시 조회합니다.")
             return
         st.subheader("현재 포트폴리오")
         _render_saved_portfolio_selector(owner_id, store)
@@ -812,12 +822,8 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
         with st.expander("데이터 정보", expanded=False):
             st.caption("미국 주식은 yfinance, USD/KRW 환율은 Yahoo chart와 open.er-api fallback, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
         with st.expander("가격 조회 옵션", expanded=False):
-            st.radio(
-                "가격 새로고침 대상",
-                ["미조회/오래된 가격만", "실패 종목만", "전체 강제 재조회"],
-                key=PRICE_REFRESH_MODE_KEY,
-                help="전체 강제 재조회는 현재 세션의 가격 캐시를 우회합니다.",
-            )
+            st.caption("현재가 갱신은 보유 중인 모든 종목과 USD/KRW 환율을 캐시 없이 다시 조회합니다.")
+            st.caption("실패 종목 재시도 버튼은 실패한 종목만 다시 조회합니다.")
 
 
 def _render_header(config: AppSecurityConfig, owner_id, store, history_store, metrics, *, public_auth_enabled: bool = False) -> None:
@@ -837,11 +843,11 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
         st.caption(f"정상 {metrics.priced_count} · 캐시 {summary.cached} · 이전 가격 {metrics.stale_quote_count} · 실패 {metrics.failed_quote_count} · 미조회 {metrics.missing_quote_count}")
         st.caption(_current_save_status_text(public_auth_enabled=public_auth_enabled, dirty=dirty))
     with right:
-        if st.button("현재가 갱신", type="primary", width="stretch", icon=":material/refresh:"):
-            _refresh_prices(config, owner_id, history_store)
+        if st.button("현재가/환율 갱신", type="primary", width="stretch", icon=":material/refresh:"):
+            _refresh_prices(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)
         if summary.failed and st.button("실패 종목 재시도", width="stretch", icon=":material/replay:"):
             st.session_state[PRICE_REFRESH_MODE_KEY] = "실패 종목만"
-            _refresh_prices(config, owner_id, history_store)
+            _refresh_prices(config, owner_id, history_store, mode="실패 종목만", refresh_fx=False, public_auth_enabled=public_auth_enabled)
         if not public_auth_enabled:
             save_disabled = not dirty or owner_id is None or store is None
             if st.button("포트폴리오 저장", disabled=save_disabled, width="stretch", icon=":material/save:"):
