@@ -65,7 +65,7 @@ def test_summary_holding_table_contains_average_price_and_return_rate():
     assert "₩723,000" in html_rows
     assert "$100.00" in html_rows
     assert "$120.00" in html_rows
-    assert "당일 변동성" not in html_rows
+    assert "당일 흐름" not in html_rows
     assert "summary-sparkline" in html_rows
     assert "-$5.00 (-4.0%)" in html_rows
     assert "%" in html_rows
@@ -101,7 +101,7 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
 
     assert "summary-mobile-holding-table" in html
     assert '<div class="summary-table-wrap">' in html
-    assert "<h3>보유 종목 현황</h3>" in html
+    assert "<h3>보유 종목</h3>" in html
     assert ".summary-table-wrap {\n                display: none;" not in html
 
 
