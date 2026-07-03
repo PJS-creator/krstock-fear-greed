@@ -1,6 +1,13 @@
 from portfolio.holdings import build_portfolio_metrics
 
-from app.ui.investment_summary_card import _allocation_rows, _heatmap_tiles, _holding_table_rows, _mobile_holding_summary_cards, _sparkline_html
+from app.ui.investment_summary_card import (
+    _allocation_rows,
+    _heatmap_tiles,
+    _holding_table_rows,
+    _mobile_holding_summary_table,
+    _sparkline_html,
+    render_investment_summary_card,
+)
 
 
 def _metrics():
@@ -65,18 +72,36 @@ def test_summary_holding_table_contains_average_price_and_return_rate():
     assert "합계 (주식 평가금액 + 현금)" in html_rows
 
 
-def test_mobile_holding_summary_cards_include_required_compact_fields():
-    cards = _mobile_holding_summary_cards(_metrics())
+def test_mobile_holding_summary_table_includes_requested_compact_columns():
+    table = _mobile_holding_summary_table(_metrics())
 
-    assert "summary-mobile-holdings" in cards
-    assert "삼성전자" in cards
-    assert "수량" in cards
-    assert "평단가" in cards
-    assert "매입금액" in cards
-    assert "현재가" in cards
-    assert "평가금액" in cards
-    assert "자산비중" in cards
-    assert "%" in cards
+    assert "summary-mobile-holdings" in table
+    assert "summary-mobile-holding-table" in table
+    for label in ("종목명", "수량", "평단가", "현재가", "자산비중"):
+        assert f"<th>{label}</th>" in table
+    assert "삼성전자" in table
+    assert "Micron" in table
+    assert "summary-mobile-holding-list" not in table
+    assert "summary-mobile-holding-cell" not in table
+    assert "매입금액" not in table
+    assert "평가금액" not in table
+
+
+def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(monkeypatch):
+    rendered: list[str] = []
+
+    def capture_markdown(body, **_kwargs):
+        rendered.append(str(body))
+
+    monkeypatch.setattr("app.ui.investment_summary_card.st.markdown", capture_markdown)
+
+    render_investment_summary_card(_metrics(), portfolio_name="main")
+    html = "\n".join(rendered)
+
+    assert "summary-mobile-holding-table" in html
+    assert '<div class="summary-table-wrap">' in html
+    assert "<h3>보유 종목 현황</h3>" in html
+    assert ".summary-table-wrap {\n                display: none;" not in html
 
 
 def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels():
