@@ -210,5 +210,47 @@ def inject_styles() -> None:
     )
 
 
+def inject_public_cloud_chrome_guard() -> None:
+    st.markdown(
+        """
+        <style>
+        #MainMenu,
+        header[data-testid="stHeader"],
+        div[data-testid="stToolbar"],
+        div[data-testid="stDecoration"],
+        div[data-testid="stStatusWidget"],
+        div[data-testid="collapsedControl"],
+        a[href*="share.streamlit.io"],
+        a[href*="github.com"][href*="krstock-fear-greed"],
+        a[href*="github.com/PJS-creator/krstock-fear-greed"],
+        button[title*="Deploy"],
+        button[title*="Share"],
+        button[title*="Edit"],
+        button[title*="GitHub"],
+        button[title*="Manage"],
+        button[aria-label*="Deploy"],
+        button[aria-label*="Share"],
+        button[aria-label*="Edit"],
+        button[aria-label*="GitHub"],
+        button[aria-label*="Manage"],
+        a[title*="Manage"],
+        a[aria-label*="Manage"],
+        [data-testid*="manage-app"],
+        [data-testid*="ManageApp"],
+        [data-testid*="stDeployButton"],
+        [data-testid*="stToolbarActionButton"] {
+            display: none !important;
+            visibility: hidden !important;
+            pointer-events: none !important;
+        }
+        .block-container {
+            padding-top: 1.25rem !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def show_dataframe(frame: pd.DataFrame) -> None:
     st.dataframe(frame, width="stretch", hide_index=True)

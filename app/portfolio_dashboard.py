@@ -48,7 +48,7 @@ from app.ui.manage import (
 )
 from app.ui.overview import render_overview
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
-from app.ui.styles import inject_styles
+from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles
 from app.ui.transactions import render_transaction_cashflow, render_transaction_editor
 from portfolio.auth import (
     AccountConfig,
@@ -965,6 +965,8 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
 st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
 inject_styles()
 public_auth_enabled = _read_public_auth_settings()
+if public_auth_enabled:
+    inject_public_cloud_chrome_guard()
 _initialize_session_state(public_auth_enabled=public_auth_enabled)
 security_config = _read_security_config()
 storage_config = _read_storage_config(public_auth_enabled=public_auth_enabled)
