@@ -16,14 +16,38 @@ class SupabaseStorageConfig:
     service_role_key: str | None
     owner_id: str | None
     table_name: str = DEFAULT_TABLE_NAME
+    publishable_key: str | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
+
+    @property
+    def api_key(self) -> str | None:
+        return self.service_role_key or self.publishable_key
 
     @property
     def has_credentials(self) -> bool:
-        return bool(self.supabase_url and self.service_role_key)
+        return bool(self.supabase_url and self.api_key)
 
     @property
     def is_configured(self) -> bool:
         return self.has_credentials and bool(self.owner_id)
+
+    def with_auth_session(
+        self,
+        *,
+        owner_id: str | None,
+        access_token: str | None,
+        refresh_token: str | None,
+    ) -> "SupabaseStorageConfig":
+        return SupabaseStorageConfig(
+            supabase_url=self.supabase_url,
+            service_role_key=self.service_role_key,
+            owner_id=_clean_secret(owner_id),
+            table_name=self.table_name,
+            publishable_key=self.publishable_key,
+            access_token=_clean_secret(access_token),
+            refresh_token=_clean_secret(refresh_token),
+        )
 
 
 def _clean_secret(value: object | None) -> str | None:
@@ -39,6 +63,8 @@ def supabase_config_from_secrets(secrets: Mapping[str, object] | None) -> Supaba
         supabase_url=_clean_secret(secrets.get("SUPABASE_URL")),
         service_role_key=_clean_secret(secrets.get("SUPABASE_SERVICE_ROLE_KEY")),
         owner_id=_clean_secret(secrets.get("PORTFOLIO_OWNER_ID")),
+        publishable_key=_clean_secret(secrets.get("SUPABASE_PUBLISHABLE_KEY"))
+        or _clean_secret(secrets.get("SUPABASE_ANON_KEY")),
     )
 
 
@@ -54,6 +80,48 @@ def build_supabase_store(config: SupabaseStorageConfig) -> "SupabasePortfolioSto
     if not has_supabase_credentials(config):
         return None
     return SupabasePortfolioStore(config)
+
+
+def _field(source: Any, name: str) -> Any:
+    if isinstance(source, Mapping):
+        return source.get(name)
+    return getattr(source, name, None)
+
+
+def create_supabase_client(config: SupabaseStorageConfig):
+    if not has_supabase_credentials(config):
+        raise PortfolioStoreError("Supabase storage is not configured")
+    try:
+        from supabase import create_client
+    except ImportError as exc:
+        raise PortfolioStoreError("The supabase package is not installed") from exc
+
+    try:
+        client = create_client(config.supabase_url, config.api_key)
+    except Exception as exc:
+        raise PortfolioStoreError("Failed to create Supabase client") from exc
+
+    access_token = config.access_token
+    if access_token and config.refresh_token:
+        try:
+            response = client.auth.set_session(access_token, config.refresh_token)
+            session = _field(response, "session")
+            access_token = str(_field(session, "access_token") or access_token).strip()
+        except Exception:
+            pass
+
+    if access_token:
+        auth_header = f"Bearer {access_token}"
+        client.options.headers["Authorization"] = auth_header
+        if hasattr(client, "auth") and hasattr(client.auth, "_headers"):
+            client.auth._headers["Authorization"] = auth_header
+        if hasattr(client, "_postgrest"):
+            client._postgrest = None
+        if hasattr(client, "_storage"):
+            client._storage = None
+        if hasattr(client, "_functions"):
+            client._functions = None
+    return client
 
 
 def _utc_now_iso() -> str:
@@ -77,17 +145,10 @@ class SupabasePortfolioStore:
     def __init__(self, config: SupabaseStorageConfig) -> None:
         if not has_supabase_credentials(config):
             raise PortfolioStoreError("Supabase storage is not configured")
-        try:
-            from supabase import create_client
-        except ImportError as exc:
-            raise PortfolioStoreError("The supabase package is not installed") from exc
 
         self._owner_id = config.owner_id
         self._table_name = config.table_name
-        try:
-            self._client = create_client(config.supabase_url, config.service_role_key)
-        except Exception as exc:
-            raise PortfolioStoreError("Failed to create Supabase client") from exc
+        self._client = create_supabase_client(config)
 
     def _table(self):
         return self._client.table(self._table_name)

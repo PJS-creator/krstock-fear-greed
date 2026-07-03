@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from portfolio.storage.supabase_store import SupabaseStorageConfig, has_supabase_credentials
+from portfolio.storage.supabase_store import PortfolioStoreError, SupabaseStorageConfig, create_supabase_client, has_supabase_credentials
 
 from .base import HistoryPeriod, PortfolioHistoryStoreError, period_start
 from .models import PortfolioHistoryRecord
@@ -59,14 +59,10 @@ class SupabasePortfolioHistoryStore:
     def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_HISTORY_TABLE_NAME) -> None:
         if not has_supabase_credentials(config):
             raise PortfolioHistoryStoreError("Supabase storage is not configured")
-        try:
-            from supabase import create_client
-        except ImportError as exc:
-            raise PortfolioHistoryStoreError("The supabase package is not installed") from exc
         self._table_name = table_name
         try:
-            self._client = create_client(config.supabase_url, config.service_role_key)
-        except Exception as exc:
+            self._client = create_supabase_client(config)
+        except PortfolioStoreError as exc:
             raise PortfolioHistoryStoreError("Failed to create Supabase client") from exc
 
     def _table(self):

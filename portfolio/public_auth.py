@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from portfolio.storage.supabase_store import SupabaseStorageConfig, has_supabase_credentials
+from portfolio.storage.supabase_store import SupabaseStorageConfig
 
 ACCOUNT_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_.@-]{2,63}$")
 PASSWORD_MIN_LENGTH = 8
@@ -88,7 +88,7 @@ def _account_from_row(row: Mapping[str, Any]) -> PublicAccount:
 
 class SupabasePublicAccountStore:
     def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_PUBLIC_ACCOUNTS_TABLE) -> None:
-        if not has_supabase_credentials(config):
+        if not config.supabase_url or not config.service_role_key:
             raise PublicAccountError("Supabase 저장소가 설정되지 않았습니다.")
         try:
             from supabase import create_client

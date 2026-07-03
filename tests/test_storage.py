@@ -113,6 +113,19 @@ def test_memory_store_overwrites_same_portfolio_name():
     assert len(store.list_portfolios("owner-a")) == 1
 
 
+def test_memory_store_isolates_records_by_owner_id():
+    store = MemoryPortfolioStore()
+    payload_a = serialize_portfolio_payload([_row(symbol="AAA")], usd_krw=1300, cash_krw=0)
+    payload_b = serialize_portfolio_payload([_row(symbol="BBB")], usd_krw=1300, cash_krw=0)
+
+    store.save_portfolio("owner-a", "main", payload_a)
+    store.save_portfolio("owner-b", "main", payload_b)
+
+    assert store.get_portfolio("owner-a", "main").payload_json["holdings"][0]["ticker"] == "AAA"
+    assert store.get_portfolio("owner-b", "main").payload_json["holdings"][0]["ticker"] == "BBB"
+    assert [record.owner_id for record in store.list_portfolios("owner-a")] == ["owner-a"]
+
+
 def test_missing_supabase_secrets_disable_storage_policy():
     assert not should_enable_storage(supabase_config_from_secrets({}))
     credentials_only = supabase_config_from_secrets(
@@ -133,6 +146,23 @@ def test_missing_supabase_secrets_disable_storage_policy():
             }
         )
     )
+
+
+def test_publishable_key_can_configure_authenticated_public_storage():
+    config = supabase_config_from_secrets(
+        {
+            "SUPABASE_URL": "https://example.supabase.co",
+            "SUPABASE_PUBLISHABLE_KEY": "placeholder-publishable-key",
+        }
+    )
+    authed = config.with_auth_session(owner_id="auth-user-id", access_token="access-token", refresh_token="refresh-token")
+
+    assert has_supabase_credentials(config)
+    assert config.api_key == "placeholder-publishable-key"
+    assert not should_enable_storage(config)
+    assert should_enable_storage(authed)
+    assert authed.owner_id == "auth-user-id"
+    assert authed.service_role_key is None
 
 
 def test_invalid_payload_validation_errors():

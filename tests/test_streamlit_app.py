@@ -114,7 +114,7 @@ def test_public_holdings_section_defers_transaction_editor_by_default():
     at = AppTest.from_file("app/public_portfolio_dashboard.py")
     at.session_state["is_authenticated"] = True
     at.session_state["authenticated_account_id"] = "demo"
-    at.session_state["authenticated_owner_id"] = "public:demo"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
     at.session_state["authenticated_default_portfolio"] = "main"
     at.session_state["public_dashboard_section"] = "보유자산"
     at.run(timeout=20)
@@ -130,7 +130,7 @@ def test_public_holdings_transaction_input_renders_only_when_selected():
     at = AppTest.from_file("app/public_portfolio_dashboard.py")
     at.session_state["is_authenticated"] = True
     at.session_state["authenticated_account_id"] = "demo"
-    at.session_state["authenticated_owner_id"] = "public:demo"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
     at.session_state["authenticated_default_portfolio"] = "main"
     at.session_state["public_dashboard_section"] = "보유자산"
     at.session_state["public_holdings_view"] = "거래 입력"
@@ -156,7 +156,7 @@ def test_public_cash_fx_refresh_button_falls_back_and_applies_rate(monkeypatch):
     at = AppTest.from_file("app/public_portfolio_dashboard.py")
     at.session_state["is_authenticated"] = True
     at.session_state["authenticated_account_id"] = "demo"
-    at.session_state["authenticated_owner_id"] = "public:demo"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
     at.session_state["authenticated_default_portfolio"] = "main"
     at.session_state["public_dashboard_section"] = "보유자산"
     at.session_state["public_holdings_view"] = "현금/환율"
@@ -174,3 +174,19 @@ def test_public_cash_fx_refresh_button_falls_back_and_applies_rate(monkeypatch):
     ]
     assert at.session_state["usd_krw"] == 1388.25
     assert at.session_state["fx_status_message"] == "USD/KRW 환율을 갱신했습니다."
+
+
+def test_public_app_hides_manual_storage_management_ui():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo@example.com"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["portfolio_name"] = "legacy-name"
+    at.run(timeout=20)
+
+    assert not at.exception
+    text = _app_text(at)
+    for hidden in ("관리", "포트폴리오 저장", "저장된 포트폴리오", "선택 포트폴리오 불러오기"):
+        assert hidden not in text
+    assert at.session_state["portfolio_name"] == "main"
