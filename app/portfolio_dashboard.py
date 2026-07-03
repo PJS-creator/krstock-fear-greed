@@ -72,14 +72,6 @@ from portfolio.pricing import (
     refresh_holding_quotes,
     refresh_usd_krw,
 )
-from portfolio.public_auth import (
-    DEFAULT_PUBLIC_ACCOUNTS_TABLE,
-    PublicAccount,
-    PublicAccountAlreadyExistsError,
-    PublicAccountError,
-    PublicAccountValidationError,
-    SupabasePublicAccountStore,
-)
 from portfolio.storage import (
     PortfolioStoreError,
     build_supabase_store,
@@ -88,11 +80,19 @@ from portfolio.storage import (
     should_enable_storage,
     supabase_config_from_secrets,
 )
+from portfolio.supabase_auth import (
+    SupabaseAuthAccount,
+    SupabaseAuthError,
+    SupabaseAuthStore,
+    SupabaseAuthValidationError,
+)
 
 AUTHENTICATED_KEY = "is_authenticated"
 ACCOUNT_ID_KEY = "authenticated_account_id"
 OWNER_ID_KEY = "authenticated_owner_id"
 DEFAULT_PORTFOLIO_KEY = "authenticated_default_portfolio"
+AUTH_ACCESS_TOKEN_KEY = "authenticated_access_token"
+AUTH_REFRESH_TOKEN_KEY = "authenticated_refresh_token"
 PORTFOLIO_NAME_KEY = "portfolio_name"
 PORTFOLIO_NAME_INPUT_KEY = "portfolio_name_input"
 PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
@@ -105,6 +105,7 @@ PRICE_REFRESH_MODE_KEY = "price_refresh_mode"
 AUTO_LOAD_ATTEMPTED_KEY = "account_auto_load_attempted"
 AUTO_PRICE_REFRESHED_KEY = "account_auto_price_refreshed"
 ACCOUNT_STATUS_KEY = "account_status_message"
+PUBLIC_SAVE_STATUS_KEY = "public_auto_save_status"
 PUBLIC_SECTION_KEY = "public_dashboard_section"
 PUBLIC_HOLDINGS_VIEW_KEY = "public_holdings_view"
 CASH_FX_INPUT_SYNC_KEY = "cash_fx_inline_input_sync"
@@ -113,8 +114,8 @@ INLINE_CASH_USD_KEY = "cash_fx_inline_cash_usd"
 INLINE_USD_KRW_KEY = "cash_fx_inline_usd_krw"
 PUBLIC_AUTH_ENV_KEY = "PORTFOLIO_PUBLIC_AUTH"
 PUBLIC_AUTH_SECRET_KEY = "PUBLIC_USER_AUTH"
-PUBLIC_AUTH_TABLE_SECRET_KEY = "PUBLIC_ACCOUNTS_TABLE"
 UNPROTECTED_WARNING = "공개 앱에서 저장소와 직접 입력 보호를 위해 APP_PASSWORD 설정을 권장합니다."
+PUBLIC_PORTFOLIO_NAME = "main"
 
 
 def _clean_portfolio_name(value: object) -> str:
@@ -187,20 +188,31 @@ def _authenticate_account(account: AccountConfig) -> None:
     _reset_current_portfolio_state(account.default_portfolio)
 
 
-def _authenticate_public_account(account: PublicAccount) -> None:
+def _authenticate_public_account(account: SupabaseAuthAccount) -> None:
     _authenticate_account(
         AccountConfig(
             account_id=account.account_id,
             password="",
             owner_id=account.owner_id,
-            default_portfolio="main",
+            default_portfolio=PUBLIC_PORTFOLIO_NAME,
         )
     )
+    st.session_state[AUTH_ACCESS_TOKEN_KEY] = account.access_token
+    st.session_state[AUTH_REFRESH_TOKEN_KEY] = account.refresh_token
 
 
 def _logout() -> None:
     st.session_state[AUTHENTICATED_KEY] = False
-    for key in (ACCOUNT_ID_KEY, OWNER_ID_KEY, DEFAULT_PORTFOLIO_KEY, AUTO_LOAD_ATTEMPTED_KEY, AUTO_PRICE_REFRESHED_KEY):
+    for key in (
+        ACCOUNT_ID_KEY,
+        OWNER_ID_KEY,
+        DEFAULT_PORTFOLIO_KEY,
+        AUTH_ACCESS_TOKEN_KEY,
+        AUTH_REFRESH_TOKEN_KEY,
+        AUTO_LOAD_ATTEMPTED_KEY,
+        AUTO_PRICE_REFRESHED_KEY,
+        PUBLIC_SAVE_STATUS_KEY,
+    ):
         st.session_state.pop(key, None)
     _reset_current_portfolio_state()
 
@@ -220,38 +232,45 @@ def _read_security_config() -> AppSecurityConfig:
     return config_from_secrets(secrets)
 
 
-def _read_storage_config():
+def _read_storage_config(*, public_auth_enabled: bool = False):
     try:
         secrets = {
             "SUPABASE_URL": st.secrets.get("SUPABASE_URL", ""),
-            "SUPABASE_SERVICE_ROLE_KEY": st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", ""),
+            "SUPABASE_SERVICE_ROLE_KEY": "" if public_auth_enabled else st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", ""),
+            "SUPABASE_PUBLISHABLE_KEY": st.secrets.get("SUPABASE_PUBLISHABLE_KEY", ""),
+            "SUPABASE_ANON_KEY": st.secrets.get("SUPABASE_ANON_KEY", ""),
             "PORTFOLIO_OWNER_ID": st.secrets.get("PORTFOLIO_OWNER_ID", ""),
         }
     except Exception:
         secrets = {}
-    return supabase_config_from_secrets(secrets)
+    config = supabase_config_from_secrets(secrets)
+    if public_auth_enabled:
+        return config.with_auth_session(
+            owner_id=st.session_state.get(OWNER_ID_KEY),
+            access_token=st.session_state.get(AUTH_ACCESS_TOKEN_KEY),
+            refresh_token=st.session_state.get(AUTH_REFRESH_TOKEN_KEY),
+        )
+    return config
 
 
 def _truthy(value: object | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
-def _read_public_auth_settings() -> tuple[bool, str]:
+def _read_public_auth_settings() -> bool:
     enabled = _truthy(os.environ.get(PUBLIC_AUTH_ENV_KEY))
-    table_name = DEFAULT_PUBLIC_ACCOUNTS_TABLE
     try:
         enabled = enabled or _truthy(st.secrets.get(PUBLIC_AUTH_SECRET_KEY, ""))
-        table_name = str(st.secrets.get(PUBLIC_AUTH_TABLE_SECRET_KEY, table_name) or table_name).strip() or table_name
     except Exception:
         pass
-    return enabled, table_name
+    return enabled
 
 
 @st.cache_resource(show_spinner=False)
-def _build_public_account_store(storage_config, *, table_name: str) -> SupabasePublicAccountStore | None:
-    if not has_supabase_credentials(storage_config):
+def _build_public_auth_store(storage_config) -> SupabaseAuthStore | None:
+    if not storage_config.supabase_url or not storage_config.publishable_key:
         return None
-    return SupabasePublicAccountStore(storage_config, table_name=table_name)
+    return SupabaseAuthStore(storage_config)
 
 
 def _apply_pending_portfolio_state() -> None:
@@ -281,7 +300,7 @@ def _apply_pending_portfolio_state() -> None:
         st.session_state[MARK_CLEAN_KEY] = True
 
 
-def _initialize_session_state() -> None:
+def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     st.session_state.setdefault(AUTHENTICATED_KEY, False)
     st.session_state.setdefault(PORTFOLIO_NAME_KEY, "main")
     pending_portfolio_name = st.session_state.pop(PENDING_PORTFOLIO_NAME_KEY, None)
@@ -302,6 +321,10 @@ def _initialize_session_state() -> None:
     st.session_state.setdefault("price_update_statuses", [])
     st.session_state.setdefault("last_price_refresh_at", None)
     st.session_state.setdefault(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
+    if public_auth_enabled:
+        st.session_state[PORTFOLIO_NAME_KEY] = PUBLIC_PORTFOLIO_NAME
+        st.session_state[PORTFOLIO_NAME_INPUT_KEY] = PUBLIC_PORTFOLIO_NAME
+        st.session_state[DEFAULT_PORTFOLIO_KEY] = PUBLIC_PORTFOLIO_NAME
     if st.session_state.pop(MARK_CLEAN_KEY, False) or SAVED_SIGNATURE_KEY not in st.session_state:
         _mark_portfolio_clean()
 
@@ -335,37 +358,35 @@ def _render_login_form(config: AppSecurityConfig) -> None:
     st.stop()
 
 
-def _render_public_auth_gate(storage_config, *, table_name: str) -> None:
+def _render_public_auth_gate(storage_config) -> None:
     st.title("포트폴리오 대시보드")
     try:
-        account_store = _build_public_account_store(storage_config, table_name=table_name)
-    except PublicAccountError as exc:
+        auth_store = _build_public_auth_store(storage_config)
+    except SupabaseAuthError as exc:
         st.error(f"로그인 저장소를 초기화할 수 없습니다: {exc}")
         st.stop()
-    if account_store is None:
-        st.error("로그인 저장소 설정이 필요합니다. Streamlit Secrets에 SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY를 입력하세요.")
+    if auth_store is None:
+        st.error("로그인 설정이 필요합니다. Streamlit Secrets에 SUPABASE_URL과 SUPABASE_PUBLISHABLE_KEY 또는 SUPABASE_ANON_KEY를 입력하세요.")
         st.stop()
 
     login_tab, signup_tab = st.tabs(["로그인", "회원가입"])
     with login_tab:
         with st.form("public_login_form"):
-            account_id = st.text_input("아이디", key="public_login_account_id")
+            email = st.text_input("이메일", key="public_login_email")
             password = st.text_input("비밀번호", type="password", key="public_login_password")
             submitted = st.form_submit_button("로그인", type="primary")
         if submitted:
             try:
-                account = account_store.verify_account(account_id, password)
-            except (PublicAccountValidationError, PublicAccountError) as exc:
+                account = auth_store.sign_in(email, password)
+            except (SupabaseAuthValidationError, SupabaseAuthError) as exc:
                 st.error(str(exc))
             else:
-                if account is not None:
-                    _authenticate_public_account(account)
-                    st.rerun()
-                st.error("아이디 또는 비밀번호가 올바르지 않습니다.")
+                _authenticate_public_account(account)
+                st.rerun()
 
     with signup_tab:
         with st.form("public_signup_form"):
-            account_id = st.text_input("아이디", key="public_signup_account_id")
+            email = st.text_input("이메일", key="public_signup_email")
             password = st.text_input("비밀번호", type="password", key="public_signup_password")
             password_confirm = st.text_input("비밀번호 확인", type="password", key="public_signup_password_confirm")
             submitted = st.form_submit_button("회원가입", type="primary")
@@ -374,12 +395,15 @@ def _render_public_auth_gate(storage_config, *, table_name: str) -> None:
                 st.error("비밀번호 확인이 일치하지 않습니다.")
             else:
                 try:
-                    account = account_store.create_account(account_id, password)
-                except (PublicAccountAlreadyExistsError, PublicAccountValidationError, PublicAccountError) as exc:
+                    result = auth_store.sign_up(email, password)
+                except (SupabaseAuthValidationError, SupabaseAuthError) as exc:
                     st.error(str(exc))
                 else:
-                    _authenticate_public_account(account)
-                    st.rerun()
+                    if result.account is not None:
+                        _authenticate_public_account(result.account)
+                        st.rerun()
+                    if result.confirmation_required:
+                        st.success("회원가입 요청을 보냈습니다. Supabase Auth 설정에서 이메일 확인이 켜져 있으면 메일 확인 후 로그인하세요.")
     st.stop()
 
 
@@ -476,6 +500,40 @@ def _save_current_portfolio(owner_id, store, history_store, metrics) -> None:
         st.rerun()
     except (PortfolioStoreError, ValueError) as exc:
         st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
+
+
+def _auto_save_public_portfolio(owner_id, store, history_store, metrics) -> None:
+    if not _is_authenticated():
+        return
+    st.session_state[PORTFOLIO_NAME_KEY] = PUBLIC_PORTFOLIO_NAME
+    st.session_state[PORTFOLIO_NAME_INPUT_KEY] = PUBLIC_PORTFOLIO_NAME
+    if owner_id is None or store is None:
+        st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 실패: Supabase 저장소 설정이 필요합니다."
+        return
+    if not _portfolio_is_dirty():
+        st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장됨"
+        return
+    try:
+        st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 중"
+        _persist_current_portfolio(owner_id, store)
+        if history_store is not None:
+            history_store.save_snapshot(
+                build_history_record(
+                    owner_id=owner_id,
+                    portfolio_name=PUBLIC_PORTFOLIO_NAME,
+                    event_type="portfolio_save",
+                    metrics=metrics,
+                )
+            )
+        st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장됨"
+    except (PortfolioStoreError, ValueError) as exc:
+        st.session_state[PUBLIC_SAVE_STATUS_KEY] = f"저장 실패: {exc}"
+
+
+def _current_save_status_text(*, public_auth_enabled: bool, dirty: bool) -> str:
+    if public_auth_enabled:
+        return str(st.session_state.get(PUBLIC_SAVE_STATUS_KEY) or ("저장 중" if dirty else "저장됨"))
+    return "저장하지 않은 변경 있음" if dirty else "저장됨"
 
 
 def _refresh_price_rows(
@@ -717,6 +775,18 @@ def _render_saved_portfolio_selector(owner_id, store) -> None:
 
 def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_enabled: bool = False) -> None:
     with st.sidebar:
+        if public_auth_enabled:
+            st.subheader("데이터")
+            with st.expander("데이터 정보", expanded=False):
+                st.caption("미국 주식은 yfinance, USD/KRW 환율은 Yahoo chart와 open.er-api fallback, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
+            with st.expander("가격 조회 옵션", expanded=False):
+                st.radio(
+                    "가격 새로고침 대상",
+                    ["미조회/오래된 가격만", "실패 종목만", "전체 강제 재조회"],
+                    key=PRICE_REFRESH_MODE_KEY,
+                    help="전체 강제 재조회는 현재 세션의 가격 캐시를 우회합니다.",
+                )
+            return
         st.subheader("현재 포트폴리오")
         _render_saved_portfolio_selector(owner_id, store)
         if _portfolio_is_dirty():
@@ -750,14 +820,14 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
             )
 
 
-def _render_header(config: AppSecurityConfig, owner_id, store, history_store, metrics) -> None:
+def _render_header(config: AppSecurityConfig, owner_id, store, history_store, metrics, *, public_auth_enabled: bool = False) -> None:
     dirty = _portfolio_is_dirty()
     summary = aggregate_price_statuses(st.session_state.get("price_update_statuses", []))
     last_refresh = metrics.last_price_refresh_at or st.session_state.last_price_refresh_at
     left, middle, right = st.columns([2.3, 2.1, 1.4], vertical_alignment="center")
     with left:
         st.title("포트폴리오 대시보드")
-        st.caption(f"현재 포트폴리오 · {_current_portfolio_name()}")
+        st.caption("내 포트폴리오" if public_auth_enabled else f"현재 포트폴리오 · {_current_portfolio_name()}")
     with middle:
         st.caption("마지막 가격 갱신")
         if last_refresh:
@@ -765,16 +835,17 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
         else:
             st.write("**미조회**")
         st.caption(f"정상 {metrics.priced_count} · 캐시 {summary.cached} · 이전 가격 {metrics.stale_quote_count} · 실패 {metrics.failed_quote_count} · 미조회 {metrics.missing_quote_count}")
-        st.caption("저장하지 않은 변경 있음" if dirty else "저장됨")
+        st.caption(_current_save_status_text(public_auth_enabled=public_auth_enabled, dirty=dirty))
     with right:
         if st.button("현재가 갱신", type="primary", width="stretch", icon=":material/refresh:"):
             _refresh_prices(config, owner_id, history_store)
         if summary.failed and st.button("실패 종목 재시도", width="stretch", icon=":material/replay:"):
             st.session_state[PRICE_REFRESH_MODE_KEY] = "실패 종목만"
             _refresh_prices(config, owner_id, history_store)
-        save_disabled = not dirty or owner_id is None or store is None
-        if st.button("포트폴리오 저장", disabled=save_disabled, width="stretch", icon=":material/save:"):
-            _save_current_portfolio(owner_id, store, history_store, metrics)
+        if not public_auth_enabled:
+            save_disabled = not dirty or owner_id is None or store is None
+            if st.button("포트폴리오 저장", disabled=save_disabled, width="stretch", icon=":material/save:"):
+                _save_current_portfolio(owner_id, store, history_store, metrics)
 
 
 def _render_status_messages() -> None:
@@ -876,7 +947,7 @@ def _render_private_dashboard_sections(security_config, owner_id, portfolio_stor
 def _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
     selected_section = st.radio(
         "화면 선택",
-        ["투자 총괄 카드", "개요", "보유자산", "자산추이", "관리"],
+        ["투자 총괄 카드", "개요", "보유자산", "자산추이"],
         key=PUBLIC_SECTION_KEY,
         horizontal=True,
         label_visibility="collapsed",
@@ -887,20 +958,18 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
         _render_overview_section(metrics)
     elif selected_section == "보유자산":
         _render_public_holdings_section(security_config)
-    elif selected_section == "자산추이":
-        _render_history_section(owner_id, history_store, historical_schedule_store)
     else:
-        _render_manage_section(owner_id, portfolio_store, history_store)
+        _render_history_section(owner_id, history_store, historical_schedule_store)
 
 
 st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
 inject_styles()
-_initialize_session_state()
+public_auth_enabled = _read_public_auth_settings()
+_initialize_session_state(public_auth_enabled=public_auth_enabled)
 security_config = _read_security_config()
-storage_config = _read_storage_config()
-public_auth_enabled, public_accounts_table = _read_public_auth_settings()
+storage_config = _read_storage_config(public_auth_enabled=public_auth_enabled)
 if public_auth_enabled and not _is_authenticated():
-    _render_public_auth_gate(storage_config, table_name=public_accounts_table)
+    _render_public_auth_gate(storage_config)
 if not public_auth_enabled and should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
 
@@ -914,7 +983,9 @@ _render_security_status(security_config, public_auth_enabled=public_auth_enabled
 if not public_auth_enabled and should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
 metrics = _current_metrics()
-_render_header(security_config, owner_id, portfolio_store, history_store, metrics)
+if public_auth_enabled:
+    _auto_save_public_portfolio(owner_id, portfolio_store, history_store, metrics)
+_render_header(security_config, owner_id, portfolio_store, history_store, metrics, public_auth_enabled=public_auth_enabled)
 _render_status_messages()
 
 if public_auth_enabled:
