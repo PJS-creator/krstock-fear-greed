@@ -5,6 +5,17 @@ from streamlit.testing.v1 import AppTest
 RAW_ISO_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
 
 
+class _FakeYahooFxResponse:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+    def read(self):
+        return b'{"chart":{"result":[{"indicators":{"quote":[{"close":[1388.25]}]}}],"error":null}}'
+
+
 def _element_texts(elements):
     texts = []
     for element in elements:
@@ -128,3 +139,31 @@ def test_public_holdings_transaction_input_renders_only_when_selected():
     text = _app_text(at)
     assert "거래 1건 입력" in text
     assert "여러 개 빠른 입력" in text
+
+
+def test_public_cash_fx_refresh_button_fetches_and_applies_rate(monkeypatch):
+    calls = []
+
+    def fake_urlopen(url, timeout):
+        calls.append((url, timeout))
+        return _FakeYahooFxResponse()
+
+    monkeypatch.setattr("portfolio.pricing.yahoo_finance.urlopen", fake_urlopen)
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo"
+    at.session_state["authenticated_owner_id"] = "public:demo"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["public_dashboard_section"] = "보유자산"
+    at.session_state["public_holdings_view"] = "현금/환율"
+    at.session_state["usd_krw"] = 1300.0
+    at.run(timeout=20)
+
+    refresh_buttons = [button for button in at.button if getattr(button, "label", "") == "USD/KRW 환율 갱신"]
+    assert len(refresh_buttons) == 1
+    refresh_buttons[0].click().run(timeout=20)
+
+    assert not at.exception
+    assert calls == [("https://query1.finance.yahoo.com/v8/finance/chart/KRW=X?range=5d&interval=1d", 4.0)]
+    assert at.session_state["usd_krw"] == 1388.25
+    assert at.session_state["fx_status_message"] == "USD/KRW 환율을 갱신했습니다."
