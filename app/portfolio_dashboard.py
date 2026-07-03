@@ -538,6 +538,10 @@ def _apply_fx_rate(new_rate, status) -> bool:
 
 
 def _refresh_fx(_config: AppSecurityConfig, *, public_auth_enabled: bool = False) -> None:
+    if public_auth_enabled:
+        st.session_state.fx_status_message = "공용 앱에서는 USD/KRW 환율을 직접 입력해 사용합니다. 값을 바꾼 뒤 현금/환율 적용을 눌러주세요."
+        st.info(st.session_state.fx_status_message)
+        return
     with st.spinner("USD/KRW 환율 조회 중..."):
         result = _fetch_fx_rate(public_auth_enabled=public_auth_enabled)
     if result is None:
@@ -597,7 +601,8 @@ def _render_cash_fx_tools(config: AppSecurityConfig, *, public_auth_enabled: boo
             submitted = st.form_submit_button("현금/환율 적용", type="primary")
         if submitted:
             _queue_inline_cash_fx_update()
-        if st.button("USD/KRW 환율 갱신", icon=":material/currency_exchange:", key="inline_fx_refresh"):
+        fx_button_label = "수동 환율 안내" if public_auth_enabled else "USD/KRW 환율 갱신"
+        if st.button(fx_button_label, icon=":material/currency_exchange:", key="inline_fx_refresh"):
             _refresh_fx(config, public_auth_enabled=public_auth_enabled)
         st.caption(st.session_state.fx_status_message)
         if st.session_state.fx_fetched_at:
@@ -712,7 +717,8 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
             st.number_input("원화 현금", min_value=0.0, step=100000.0, key="cash_krw")
             st.number_input("달러 현금", min_value=0.0, step=100.0, key="cash_usd")
             st.number_input("환율", min_value=0.01, step=1.0, key="usd_krw", help="USD/KRW")
-            if st.button("환율 갱신", icon=":material/currency_exchange:"):
+            fx_button_label = "수동 환율 안내" if public_auth_enabled else "환율 갱신"
+            if st.button(fx_button_label, icon=":material/currency_exchange:"):
                 _refresh_fx(config, public_auth_enabled=public_auth_enabled)
             st.caption(st.session_state.fx_status_message)
             if st.session_state.fx_fetched_at:
