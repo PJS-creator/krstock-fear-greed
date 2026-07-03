@@ -509,7 +509,7 @@ Secrets를 수정했거나 `app/requirements.txt`가 바뀐 경우 Streamlit Clo
 
 외부 사용자용 새 앱은 같은 절차로 만들되 Main file path에 `app/public_portfolio_dashboard.py`를 입력합니다. 기존 개인 테스트 앱 URL은 그대로 두고, 새 앱 URL만 외부 사용자에게 공유합니다.
 
-외부 사용자용 앱은 `.streamlit/config.toml`의 `client.toolbarMode = "viewer"` 설정과 공개 앱 전용 CSS guard로 Share, GitHub, edit, Manage app 같은 Streamlit Cloud chrome 노출을 줄입니다. 이 숨김 처리는 사용자 경험 보조 장치이지 보안 경계가 아닙니다.
+외부 사용자용 앱은 `.streamlit/config.toml`의 `client.toolbarMode = "viewer"` 설정과 공개 앱 전용 CSS guard로 앱 내부 Streamlit toolbar 노출을 줄입니다. Streamlit Cloud가 앱 바깥 wrapper에 붙이는 **Manage app**은 앱 코드에서 안전하게 제어하는 대상이 아닙니다.
 
 실제 보안 경계는 아래 권한과 비밀값 관리입니다.
 
@@ -518,7 +518,7 @@ Secrets를 수정했거나 `app/requirements.txt`가 바뀐 경우 Streamlit Clo
 - 공용 앱 Secrets에는 `SUPABASE_SERVICE_ROLE_KEY`를 넣지 않고 `SUPABASE_PUBLISHABLE_KEY` 또는 `SUPABASE_ANON_KEY`만 둡니다.
 - Supabase에는 `docs/supabase_migration_v2_auth_rls.sql`의 RLS 정책을 적용합니다.
 - 운영자 계정으로 로그인한 브라우저에서는 **Manage app**이 보일 수 있습니다. 일반 사용자 화면 검수는 로그아웃 상태, 시크릿 창, 또는 운영 권한이 없는 별도 계정으로 확인합니다.
-- **Manage app**은 Streamlit Community Cloud가 붙이는 운영 UI라 앱 내부 설정만으로 완전한 보안 경계가 되지 않습니다. Streamlit Cloud **App settings > Sharing**, Streamlit workspace 구성원, GitHub repository collaborator 권한에서 일반 사용자가 개발자/관리자 권한을 갖지 않도록 확인합니다.
+- Streamlit Cloud **App settings > Sharing**, Streamlit workspace 구성원, GitHub repository collaborator 권한에서 일반 사용자가 개발자/관리자 권한을 갖지 않도록 확인합니다.
 
 ## UI 검수 체크리스트
 
