@@ -522,6 +522,10 @@ def _fetch_fx_rate():
     except ValueError as exc:
         st.error(f"환율을 갱신할 수 없습니다: {exc}")
         return None
+    except Exception as exc:
+        st.session_state.fx_status_message = f"USD/KRW 환율 갱신 실패: {exc}. 기존 수동 환율을 유지했습니다."
+        st.error(st.session_state.fx_status_message)
+        return None
     return new_rate, status
 
 
@@ -533,7 +537,8 @@ def _apply_fx_rate(new_rate, status) -> bool:
 
 
 def _refresh_fx(_config: AppSecurityConfig) -> None:
-    result = _fetch_fx_rate()
+    with st.spinner("USD/KRW 환율 조회 중..."):
+        result = _fetch_fx_rate()
     if result is None:
         return
     new_rate, status = result
@@ -776,7 +781,8 @@ if not public_auth_enabled and should_lock_entire_app(security_config, is_authen
 portfolio_store, history_store, historical_schedule_store = _build_stores(storage_config)
 owner_id = _resolve_owner_id(storage_config)
 _auto_load_account_portfolio(owner_id, portfolio_store)
-_auto_refresh_loaded_prices(owner_id, portfolio_store, history_store)
+if not public_auth_enabled:
+    _auto_refresh_loaded_prices(owner_id, portfolio_store, history_store)
 _render_sidebar(security_config, owner_id, portfolio_store)
 _render_security_status(security_config, public_auth_enabled=public_auth_enabled)
 if not public_auth_enabled and should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
