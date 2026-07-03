@@ -65,7 +65,7 @@ from portfolio.historical_holdings import HistoricalScheduleStoreError, build_su
 from portfolio.pricing import (
     TTLQuoteCache,
     build_korea_quote_provider,
-    build_yahoo_chart_fx_provider,
+    build_public_fx_provider,
     build_yfinance_fx_provider,
     build_yfinance_intraday_provider,
     build_yfinance_provider,
@@ -539,7 +539,7 @@ def _refresh_prices(_config: AppSecurityConfig, owner_id, history_store) -> None
 
 
 def _fetch_fx_rate(*, public_auth_enabled: bool = False):
-    provider = build_yahoo_chart_fx_provider() if public_auth_enabled else build_yfinance_fx_provider()
+    provider = build_public_fx_provider() if public_auth_enabled else build_yfinance_fx_provider()
     try:
         new_rate, status = refresh_usd_krw(provider, float(st.session_state.usd_krw))
     except ValueError as exc:
@@ -740,7 +740,7 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
             if st.session_state.fx_fetched_at:
                 st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
         with st.expander("데이터 정보", expanded=False):
-            st.caption("미국 주식은 yfinance, USD/KRW 환율은 Yahoo chart, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
+            st.caption("미국 주식은 yfinance, USD/KRW 환율은 Yahoo chart와 open.er-api fallback, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
         with st.expander("가격 조회 옵션", expanded=False):
             st.radio(
                 "가격 새로고침 대상",

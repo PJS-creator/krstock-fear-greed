@@ -4,6 +4,8 @@ import pandas as pd
 import pytest
 
 from portfolio.pricing import (
+    FallbackFxProvider,
+    OpenErApiFxProvider,
     PriceProviderError,
     ProviderFxRate,
     ProviderQuote,
@@ -16,6 +18,7 @@ from portfolio.pricing import (
     build_alpha_vantage_provider,
     parse_alpha_vantage_currency_exchange_response,
     parse_alpha_vantage_global_quote_response,
+    parse_open_er_api_usd_krw_response,
     parse_yahoo_chart_usd_krw_response,
     parse_yfinance_history_frame,
     parse_yfinance_intraday_frame,
@@ -296,6 +299,49 @@ def test_yahoo_chart_fx_provider_uses_short_timeout_loader():
     assert calls == [("https://query1.finance.yahoo.com/v8/finance/chart/KRW=X?range=5d&interval=1d", 3.0)]
     assert rate.rate == pytest.approx(1380.0)
     assert rate.provider == "yahoo-chart"
+
+
+def test_open_er_api_fx_response_parsing_uses_krw_rate():
+    rate = parse_open_er_api_usd_krw_response(
+        {
+            "result": "success",
+            "base_code": "USD",
+            "rates": {"KRW": 1388.25},
+        }
+    )
+
+    assert rate.from_currency == "USD"
+    assert rate.to_currency == "KRW"
+    assert rate.rate == pytest.approx(1388.25)
+    assert rate.provider == "open-er-api"
+
+
+def test_open_er_api_fx_provider_uses_short_timeout_loader():
+    calls = []
+
+    def response_loader(url, timeout_seconds):
+        calls.append((url, timeout_seconds))
+        return {
+            "result": "success",
+            "base_code": "USD",
+            "rates": {"KRW": 1387.5},
+        }
+
+    provider = OpenErApiFxProvider(response_loader=response_loader, timeout_seconds=3.0)
+    rate = provider.get_exchange_rate("usd", "krw")
+
+    assert calls == [("https://open.er-api.com/v6/latest/USD", 3.0)]
+    assert rate.rate == pytest.approx(1387.5)
+    assert rate.provider == "open-er-api"
+
+
+def test_fallback_fx_provider_uses_next_provider_after_failure():
+    fallback = FallbackFxProvider([FailingProvider(), FakeProvider()])
+
+    rate = fallback.get_exchange_rate("USD", "KRW")
+
+    assert rate.rate == pytest.approx(1380.5)
+    assert rate.provider == "fake"
 
 
 def test_yfinance_fx_provider_rejects_unsupported_pair():

@@ -5,7 +5,7 @@ import json
 from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from .base import PriceProviderError, ProviderFxRate, ProviderIntradayPrices, ProviderQuote
 from .korea import normalize_korea_symbol
@@ -14,6 +14,12 @@ YFINANCE_PROVIDER_NAME = "yfinance"
 YFINANCE_USD_KRW_SYMBOL = "KRW=X"
 YAHOO_CHART_FX_PROVIDER_NAME = "yahoo-chart"
 YAHOO_CHART_FX_URL = "https://query1.finance.yahoo.com/v8/finance/chart/KRW=X?range=5d&interval=1d"
+OPEN_ER_API_FX_PROVIDER_NAME = "open-er-api"
+OPEN_ER_API_FX_URL = "https://open.er-api.com/v6/latest/USD"
+HTTP_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; krstock-fear-greed/1.0; +https://github.com/PJS-creator/krstock-fear-greed)",
+    "Accept": "application/json",
+}
 
 
 def normalize_yfinance_symbol(symbol: object) -> str:
@@ -307,6 +313,24 @@ def parse_yahoo_chart_usd_krw_response(payload: Mapping[str, Any]) -> ProviderFx
     return ProviderFxRate.now(from_currency="USD", to_currency="KRW", rate=values[-1], provider=YAHOO_CHART_FX_PROVIDER_NAME)
 
 
+def parse_open_er_api_usd_krw_response(payload: Mapping[str, Any]) -> ProviderFxRate:
+    try:
+        result = str(payload.get("result", "")).lower()
+        if result and result != "success":
+            raise PriceProviderError(f"open.er-api 응답 오류: {payload.get('error-type') or result}")
+        base_code = str(payload.get("base_code", "")).upper()
+        if base_code != "USD":
+            raise PriceProviderError("open.er-api USD 기준 응답이 아닙니다.")
+        rate = float(payload["rates"]["KRW"])
+    except PriceProviderError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise PriceProviderError("open.er-api USD/KRW 응답 형식이 올바르지 않습니다.") from exc
+    if not math.isfinite(rate) or rate <= 0:
+        raise PriceProviderError("open.er-api USD/KRW 환율 값이 유효하지 않습니다.")
+    return ProviderFxRate.now(from_currency="USD", to_currency="KRW", rate=rate, provider=OPEN_ER_API_FX_PROVIDER_NAME)
+
+
 class YahooChartFxProvider:
     def __init__(
         self,
@@ -321,7 +345,8 @@ class YahooChartFxProvider:
         if self._response_loader is not None:
             return self._response_loader(YAHOO_CHART_FX_URL, self._timeout_seconds)
         try:
-            with urlopen(YAHOO_CHART_FX_URL, timeout=self._timeout_seconds) as response:
+            request = Request(YAHOO_CHART_FX_URL, headers=HTTP_HEADERS)
+            with urlopen(request, timeout=self._timeout_seconds) as response:
                 return json.loads(response.read().decode("utf-8"))
         except (OSError, URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise PriceProviderError("Yahoo chart USD/KRW 환율 조회 실패") from exc
@@ -336,3 +361,56 @@ class YahooChartFxProvider:
 
 def build_yahoo_chart_fx_provider() -> YahooChartFxProvider:
     return YahooChartFxProvider()
+
+
+class OpenErApiFxProvider:
+    def __init__(
+        self,
+        *,
+        response_loader: Callable[[str, float], Mapping[str, Any]] | None = None,
+        timeout_seconds: float = 4.0,
+    ) -> None:
+        self._response_loader = response_loader
+        self._timeout_seconds = timeout_seconds
+
+    def _load_response(self) -> Mapping[str, Any]:
+        if self._response_loader is not None:
+            return self._response_loader(OPEN_ER_API_FX_URL, self._timeout_seconds)
+        try:
+            request = Request(OPEN_ER_API_FX_URL, headers=HTTP_HEADERS)
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (OSError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            raise PriceProviderError("open.er-api USD/KRW 환율 조회 실패") from exc
+
+    def get_exchange_rate(self, from_currency: str, to_currency: str) -> ProviderFxRate:
+        normalized_from = str(from_currency or "").strip().upper()
+        normalized_to = str(to_currency or "").strip().upper()
+        if (normalized_from, normalized_to) != ("USD", "KRW"):
+            raise PriceProviderError("open.er-api FX provider는 USD/KRW만 지원합니다.")
+        return parse_open_er_api_usd_krw_response(self._load_response())
+
+
+class FallbackFxProvider:
+    def __init__(self, providers: list[Any]) -> None:
+        if not providers:
+            raise ValueError("providers must not be empty")
+        self._providers = providers
+
+    def get_exchange_rate(self, from_currency: str, to_currency: str) -> ProviderFxRate:
+        errors = []
+        for provider in self._providers:
+            try:
+                return provider.get_exchange_rate(from_currency, to_currency)
+            except PriceProviderError as exc:
+                errors.append(str(exc))
+        detail = "; ".join(errors) if errors else "사용 가능한 provider가 없습니다."
+        raise PriceProviderError(f"USD/KRW 환율 조회 실패: {detail}")
+
+
+def build_open_er_api_fx_provider() -> OpenErApiFxProvider:
+    return OpenErApiFxProvider()
+
+
+def build_public_fx_provider() -> FallbackFxProvider:
+    return FallbackFxProvider([YahooChartFxProvider(), OpenErApiFxProvider()])
