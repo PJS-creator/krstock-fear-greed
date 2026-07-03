@@ -496,7 +496,7 @@ Streamlit Community Cloud는 실행 파일 위치 기준으로 가까운 `requir
 3. Repository는 `PJS-creator/krstock-fear-greed`를 선택합니다.
 4. Branch는 `main`을 선택합니다.
 5. Main file path는 `app/portfolio_dashboard.py`를 입력합니다.
-6. Python version은 `3.11` 또는 `3.12`를 선택합니다.
+6. Python version은 `3.11` 또는 `3.12`를 선택합니다. 로그에 `/python3.14/`가 보이면 App settings > Advanced settings에서 `3.12`로 바꾼 뒤 저장합니다.
 7. **Deploy**를 클릭합니다.
 
 Secrets를 수정했거나 `app/requirements.txt`가 바뀐 경우 Streamlit Cloud에서 앱을 Reboot 또는 Redeploy 해야 새 설정과 의존성이 반영됩니다. 이번 UI 변경은 `streamlit>=1.50`을 요구하므로 merge 후 Reboot 또는 Redeploy가 필요합니다.
