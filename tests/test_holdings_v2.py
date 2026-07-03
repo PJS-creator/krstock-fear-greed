@@ -7,7 +7,7 @@ from portfolio.holdings import (
     merge_quick_rows_with_existing,
     normalize_holding_rows,
 )
-from portfolio.pricing import PriceProviderError, ProviderQuote, TTLQuoteCache, refresh_holding_quotes
+from portfolio.pricing import PriceProviderError, ProviderIntradayPrices, ProviderQuote, TTLQuoteCache, refresh_holding_quotes
 
 
 def test_ticker_quantity_quick_rows_create_default_holding():
@@ -99,6 +99,15 @@ class FakeProvider:
         return ProviderQuote.now(symbol=symbol, price=12, previous_close=10, provider="fake")
 
 
+class FakeIntradayProvider:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def get_intraday_prices(self, symbol, *, market=None):
+        self.calls.append((symbol, market))
+        return ProviderIntradayPrices.now(symbol=symbol, prices=(10.0, 11.0, 10.5, 12.0), provider="fake_intraday")
+
+
 class FailingProvider:
     def get_quote(self, symbol):
         raise PriceProviderError("provider unavailable")
@@ -116,6 +125,37 @@ def test_quote_refresh_updates_only_explicit_call_and_reports_cached():
     assert first_statuses[0].status == "updated"
     assert second_statuses[0].status == "cached"
     assert second_rows[0]["current_price"] == 12
+
+
+def test_quote_refresh_attaches_intraday_prices_when_available():
+    provider = FakeProvider()
+    intraday_provider = FakeIntradayProvider()
+
+    rows, statuses = refresh_holding_quotes(
+        [{"ticker": "AAA", "quantity": 1}],
+        provider,
+        cache=TTLQuoteCache(),
+        intraday_provider=intraday_provider,
+    )
+
+    assert statuses[0].status == "updated"
+    assert intraday_provider.calls == [("AAA", "US")]
+    assert rows[0]["intraday_prices"] == [10.0, 11.0, 10.5, 12.0]
+    assert rows[0]["intraday_provider"] == "fake_intraday"
+
+
+def test_quote_refresh_skips_intraday_prices_without_intraday_provider():
+    provider = FakeProvider()
+
+    rows, statuses = refresh_holding_quotes(
+        [{"ticker": "AAA", "quantity": 1}],
+        provider,
+        cache=TTLQuoteCache(),
+    )
+
+    assert statuses[0].status == "updated"
+    assert rows[0]["intraday_prices"] == []
+    assert rows[0]["intraday_provider"] is None
 
 
 def test_quote_refresh_paces_uncached_provider_calls():
