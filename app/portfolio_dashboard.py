@@ -49,6 +49,7 @@ from app.ui.manage import (
 from app.ui.overview import render_overview
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
 from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles
+from app.ui.theme import APP_THEME_KEY, DEFAULT_THEME_MODE, normalize_theme_mode
 from app.ui.transactions import render_transaction_cashflow, render_transaction_editor
 from portfolio.auth import (
     AccountConfig,
@@ -117,6 +118,36 @@ PUBLIC_AUTH_ENV_KEY = "PORTFOLIO_PUBLIC_AUTH"
 PUBLIC_AUTH_SECRET_KEY = "PUBLIC_USER_AUTH"
 UNPROTECTED_WARNING = "공개 앱에서 저장소와 직접 입력 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 PUBLIC_PORTFOLIO_NAME = "main"
+APP_THEME_CHOICE_KEY = "app_theme_choice"
+THEME_LABEL_BY_MODE = {"dark": "다크", "light": "라이트"}
+THEME_MODE_BY_LABEL = {label: mode for mode, label in THEME_LABEL_BY_MODE.items()}
+
+
+def _initialize_theme_state() -> None:
+    selected_label = st.session_state.get(APP_THEME_CHOICE_KEY)
+    if selected_label in THEME_MODE_BY_LABEL:
+        mode = THEME_MODE_BY_LABEL[str(selected_label)]
+    else:
+        mode = normalize_theme_mode(st.session_state.get(APP_THEME_KEY, DEFAULT_THEME_MODE))
+    st.session_state[APP_THEME_KEY] = mode
+    st.session_state[APP_THEME_CHOICE_KEY] = THEME_LABEL_BY_MODE[mode]
+
+
+def _current_theme_mode() -> str:
+    return normalize_theme_mode(st.session_state.get(APP_THEME_KEY, DEFAULT_THEME_MODE))
+
+
+def _render_theme_selector() -> None:
+    current_mode = _current_theme_mode()
+    st.markdown("<div class='app-theme-toggle-label'>화면 테마</div>", unsafe_allow_html=True)
+    st.radio(
+        "화면 테마",
+        list(THEME_MODE_BY_LABEL.keys()),
+        index=list(THEME_MODE_BY_LABEL).index(THEME_LABEL_BY_MODE[current_mode]),
+        key=APP_THEME_CHOICE_KEY,
+        horizontal=True,
+        label_visibility="collapsed",
+    )
 
 
 def _clean_portfolio_name(value: object) -> str:
@@ -339,6 +370,9 @@ def _is_authenticated() -> bool:
 
 
 def _render_login_form(config: AppSecurityConfig) -> None:
+    _, theme_col = st.columns([3, 1], vertical_alignment="center")
+    with theme_col:
+        _render_theme_selector()
     st.title("포트폴리오 대시보드")
     st.subheader("로그인이 필요합니다")
     st.caption("계정별 저장 포트폴리오와 Supabase 저장소를 보호하기 위한 개인용 보호입니다.")
@@ -360,6 +394,9 @@ def _render_login_form(config: AppSecurityConfig) -> None:
 
 
 def _render_public_auth_gate(storage_config) -> None:
+    _, theme_col = st.columns([3, 1], vertical_alignment="center")
+    with theme_col:
+        _render_theme_selector()
     st.title("포트폴리오 대시보드")
     try:
         auth_store = _build_public_auth_store(storage_config)
@@ -843,6 +880,7 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
         st.caption(f"정상 {metrics.priced_count} · 캐시 {summary.cached} · 이전 가격 {metrics.stale_quote_count} · 실패 {metrics.failed_quote_count} · 미조회 {metrics.missing_quote_count}")
         st.caption(_current_save_status_text(public_auth_enabled=public_auth_enabled, dirty=dirty))
     with right:
+        _render_theme_selector()
         if st.button("현재가/환율 갱신", type="primary", width="stretch", icon=":material/refresh:"):
             _refresh_prices(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)
         if summary.failed and st.button("실패 종목 재시도", width="stretch", icon=":material/replay:"):
@@ -969,7 +1007,8 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
 
 
 st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
-inject_styles()
+_initialize_theme_state()
+inject_styles(_current_theme_mode())
 public_auth_enabled = _read_public_auth_settings()
 if public_auth_enabled:
     inject_public_cloud_chrome_guard()

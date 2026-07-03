@@ -10,7 +10,7 @@ from app.ui.charts import (
     plot_reconstructed_total_value,
     plot_total_value_history,
 )
-from app.ui.theme import SEMANTIC_COLORS, deterministic_color
+from app.ui.theme import SEMANTIC_COLORS, deterministic_color, get_app_theme
 
 
 def _metrics(rows=None):
@@ -89,11 +89,18 @@ def test_allocation_donut_has_labels_hover_and_percent():
     assert any("삼성전자 · 005930" == str(label) for label in fig.data[0].labels)
     assert any("현금" == str(label) for label in fig.data[0].labels)
     hover = fig.data[0].hovertemplate
-    assert "티커" in hover
-    assert "평가액" in hover
-    assert "비중" in hover
-    assert "오늘 변동" in hover
+    hover_text = "\n".join(str(item) for item in fig.data[0].hovertext)
+    assert hover == "%{hovertext}<extra></extra>"
+    assert "티커" in hover_text
+    assert "평가액" in hover_text
+    assert "비중" in hover_text
+    assert "오늘 변동" in hover_text
+    assert "customdata{" not in hover
+    assert "%{customdata" not in hover
+    assert "customdata[" not in hover
+    assert "customdata{" not in hover_text
     assert "," in fig.data[0].customdata[0][4]
+    assert fig.layout.font.color == get_app_theme("dark").text
 
 
 def test_allocation_donut_collapses_small_or_extra_slices_to_other():

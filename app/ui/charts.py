@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from html import escape
 from typing import Iterable
 
 import plotly.graph_objects as go
@@ -24,7 +25,7 @@ from .formatters import (
     signed_krw,
     signed_percentage,
 )
-from .theme import CURRENCY_COLORS, DIMENSIONS, SEMANTIC_COLORS, deterministic_color, signed_color
+from .theme import CURRENCY_COLORS, DIMENSIONS, SEMANTIC_COLORS, deterministic_color, get_active_theme, signed_color
 
 
 def apply_chart_layout(
@@ -34,6 +35,7 @@ def apply_chart_layout(
     hovermode: str = "closest",
     showlegend: bool = True,
 ) -> go.Figure:
+    theme = get_active_theme()
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -42,19 +44,19 @@ def apply_chart_layout(
         hovermode=hovermode,
         showlegend=showlegend,
         legend_title_text="",
-        font=dict(family=APP_FONT_FAMILY, size=15, color=SEMANTIC_COLORS["ink"]),
+        font=dict(family=APP_FONT_FAMILY, size=15, color=theme.text),
         hoverlabel=dict(
             align="left",
-            bgcolor="rgba(17,24,39,0.94)",
-            bordercolor="rgba(255,255,255,0.18)",
+            bgcolor=theme.chart_hover_bg,
+            bordercolor=theme.chart_hover_border,
             font=dict(family=APP_FONT_FAMILY, size=13, color="#FFFFFF"),
         ),
         legend=dict(font=dict(size=13), itemclick="toggleothers", itemdoubleclick="toggle"),
     )
     fig.update_xaxes(
         showgrid=True,
-        gridcolor="rgba(100,116,139,0.18)",
-        zerolinecolor="rgba(100,116,139,0.45)",
+        gridcolor=theme.chart_grid,
+        zerolinecolor=theme.chart_zero,
         tickfont=dict(size=12),
         title_font=dict(size=13),
         automargin=True,
@@ -146,6 +148,7 @@ def plot_allocation(
     min_label_weight: float = 0.035,
     include_cash: bool = True,
 ) -> go.Figure | None:
+    theme = get_active_theme()
     source_rows = _allocation_source_rows(metrics, include_cash=include_cash)
     if not source_rows:
         return None
@@ -180,6 +183,17 @@ def plot_allocation(
         ]
         for row in rows
     ]
+    hovertext = [
+        (
+            f"<b>{escape(str(row['label']))}</b><br>"
+            f"티커 {escape(str(row['ticker']))} · 시장 {escape(str(row['market']))}<br>"
+            f"평가액 {escape(full_krw(float(row['market_value_krw'])))}<br>"
+            f"비중 {escape(percentage(float(row['weight'])))}<br>"
+            f"오늘 변동 {escape(signed_krw(row['day_change_krw']))} ({escape(signed_percentage(row['day_change_pct']))})<br>"
+            f"총수익률 {escape(signed_percentage(row['total_pnl_pct']))}"
+        )
+        for row in rows
+    ]
     fig = go.Figure(
         go.Pie(
             labels=legend_labels,
@@ -193,16 +207,10 @@ def plot_allocation(
             insidetextorientation="radial",
             textfont=dict(size=12, family=APP_FONT_FAMILY),
             customdata=customdata,
-            marker=dict(colors=colors, line=dict(color="rgba(148,163,184,0.38)", width=1)),
+            hovertext=hovertext,
+            marker=dict(colors=colors, line=dict(color=theme.border_strong, width=1)),
             pull=[0.025 if index == 0 else 0 for index, _ in enumerate(rows)],
-            hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "티커 %{customdata[1]} · 시장 %{customdata[3]}<br>"
-                "평가액 %{customdata[4]}<br>"
-                "비중 %{customdata[5]}<br>"
-                "오늘 변동 %{customdata[6]} (%{customdata[7]})<br>"
-                "총수익률 %{customdata[8]}<extra></extra>"
-            ),
+            hovertemplate="%{hovertext}<extra></extra>",
         )
     )
     fig.update_layout(
@@ -212,7 +220,7 @@ def plot_allocation(
                 x=0.5,
                 y=0.5,
                 showarrow=False,
-                font=dict(size=16, family=APP_FONT_FAMILY, color=SEMANTIC_COLORS["ink"]),
+                font=dict(size=16, family=APP_FONT_FAMILY, color=theme.text),
             )
         ],
         legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),

@@ -16,7 +16,7 @@ PENDING_PORTFOLIO_STATE_KEY = "pending_portfolio_state"
 
 
 def render_plotly_chart(fig, *, key: str) -> None:
-    st.plotly_chart(fig, use_container_width=True, theme="streamlit", config=chart_config(), key=key)
+    st.plotly_chart(fig, use_container_width=True, theme=None, config=chart_config(), key=key)
 
 
 def render_empty_portfolio() -> None:
