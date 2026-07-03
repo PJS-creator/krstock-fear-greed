@@ -21,7 +21,7 @@ class _FakeYahooFxResponse:
 def _element_texts(elements):
     texts = []
     for element in elements:
-        for attr in ("label", "value", "text"):
+        for attr in ("label", "value", "text", "options"):
             value = getattr(element, attr, None)
             if value is not None:
                 texts.append(str(value))
@@ -42,6 +42,7 @@ def _app_text(at: AppTest) -> str:
         "tabs",
         "metric",
         "expander",
+        "radio",
     ]
     chunks = []
     for name in names:
@@ -56,6 +57,9 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
     text = _app_text(at)
     for label in ("투자 총괄 카드", "개요", "보유자산", "자산추이", "관리"):
         assert label in text
+    for label in ("화면 테마", "다크", "라이트"):
+        assert label in text
+    assert at.session_state["app_theme_mode"] == "dark"
     for label in ("현금 및 환율", "현금/환율 적용", "USD/KRW 환율 갱신", "자산 입력", "거래 1건 입력", "매입/매도 기준 자산 증감"):
         assert label in text
     assert "현재가/환율 갱신" in text
@@ -63,6 +67,16 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
     for label in ("총자산", "오늘 변동", "총현금", "USD 노출도"):
         assert label in metric_labels
     assert RAW_ISO_RE.search(text) is None
+
+
+def test_dashboard_theme_toggle_accepts_light_mode():
+    at = AppTest.from_file("app/portfolio_dashboard.py")
+    at.session_state["app_theme_choice"] = "라이트"
+    at.run(timeout=20)
+
+    assert not at.exception
+    assert at.session_state["app_theme_mode"] == "light"
+    assert "라이트" in _app_text(at)
 
 
 def test_price_log_detail_expander_is_rendered_collapsed_by_default():
