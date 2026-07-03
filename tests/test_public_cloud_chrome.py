@@ -19,9 +19,7 @@ def test_public_cloud_chrome_guard_hides_streamlit_controls():
         'title*="Edit"',
         'title*="GitHub"',
         'title*="Manage"',
-        'title*="Manage app"',
         'aria-label*="Manage"',
-        'aria-label*="Manage app"',
         'data-testid*="manage-app"',
         'href*="streamlit.io/cloud"',
         'data-testid="appCreatorAvatar"',
@@ -31,20 +29,14 @@ def test_public_cloud_chrome_guard_hides_streamlit_controls():
         assert selector in source
 
 
-def test_public_cloud_chrome_guard_reaches_streamlit_cloud_wrapper_best_effort():
+def test_public_cloud_chrome_guard_does_not_mutate_cloud_wrapper_documents():
     source = Path("app/ui/styles.py").read_text(encoding="utf-8")
 
-    assert "import streamlit.components.v1 as components" in source
-    assert "reachableDocuments" in source
-    assert "hideLabelledCloudControls" in source
-    assert "CLOUD_CONTROL_LABEL" in source
-    assert "Manage app" in source
-    assert "Reboot app" in source
-    assert "Delete app" in source
-    assert "Settings" in source
-    assert "win.parent" in source
-    assert "MutationObserver" in source
-    assert "Best-effort UI cleanup only" in source
+    assert "streamlit.components.v1" not in source
+    assert "reachableDocuments" not in source
+    assert "hideLabelledCloudControls" not in source
+    assert "MutationObserver" not in source
+    assert "win.parent" not in source
 
 
 def test_public_dashboard_applies_chrome_guard_only_in_public_mode():
