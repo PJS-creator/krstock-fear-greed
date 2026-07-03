@@ -8,6 +8,7 @@ from app.ui.investment_summary_card import (
     _sparkline_html,
     render_investment_summary_card,
 )
+from app.ui.theme import get_app_theme
 
 
 def _metrics():
@@ -112,6 +113,13 @@ def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels():
     assert "height:" in tiles
     assert "삼성전자" in tiles
     assert "+1.3%" in tiles
+
+
+def test_light_theme_separates_heatmap_tile_borders_from_outer_border():
+    variables = get_app_theme("light").css_variables()
+
+    assert variables["summary-heatmap-border"] != variables["summary-heatmap-tile-border"]
+    assert "255, 255, 255" in variables["summary-heatmap-tile-border"]
 
 
 def test_summary_sparkline_uses_intraday_prices_and_handles_missing_data():

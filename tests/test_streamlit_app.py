@@ -79,6 +79,14 @@ def test_dashboard_theme_toggle_accepts_light_mode():
     assert "라이트" in _app_text(at)
 
 
+def test_theme_css_keeps_metric_and_radio_text_readable():
+    source = Path("app/ui/styles.py").read_text(encoding="utf-8")
+
+    assert 'div[data-testid="stMetricLabel"] *' in source
+    assert 'div[data-testid="stMetricValue"] *' in source
+    assert 'div[role="radiogroup"] label > div:first-child' in source
+
+
 def test_price_log_detail_expander_is_rendered_collapsed_by_default():
     at = AppTest.from_file("app/portfolio_dashboard.py")
     at.session_state["price_update_statuses"] = [

@@ -86,6 +86,7 @@ class AppTheme:
     summary_panel_bg: str
     summary_heatmap_bg: str
     summary_heatmap_border: str
+    summary_heatmap_tile_border: str
     up_text: str
     up_bg: str
     up_border: str
@@ -128,6 +129,7 @@ class AppTheme:
             "summary-panel-bg": self.summary_panel_bg,
             "summary-heatmap-bg": self.summary_heatmap_bg,
             "summary-heatmap-border": self.summary_heatmap_border,
+            "summary-heatmap-tile-border": self.summary_heatmap_tile_border,
             "summary-up-text": self.up_text,
             "summary-up-bg": self.up_bg,
             "summary-up-border": self.up_border,
@@ -173,6 +175,7 @@ APP_THEMES = {
         summary_panel_bg="linear-gradient(180deg, rgba(20, 31, 51, 0.92), rgba(9, 17, 31, 0.92))",
         summary_heatmap_bg="#050A13",
         summary_heatmap_border="#000000",
+        summary_heatmap_tile_border="#000000",
         up_text="#FEE2E2",
         up_bg="rgba(220, 90, 94, 0.36)",
         up_border="rgba(248, 113, 113, 0.38)",
@@ -214,7 +217,8 @@ APP_THEMES = {
         summary_card_bg="linear-gradient(135deg, #FFFFFF 0%, #F8FAFC 52%, #EEF4FB 100%)",
         summary_panel_bg="linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.96))",
         summary_heatmap_bg="#E2E8F0",
-        summary_heatmap_border="rgba(100, 116, 139, 0.22)",
+        summary_heatmap_border="rgba(15, 23, 42, 0.28)",
+        summary_heatmap_tile_border="rgba(255, 255, 255, 0.92)",
         up_text="#991B1B",
         up_bg="rgba(254, 226, 226, 0.92)",
         up_border="rgba(248, 113, 113, 0.34)",
