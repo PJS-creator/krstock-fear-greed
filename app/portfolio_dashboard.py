@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 
@@ -52,6 +53,14 @@ from portfolio.pricing import (
     refresh_holding_quotes,
     refresh_usd_krw,
 )
+from portfolio.public_auth import (
+    DEFAULT_PUBLIC_ACCOUNTS_TABLE,
+    PublicAccount,
+    PublicAccountAlreadyExistsError,
+    PublicAccountError,
+    PublicAccountValidationError,
+    SupabasePublicAccountStore,
+)
 from portfolio.storage import (
     PortfolioStoreError,
     build_supabase_store,
@@ -81,6 +90,9 @@ CASH_FX_INPUT_SYNC_KEY = "cash_fx_inline_input_sync"
 INLINE_CASH_KRW_KEY = "cash_fx_inline_cash_krw"
 INLINE_CASH_USD_KEY = "cash_fx_inline_cash_usd"
 INLINE_USD_KRW_KEY = "cash_fx_inline_usd_krw"
+PUBLIC_AUTH_ENV_KEY = "PORTFOLIO_PUBLIC_AUTH"
+PUBLIC_AUTH_SECRET_KEY = "PUBLIC_USER_AUTH"
+PUBLIC_AUTH_TABLE_SECRET_KEY = "PUBLIC_ACCOUNTS_TABLE"
 UNPROTECTED_WARNING = "공개 앱에서 저장소와 직접 입력 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 
 
@@ -154,6 +166,17 @@ def _authenticate_account(account: AccountConfig) -> None:
     _reset_current_portfolio_state(account.default_portfolio)
 
 
+def _authenticate_public_account(account: PublicAccount) -> None:
+    _authenticate_account(
+        AccountConfig(
+            account_id=account.account_id,
+            password="",
+            owner_id=account.owner_id,
+            default_portfolio="main",
+        )
+    )
+
+
 def _logout() -> None:
     st.session_state[AUTHENTICATED_KEY] = False
     for key in (ACCOUNT_ID_KEY, OWNER_ID_KEY, DEFAULT_PORTFOLIO_KEY, AUTO_LOAD_ATTEMPTED_KEY, AUTO_PRICE_REFRESHED_KEY):
@@ -186,6 +209,27 @@ def _read_storage_config():
     except Exception:
         secrets = {}
     return supabase_config_from_secrets(secrets)
+
+
+def _truthy(value: object | None) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _read_public_auth_settings() -> tuple[bool, str]:
+    enabled = _truthy(os.environ.get(PUBLIC_AUTH_ENV_KEY))
+    table_name = DEFAULT_PUBLIC_ACCOUNTS_TABLE
+    try:
+        enabled = enabled or _truthy(st.secrets.get(PUBLIC_AUTH_SECRET_KEY, ""))
+        table_name = str(st.secrets.get(PUBLIC_AUTH_TABLE_SECRET_KEY, table_name) or table_name).strip() or table_name
+    except Exception:
+        pass
+    return enabled, table_name
+
+
+def _build_public_account_store(storage_config, *, table_name: str) -> SupabasePublicAccountStore | None:
+    if not has_supabase_credentials(storage_config):
+        return None
+    return SupabasePublicAccountStore(storage_config, table_name=table_name)
 
 
 def _apply_pending_portfolio_state() -> None:
@@ -269,9 +313,64 @@ def _render_login_form(config: AppSecurityConfig) -> None:
     st.stop()
 
 
-def _render_security_status(config: AppSecurityConfig) -> None:
+def _render_public_auth_gate(storage_config, *, table_name: str) -> None:
+    st.title("포트폴리오 대시보드")
+    try:
+        account_store = _build_public_account_store(storage_config, table_name=table_name)
+    except PublicAccountError as exc:
+        st.error(f"로그인 저장소를 초기화할 수 없습니다: {exc}")
+        st.stop()
+    if account_store is None:
+        st.error("로그인 저장소 설정이 필요합니다. Streamlit Secrets에 SUPABASE_URL과 SUPABASE_SERVICE_ROLE_KEY를 입력하세요.")
+        st.stop()
+
+    login_tab, signup_tab = st.tabs(["로그인", "회원가입"])
+    with login_tab:
+        with st.form("public_login_form"):
+            account_id = st.text_input("아이디", key="public_login_account_id")
+            password = st.text_input("비밀번호", type="password", key="public_login_password")
+            submitted = st.form_submit_button("로그인", type="primary")
+        if submitted:
+            try:
+                account = account_store.verify_account(account_id, password)
+            except (PublicAccountValidationError, PublicAccountError) as exc:
+                st.error(str(exc))
+            else:
+                if account is not None:
+                    _authenticate_public_account(account)
+                    st.rerun()
+                st.error("아이디 또는 비밀번호가 올바르지 않습니다.")
+
+    with signup_tab:
+        with st.form("public_signup_form"):
+            account_id = st.text_input("아이디", key="public_signup_account_id")
+            password = st.text_input("비밀번호", type="password", key="public_signup_password")
+            password_confirm = st.text_input("비밀번호 확인", type="password", key="public_signup_password_confirm")
+            submitted = st.form_submit_button("회원가입", type="primary")
+        if submitted:
+            if password != password_confirm:
+                st.error("비밀번호 확인이 일치하지 않습니다.")
+            else:
+                try:
+                    account = account_store.create_account(account_id, password)
+                except (PublicAccountAlreadyExistsError, PublicAccountValidationError, PublicAccountError) as exc:
+                    st.error(str(exc))
+                else:
+                    _authenticate_public_account(account)
+                    st.rerun()
+    st.stop()
+
+
+def _render_security_status(config: AppSecurityConfig, *, public_auth_enabled: bool = False) -> None:
     with st.sidebar:
         st.subheader("인증 상태")
+        if public_auth_enabled:
+            account_id = st.session_state.get(ACCOUNT_ID_KEY) or "account"
+            st.caption(f"상태: 로그인됨 · {account_id}")
+            if st.button("로그아웃", icon=":material/logout:"):
+                _logout()
+                st.rerun()
+            return
         if not config.has_password:
             st.warning(UNPROTECTED_WARNING)
             return
@@ -667,17 +766,20 @@ st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
 inject_styles()
 _initialize_session_state()
 security_config = _read_security_config()
-if should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
+storage_config = _read_storage_config()
+public_auth_enabled, public_accounts_table = _read_public_auth_settings()
+if public_auth_enabled and not _is_authenticated():
+    _render_public_auth_gate(storage_config, table_name=public_accounts_table)
+if not public_auth_enabled and should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
 
-storage_config = _read_storage_config()
 portfolio_store, history_store, historical_schedule_store = _build_stores(storage_config)
 owner_id = _resolve_owner_id(storage_config)
 _auto_load_account_portfolio(owner_id, portfolio_store)
 _auto_refresh_loaded_prices(owner_id, portfolio_store, history_store)
 _render_sidebar(security_config, owner_id, portfolio_store)
-_render_security_status(security_config)
-if should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
+_render_security_status(security_config, public_auth_enabled=public_auth_enabled)
+if not public_auth_enabled and should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
 metrics = _current_metrics()
 _render_header(security_config, owner_id, portfolio_store, history_store, metrics)
