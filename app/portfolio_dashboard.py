@@ -163,9 +163,9 @@ def _initialize_theme_state() -> None:
     if selected_label in THEME_MODE_BY_LABEL:
         mode = THEME_MODE_BY_LABEL[str(selected_label)]
     else:
+        st.session_state.pop(APP_THEME_CHOICE_KEY, None)
         mode = normalize_theme_mode(st.session_state.get(APP_THEME_KEY, DEFAULT_THEME_MODE))
     st.session_state[APP_THEME_KEY] = mode
-    st.session_state[APP_THEME_CHOICE_KEY] = THEME_LABEL_BY_MODE[mode]
 
 
 def _current_theme_mode() -> str:
@@ -174,15 +174,24 @@ def _current_theme_mode() -> str:
 
 def _render_theme_selector() -> None:
     current_mode = _current_theme_mode()
+    labels = list(THEME_MODE_BY_LABEL.keys())
+    radio_kwargs = {
+        "key": APP_THEME_CHOICE_KEY,
+        "horizontal": True,
+        "label_visibility": "collapsed",
+    }
+    if APP_THEME_CHOICE_KEY in st.session_state:
+        radio_kwargs["index"] = None
+    else:
+        radio_kwargs["index"] = labels.index(THEME_LABEL_BY_MODE[current_mode])
     with st.container(key="app_theme_topbar"):
-        st.radio(
+        selected_label = st.radio(
             "테마",
-            list(THEME_MODE_BY_LABEL.keys()),
-            index=list(THEME_MODE_BY_LABEL).index(THEME_LABEL_BY_MODE[current_mode]),
-            key=APP_THEME_CHOICE_KEY,
-            horizontal=True,
-            label_visibility="collapsed",
+            labels,
+            **radio_kwargs,
         )
+    if selected_label in THEME_MODE_BY_LABEL:
+        st.session_state[APP_THEME_KEY] = THEME_MODE_BY_LABEL[str(selected_label)]
 
 
 def _clean_portfolio_name(value: object) -> str:
