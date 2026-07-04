@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Callable
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from .base import PriceProviderError, ProviderQuote
@@ -37,6 +37,32 @@ def _as_non_negative_float(value: object, field_name: str) -> float:
     return number
 
 
+def _index_date(value: object):
+    try:
+        if hasattr(value, "to_pydatetime"):
+            value = value.to_pydatetime()
+        if isinstance(value, datetime):
+            return value.date()
+        if hasattr(value, "date"):
+            return value.date()
+    except Exception:
+        return None
+    return None
+
+
+def _index_timestamp(value: object) -> datetime | None:
+    try:
+        if hasattr(value, "to_pydatetime"):
+            value = value.to_pydatetime()
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+    except Exception:
+        return None
+    return None
+
+
 def parse_finance_data_reader_price_frame(symbol: object, frame: Any) -> ProviderQuote:
     normalized_symbol = normalize_korea_symbol(symbol)
     if frame is None or not hasattr(frame, "columns"):
@@ -53,6 +79,7 @@ def parse_finance_data_reader_price_frame(symbol: object, frame: Any) -> Provide
         pass
 
     latest_close = _as_non_negative_float(close_series.iloc[-1], "Close")
+    latest_index = close_series.index[-1] if hasattr(close_series, "index") and len(close_series.index) else None
     # FinanceDataReader가 최신 행 하나만 반환하면 전일 종가를 확정할 수 없다.
     # 이 경우 일간 변동을 0으로 표시하도록 previous_close=current_price 정책을 사용한다.
     previous_close = latest_close
@@ -64,6 +91,8 @@ def parse_finance_data_reader_price_frame(symbol: object, frame: Any) -> Provide
         price=latest_close,
         previous_close=previous_close,
         provider=KOREA_PROVIDER_NAME,
+        price_date=_index_date(latest_index),
+        as_of_timestamp=_index_timestamp(latest_index),
     )
 
 

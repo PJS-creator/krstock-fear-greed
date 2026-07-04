@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -16,15 +17,29 @@ class ProviderQuote:
     previous_close: float
     provider: str
     fetched_at: datetime
+    price_date: date | None = None
+    as_of_timestamp: datetime | None = None
 
     @classmethod
-    def now(cls, *, symbol: str, price: float, previous_close: float, provider: str) -> "ProviderQuote":
+    def now(
+        cls,
+        *,
+        symbol: str,
+        price: float,
+        previous_close: float,
+        provider: str,
+        price_date: date | None = None,
+        as_of_timestamp: datetime | None = None,
+    ) -> "ProviderQuote":
+        fetched_at = datetime.now(timezone.utc)
         return cls(
             symbol=symbol,
             price=price,
             previous_close=previous_close,
             provider=provider,
-            fetched_at=datetime.now(timezone.utc),
+            fetched_at=fetched_at,
+            price_date=price_date,
+            as_of_timestamp=as_of_timestamp or fetched_at,
         )
 
 
@@ -52,15 +67,29 @@ class ProviderFxRate:
     rate: float
     provider: str
     fetched_at: datetime
+    rate_date: date | None = None
+    as_of_timestamp: datetime | None = None
 
     @classmethod
-    def now(cls, *, from_currency: str, to_currency: str, rate: float, provider: str) -> "ProviderFxRate":
+    def now(
+        cls,
+        *,
+        from_currency: str,
+        to_currency: str,
+        rate: float,
+        provider: str,
+        rate_date: date | None = None,
+        as_of_timestamp: datetime | None = None,
+    ) -> "ProviderFxRate":
+        fetched_at = datetime.now(timezone.utc)
         return cls(
             from_currency=from_currency.upper(),
             to_currency=to_currency.upper(),
             rate=rate,
             provider=provider,
-            fetched_at=datetime.now(timezone.utc),
+            fetched_at=fetched_at,
+            rate_date=rate_date,
+            as_of_timestamp=as_of_timestamp or fetched_at,
         )
 
 

@@ -245,6 +245,11 @@ def _current_portfolio_state() -> dict[str, object]:
         "cash_krw": st.session_state.get("cash_krw", 0.0),
         "cash_usd": st.session_state.get("cash_usd", 0.0),
         "usd_krw": st.session_state.get("usd_krw", 1380.0),
+        "fx_rate_date": st.session_state.get("fx_rate_date"),
+        "fx_as_of_timestamp": st.session_state.get("fx_as_of_timestamp"),
+        "fx_source": st.session_state.get("fx_source"),
+        "fx_status": st.session_state.get("fx_status"),
+        "fx_error_message": st.session_state.get("fx_error_message"),
     }
 
 
@@ -269,6 +274,11 @@ def _restore_last_saved_state() -> None:
         "cash_krw": float(state.get("cash_krw") or 0.0),
         "cash_usd": float(state.get("cash_usd") or 0.0),
         "usd_krw": float(state.get("usd_krw") or 1380.0),
+        "fx_rate_date": state.get("fx_rate_date"),
+        "fx_as_of_timestamp": state.get("fx_as_of_timestamp"),
+        "fx_source": state.get("fx_source"),
+        "fx_status": state.get("fx_status"),
+        "fx_error_message": state.get("fx_error_message"),
         "mark_clean": True,
     }
 
@@ -285,6 +295,11 @@ def _reset_current_portfolio_state(portfolio_name: str = "main") -> None:
         "usd_krw": 1380.0,
         "fx_status_message": "수동 USD/KRW 환율",
         "fx_fetched_at": None,
+        "fx_rate_date": None,
+        "fx_as_of_timestamp": None,
+        "fx_source": "manual",
+        "fx_status": "manual",
+        "fx_error_message": None,
         "price_update_statuses": [],
         "last_price_refresh_at": None,
         "mark_clean": True,
@@ -405,6 +420,11 @@ def _apply_pending_portfolio_state() -> None:
         "usd_krw",
         "fx_status_message",
         "fx_fetched_at",
+        "fx_rate_date",
+        "fx_as_of_timestamp",
+        "fx_source",
+        "fx_status",
+        "fx_error_message",
         "price_update_statuses",
         "last_price_refresh_at",
     ):
@@ -433,6 +453,11 @@ def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     st.session_state.setdefault("usd_krw", 1380.0)
     st.session_state.setdefault("fx_status_message", "수동 USD/KRW 환율")
     st.session_state.setdefault("fx_fetched_at", None)
+    st.session_state.setdefault("fx_rate_date", None)
+    st.session_state.setdefault("fx_as_of_timestamp", None)
+    st.session_state.setdefault("fx_source", "manual")
+    st.session_state.setdefault("fx_status", "manual")
+    st.session_state.setdefault("fx_error_message", None)
     st.session_state.setdefault("price_update_statuses", [])
     st.session_state.setdefault("last_price_refresh_at", None)
     st.session_state.setdefault(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
@@ -609,6 +634,14 @@ def _current_portfolio_payload():
         cash_usd=st.session_state.cash_usd,
         transactions=st.session_state.get("portfolio_transactions", []),
         cash_ledger=st.session_state.get("cash_ledger_entries", []),
+        fx_metadata={
+            "rate_date": st.session_state.get("fx_rate_date"),
+            "as_of_timestamp": st.session_state.get("fx_as_of_timestamp"),
+            "source": st.session_state.get("fx_source"),
+            "status": st.session_state.get("fx_status"),
+            "error_message": st.session_state.get("fx_error_message"),
+            "fetched_at": st.session_state.get("fx_fetched_at"),
+        },
     )
 
 
@@ -757,6 +790,8 @@ def _fetch_fx_rate(*, public_auth_enabled: bool = False, force_refresh: bool = F
         return None
     except Exception as exc:
         st.session_state.fx_status_message = f"USD/KRW 환율 갱신 실패: {exc}. 기존 수동 환율을 유지했습니다."
+        st.session_state.fx_status = "failed"
+        st.session_state.fx_error_message = str(exc)
         st.error(st.session_state.fx_status_message)
         return None
     return new_rate, status
@@ -766,6 +801,11 @@ def _apply_fx_rate(new_rate, status) -> bool:
     st.session_state.usd_krw = new_rate
     st.session_state.fx_status_message = status.message
     st.session_state.fx_fetched_at = status.fetched_at
+    st.session_state.fx_rate_date = status.rate_date
+    st.session_state.fx_as_of_timestamp = status.as_of_timestamp
+    st.session_state.fx_source = status.source or "manual"
+    st.session_state.fx_status = status.status
+    st.session_state.fx_error_message = status.error_message
     return status.status in {"updated", "cached"}
 
 
@@ -779,6 +819,11 @@ def _refresh_fx(_config: AppSecurityConfig, *, public_auth_enabled: bool = False
         "usd_krw": new_rate,
         "fx_status_message": status.message,
         "fx_fetched_at": status.fetched_at,
+        "fx_rate_date": status.rate_date,
+        "fx_as_of_timestamp": status.as_of_timestamp,
+        "fx_source": status.source or "manual",
+        "fx_status": status.status,
+        "fx_error_message": status.error_message,
     }
     st.rerun()
 
@@ -827,6 +872,11 @@ def _queue_manual_cash_adjustment() -> None:
     if abs(new_rate - current_rate) > 1e-9:
         pending_state["fx_status_message"] = "수동 USD/KRW 환율"
         pending_state["fx_fetched_at"] = None
+        pending_state["fx_rate_date"] = None
+        pending_state["fx_as_of_timestamp"] = None
+        pending_state["fx_source"] = "manual"
+        pending_state["fx_status"] = "manual"
+        pending_state["fx_error_message"] = None
     st.session_state[PENDING_PORTFOLIO_STATE_KEY] = pending_state
     st.rerun()
 
@@ -1067,8 +1117,16 @@ def _render_cash_fx_tools(config: AppSecurityConfig, *, public_auth_enabled: boo
         if st.button("USD/KRW 환율 갱신", icon=":material/currency_exchange:", key="inline_fx_refresh"):
             _refresh_fx(config, public_auth_enabled=public_auth_enabled)
         st.caption(st.session_state.fx_status_message)
-        if st.session_state.fx_fetched_at:
-            st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
+        fx_meta = (
+            f"상태 {st.session_state.get('fx_status') or 'manual'} · "
+            f"기준일 {st.session_state.get('fx_rate_date') or '-'} · "
+            f"기준시각 {format_kst(st.session_state.get('fx_as_of_timestamp'), compact=True)} · "
+            f"조회 {format_kst(st.session_state.get('fx_fetched_at'), compact=True)} · "
+            f"출처 {st.session_state.get('fx_source') or 'manual'}"
+        )
+        st.caption(fx_meta)
+        if st.session_state.get("fx_error_message"):
+            st.warning(f"환율 오류: {st.session_state.fx_error_message}")
     _render_cash_movement_form()
     _render_fx_conversion_form()
     _render_manual_cash_adjustment()

@@ -17,7 +17,16 @@ from app.ui.status import (
 
 def test_price_status_aggregation_and_log_rows():
     statuses = [
-        SimpleNamespace(symbol="MU", market="US", status="updated", fetched_at="2026-06-23T03:00:00+00:00", message="ok"),
+        SimpleNamespace(
+            symbol="MU",
+            market="US",
+            status="updated",
+            fetched_at="2026-06-23T03:00:00+00:00",
+            price_date="2026-06-22",
+            as_of_timestamp="2026-06-23T02:50:00+00:00",
+            source="yfinance",
+            message="ok",
+        ),
         SimpleNamespace(symbol="GOOG", market="US", status="stale", fetched_at=None, message="last price kept"),
         SimpleNamespace(symbol="005930", market="KR", status="cached", fetched_at="2026-06-23T02:59:00+00:00", message="cache"),
     ]
@@ -39,7 +48,10 @@ def test_price_status_aggregation_and_log_rows():
 
     assert rows[0]["종목명"] == "Micron"
     assert rows[0]["조회 시각"] == "06-23 12:00 KST"
-    assert rows[1]["상태"] == "이전 가격"
+    assert rows[0]["가격 기준일"] == "2026-06-22"
+    assert rows[0]["기준시각"] == "06-23 11:50 KST"
+    assert rows[0]["출처"] == "yfinance"
+    assert rows[1]["상태"] == "이전저장값사용"
     assert rows[2]["provider"] == "finance_datareader"
 
 

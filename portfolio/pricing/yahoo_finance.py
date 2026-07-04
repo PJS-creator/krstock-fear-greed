@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import json
 from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -63,6 +64,32 @@ def _select_close_series(frame: Any):
     return frame["Close"]
 
 
+def _index_date(value: object):
+    try:
+        if hasattr(value, "to_pydatetime"):
+            value = value.to_pydatetime()
+        if isinstance(value, datetime):
+            return value.date()
+        if hasattr(value, "date"):
+            return value.date()
+    except Exception:
+        return None
+    return None
+
+
+def _index_timestamp(value: object) -> datetime | None:
+    try:
+        if hasattr(value, "to_pydatetime"):
+            value = value.to_pydatetime()
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+    except Exception:
+        return None
+    return None
+
+
 def parse_yfinance_history_frame(symbol: object, frame: Any) -> ProviderQuote:
     normalized_symbol = normalize_yfinance_symbol(symbol)
     close_series = _select_close_series(frame).dropna()
@@ -74,6 +101,7 @@ def parse_yfinance_history_frame(symbol: object, frame: Any) -> ProviderQuote:
         pass
 
     latest_close = _as_non_negative_float(close_series.iloc[-1], "Close")
+    latest_index = close_series.index[-1] if hasattr(close_series, "index") and len(close_series.index) else None
     previous_close = latest_close
     if len(close_series) >= 2:
         previous_close = _as_non_negative_float(close_series.iloc[-2], "previous Close")
@@ -83,6 +111,8 @@ def parse_yfinance_history_frame(symbol: object, frame: Any) -> ProviderQuote:
         price=latest_close,
         previous_close=previous_close,
         provider=YFINANCE_PROVIDER_NAME,
+        price_date=_index_date(latest_index),
+        as_of_timestamp=_index_timestamp(latest_index),
     )
 
 
@@ -280,6 +310,8 @@ class YFinanceFxProvider:
             to_currency=normalized_to,
             rate=quote.price,
             provider=YFINANCE_PROVIDER_NAME,
+            rate_date=quote.price_date,
+            as_of_timestamp=quote.as_of_timestamp,
         )
 
 
@@ -295,11 +327,12 @@ def parse_yahoo_chart_usd_krw_response(payload: Mapping[str, Any]) -> ProviderFx
             raise PriceProviderError(f"Yahoo chart 응답 오류: {error}")
         result = chart["result"][0]
         closes = result["indicators"]["quote"][0]["close"]
+        timestamps = result.get("timestamp") or []
     except (KeyError, IndexError, TypeError) as exc:
         raise PriceProviderError("Yahoo chart USD/KRW 응답 형식이 올바르지 않습니다.") from exc
 
-    values = []
-    for value in closes:
+    values: list[tuple[float, object | None]] = []
+    for index, value in enumerate(closes):
         if value is None:
             continue
         try:
@@ -307,10 +340,25 @@ def parse_yahoo_chart_usd_krw_response(payload: Mapping[str, Any]) -> ProviderFx
         except (TypeError, ValueError):
             continue
         if math.isfinite(number) and number > 0:
-            values.append(number)
+            timestamp = timestamps[index] if index < len(timestamps) else None
+            values.append((number, timestamp))
     if not values:
         raise PriceProviderError("Yahoo chart USD/KRW 응답에 유효한 환율 값이 없습니다.")
-    return ProviderFxRate.now(from_currency="USD", to_currency="KRW", rate=values[-1], provider=YAHOO_CHART_FX_PROVIDER_NAME)
+    rate, timestamp = values[-1]
+    as_of_timestamp = None
+    if timestamp is not None:
+        try:
+            as_of_timestamp = datetime.fromtimestamp(float(timestamp), tz=timezone.utc)
+        except (TypeError, ValueError, OSError):
+            as_of_timestamp = None
+    return ProviderFxRate.now(
+        from_currency="USD",
+        to_currency="KRW",
+        rate=rate,
+        provider=YAHOO_CHART_FX_PROVIDER_NAME,
+        rate_date=as_of_timestamp.date() if as_of_timestamp is not None else None,
+        as_of_timestamp=as_of_timestamp,
+    )
 
 
 def parse_open_er_api_usd_krw_response(payload: Mapping[str, Any]) -> ProviderFxRate:
