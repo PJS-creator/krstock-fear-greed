@@ -76,6 +76,52 @@ def render_history_tab(
         )
 
 
+def render_actual_history_section(
+    *,
+    owner_id: str | None,
+    portfolio_name: str,
+    history_store: PortfolioHistoryStore | None,
+) -> None:
+    _render_actual_history(owner_id=owner_id, portfolio_name=portfolio_name, history_store=history_store)
+
+
+def render_risk_history_section(
+    *,
+    owner_id: str | None,
+    portfolio_name: str,
+    history_store: PortfolioHistoryStore | None,
+) -> None:
+    records = None
+    load_error = None
+    if history_store is not None and owner_id is not None:
+        try:
+            records = _list_history_cached(history_store, owner_id, portfolio_name, "all")
+        except PortfolioHistoryStoreError as exc:
+            load_error = str(exc)
+    render_risk_analysis(history_records=records, load_error=load_error)
+
+
+def render_historical_reconstruction_section(
+    *,
+    owner_id: str | None,
+    historical_schedule_store: HistoricalScheduleStore | None,
+    current_holdings_rows: list[dict[str, object]] | None = None,
+    current_cash_krw: float = 0.0,
+    current_cash_usd: float = 0.0,
+    current_usd_krw: float = 1380.0,
+    is_authenticated: bool = False,
+) -> None:
+    render_historical_reconstruction_tab(
+        owner_id=owner_id,
+        schedule_store=historical_schedule_store,
+        current_holdings_rows=list(current_holdings_rows or []),
+        current_cash_krw=current_cash_krw,
+        current_cash_usd=current_cash_usd,
+        current_usd_krw=current_usd_krw,
+        is_authenticated=is_authenticated,
+    )
+
+
 def _render_actual_history(
     *,
     owner_id: str | None,

@@ -55,7 +55,7 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
 
     assert not at.exception
     text = _app_text(at)
-    for label in ("총괄현황", "세부내역", "사용자 입력", "자산추이", "성과분석", "리스크분석", "리밸런싱", "저장 관리"):
+    for label in ("총괄현황", "분석", "매매일지", "사용자 입력", "수익", "리스크", "리밸런싱", "저장 관리"):
         assert label in text
     for label in ("다크", "라이트"):
         assert label in text
@@ -63,7 +63,7 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
     for label in ("현금·입출금·환율", "입출금 입력", "환전 입력", "현금 원장", "USD/KRW 환율 갱신", "자산 입력", "표준 거래 입력", "상세 옵션", "매입/매도 기준 자산 증감"):
         assert label in text
     assert "가격·환율 갱신" in text
-    assert "아직 포트폴리오 데이터가 없습니다." in text
+    assert "아직 포트폴리오가 없습니다." in text
     assert RAW_ISO_RE.search(text) is None
 
 
@@ -97,8 +97,10 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert ".st-key-app_theme_topbar" in source
     assert ".st-key-public_section_tabs" in source
     assert ".st-key-public_input_tabs" in source
+    assert ".st-key-analysis_section_tabs" in source
     assert "grid-template-columns: repeat(5, minmax(0, 1fr));" in source
     assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in source
+    assert "grid-template-columns: repeat(6, minmax(0, 1fr));" in source
     assert "border-bottom: 1px solid var(--app-border);" in source
     assert "label:has(input:checked)::after" in source
 
