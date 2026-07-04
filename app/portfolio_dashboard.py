@@ -15,6 +15,7 @@ def _ensure_project_root_on_path() -> None:
 
 _ensure_project_root_on_path()
 
+import pandas as pd
 import streamlit as st
 
 SUPPORTED_PYTHON_RUNTIMES = {(3, 11), (3, 12)}
@@ -36,7 +37,7 @@ def _stop_if_unsupported_python_runtime() -> None:
 _stop_if_unsupported_python_runtime()
 
 from app.ui.components import render_price_update_log
-from app.ui.formatters import format_kst, format_relative_time
+from app.ui.formatters import format_kst, format_number, format_price, format_relative_time, full_krw
 from app.ui.holdings import render_holdings_table
 from app.ui.history import render_history_tab
 from app.ui.investment_summary_card import render_investment_summary_card
@@ -68,6 +69,8 @@ from portfolio.cash_ledger import (
     calculate_cash_balances,
     create_balance_adjustment_entries,
     create_cash_movement_entry,
+    create_fx_conversion_entries,
+    normalize_cash_ledger_rows,
     serialize_cash_ledger_rows,
 )
 from portfolio.pricing import (
@@ -121,6 +124,8 @@ CASH_FX_INPUT_SYNC_KEY = "cash_fx_inline_input_sync"
 INLINE_CASH_KRW_KEY = "cash_fx_inline_cash_krw"
 INLINE_CASH_USD_KEY = "cash_fx_inline_cash_usd"
 INLINE_USD_KRW_KEY = "cash_fx_inline_usd_krw"
+CASH_LEDGER_STATUS_KEY = "cash_ledger_status_message"
+ALLOW_NEGATIVE_CASH_KEY = "allow_negative_cash_balance"
 PUBLIC_AUTH_ENV_KEY = "PORTFOLIO_PUBLIC_AUTH"
 PUBLIC_AUTH_SECRET_KEY = "PUBLIC_USER_AUTH"
 UNPROTECTED_WARNING = "공개 앱에서 저장소와 직접 입력 보호를 위해 APP_PASSWORD 설정을 권장합니다."
@@ -146,7 +151,7 @@ PUBLIC_SECTION_LEGACY_MAP = {
 }
 PUBLIC_HOLDINGS_VIEW_LABELS = {
     "holdings": "보유 현황",
-    "cash_fx": "현금·환율",
+    "cash_fx": "현금·입출금·환율",
     "transactions": "거래 입력",
 }
 PUBLIC_HOLDINGS_VIEW_LEGACY_MAP = {
@@ -154,6 +159,7 @@ PUBLIC_HOLDINGS_VIEW_LEGACY_MAP = {
     "보유 현황": "holdings",
     "현금/환율": "cash_fx",
     "현금·환율": "cash_fx",
+    "현금·입출금·환율": "cash_fx",
     "거래 입력": "transactions",
 }
 CASH_MOVEMENT_EVENT_BY_LABEL = {
@@ -161,6 +167,21 @@ CASH_MOVEMENT_EVENT_BY_LABEL = {
     "출금": "withdrawal",
     "배당": "dividend",
     "이자": "interest",
+    "수동 조정": "manual_adjustment",
+}
+CASH_LEDGER_EVENT_LABELS = {
+    "opening_balance": "시작 잔고",
+    "deposit": "입금",
+    "withdrawal": "출금",
+    "buy_settlement": "매수 정산",
+    "sell_settlement": "매도 정산",
+    "dividend": "배당",
+    "interest": "이자",
+    "fee": "수수료",
+    "tax": "세금",
+    "fx_conversion_in": "환전 입금",
+    "fx_conversion_out": "환전 출금",
+    "manual_adjustment": "수동 조정",
 }
 
 
@@ -415,6 +436,7 @@ def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     st.session_state.setdefault("price_update_statuses", [])
     st.session_state.setdefault("last_price_refresh_at", None)
     st.session_state.setdefault(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
+    st.session_state.setdefault(ALLOW_NEGATIVE_CASH_KEY, False)
     if public_auth_enabled:
         st.session_state[PORTFOLIO_NAME_KEY] = PUBLIC_PORTFOLIO_NAME
         st.session_state[PORTFOLIO_NAME_INPUT_KEY] = PUBLIC_PORTFOLIO_NAME
@@ -550,7 +572,27 @@ def _resolve_owner_id(storage_config) -> str | None:
     return None
 
 
+def _cash_balances_from_ledger_or_state() -> dict[str, float]:
+    ledger = list(st.session_state.get("cash_ledger_entries") or [])
+    if not ledger:
+        return {
+            "KRW": float(st.session_state.get("cash_krw") or 0.0),
+            "USD": float(st.session_state.get("cash_usd") or 0.0),
+        }
+    balances = calculate_cash_balances(ledger)
+    return {"KRW": float(balances["KRW"]), "USD": float(balances["USD"])}
+
+
+def _sync_cash_balances_from_ledger() -> None:
+    if not st.session_state.get("cash_ledger_entries"):
+        return
+    balances = _cash_balances_from_ledger_or_state()
+    st.session_state.cash_krw = balances["KRW"]
+    st.session_state.cash_usd = balances["USD"]
+
+
 def _current_metrics():
+    _sync_cash_balances_from_ledger()
     return build_portfolio_metrics(
         st.session_state.holdings_rows,
         cash_krw=st.session_state.cash_krw,
@@ -761,7 +803,7 @@ def _sync_inline_cash_fx_inputs() -> None:
     st.session_state[CASH_FX_INPUT_SYNC_KEY] = signature
 
 
-def _queue_inline_cash_fx_update() -> None:
+def _queue_manual_cash_adjustment() -> None:
     current_rate = float(st.session_state.get("usd_krw") or 1380.0)
     new_rate = float(st.session_state.get(INLINE_USD_KRW_KEY) or current_rate)
     current_ledger = list(st.session_state.get("cash_ledger_entries") or [])
@@ -789,13 +831,17 @@ def _queue_inline_cash_fx_update() -> None:
     st.rerun()
 
 
-def _queue_cash_ledger_rows(rows: list[dict[str, object]]) -> None:
+def _queue_cash_ledger_rows(rows: list[dict[str, object]], *, allow_negative: bool | None = None) -> None:
     next_ledger = serialize_cash_ledger_rows(list(st.session_state.get("cash_ledger_entries") or []) + rows)
     cash_balances = calculate_cash_balances(next_ledger)
     negative_balances = [currency for currency, amount in cash_balances.items() if amount < 0]
-    if negative_balances:
+    allow_negative = bool(st.session_state.get(ALLOW_NEGATIVE_CASH_KEY, False)) if allow_negative is None else allow_negative
+    if negative_balances and not allow_negative:
         currencies = ", ".join(negative_balances)
         raise ValueError(f"{currencies} 현금 잔고가 부족합니다.")
+    if negative_balances and allow_negative:
+        currencies = ", ".join(negative_balances)
+        st.session_state[CASH_LEDGER_STATUS_KEY] = f"주의: {currencies} 현금 잔고가 음수입니다."
     st.session_state[PENDING_PORTFOLIO_STATE_KEY] = {
         "cash_ledger_entries": next_ledger,
         "cash_krw": float(cash_balances["KRW"]),
@@ -804,24 +850,58 @@ def _queue_cash_ledger_rows(rows: list[dict[str, object]]) -> None:
     st.rerun()
 
 
+def _render_cash_balance_cards() -> None:
+    balances = _cash_balances_from_ledger_or_state()
+    usd_krw = float(st.session_state.get("usd_krw") or 0.0)
+    total_cash_krw = balances["KRW"] + balances["USD"] * usd_krw
+    cols = st.columns(4)
+    cols[0].metric("원화 현금", full_krw(balances["KRW"]))
+    cols[1].metric("달러 현금", format_price(balances["USD"], "USD"))
+    cols[2].metric("USD/KRW 환율", f"{format_number(usd_krw, digits=2, trim=True)}원")
+    cols[3].metric("KRW 환산 총현금", full_krw(total_cash_krw))
+
+
+def _render_negative_cash_options() -> None:
+    with st.expander("고급 설정", expanded=False):
+        st.checkbox(
+            "현금 부족이어도 저장 허용",
+            key=ALLOW_NEGATIVE_CASH_KEY,
+            help="기본값은 음수 현금을 차단합니다. 신용거래, 미정산 현금처럼 음수가 필요한 경우에만 켜세요.",
+        )
+        if st.session_state.get(ALLOW_NEGATIVE_CASH_KEY):
+            st.warning("음수 현금 저장을 허용했습니다. 총자산과 현금 비중이 실제 계좌와 달라질 수 있습니다.")
+
+
 def _render_cash_movement_form() -> None:
     st.divider()
-    st.caption("입출금 기록")
+    st.subheader("입출금 입력")
     with st.form("cash_movement_form"):
-        col1, col2, col3, col4 = st.columns([1.0, 1.0, 1.3, 1.2])
+        col1, col2, col3, col4 = st.columns([1.0, 1.0, 1.3, 1.2], gap="small")
         event_label = col1.selectbox("구분", list(CASH_MOVEMENT_EVENT_BY_LABEL.keys()), help="현금 증가/감소 원인을 선택합니다.")
         currency = col2.selectbox("통화", ["KRW", "USD"], help="원화 현금 또는 달러 현금입니다.")
-        amount = col3.number_input("금액", min_value=0.0, step=1.0, format="%.2f", help="출금은 양수로 입력하면 원장에서 자동으로 음수 처리합니다.")
+        amount = col3.number_input(
+            "금액",
+            value=0.0,
+            step=1.0,
+            format="%.2f",
+            help="입금/출금/배당/이자는 양수로 입력합니다. 수동 조정은 음수 입력도 가능합니다.",
+        )
         event_date = col4.date_input("일자", value=date.today(), help="현금이 실제로 들어오거나 나간 날짜입니다.")
         memo = st.text_input("메모", placeholder="선택 입력")
-        submitted = st.form_submit_button("원장 추가", type="primary")
+        submitted = st.form_submit_button("입출금 저장", type="primary")
     if not submitted:
         return
-    if amount <= 0:
-        st.error("금액은 0보다 커야 합니다.")
-        return
     event_type = CASH_MOVEMENT_EVENT_BY_LABEL[event_label]
-    signed_amount = -amount if event_type == "withdrawal" else amount
+    if event_type == "manual_adjustment":
+        signed_amount = amount
+        if abs(signed_amount) <= 1e-12:
+            st.error("수동 조정 금액은 0이 아니어야 합니다.")
+            return
+    else:
+        if amount <= 0:
+            st.error("금액은 0보다 커야 합니다.")
+            return
+        signed_amount = -amount if event_type == "withdrawal" else amount
     try:
         _queue_cash_ledger_rows(
             [
@@ -839,23 +919,161 @@ def _render_cash_movement_form() -> None:
         st.error(f"현금 원장을 반영할 수 없습니다: {exc}")
 
 
-def _render_cash_fx_tools(config: AppSecurityConfig, *, public_auth_enabled: bool = False) -> None:
-    _sync_inline_cash_fx_inputs()
-    with st.expander("현금 및 환율", expanded=True):
+def _render_fx_conversion_form() -> None:
+    st.subheader("환전 입력")
+    with st.form("fx_conversion_form"):
+        col1, col2, col3, col4, col5, col6 = st.columns([1.0, 1.0, 1.25, 1.25, 1.0, 1.1], gap="small")
+        from_currency = col1.selectbox("From 통화", ["KRW", "USD"], key="fx_from_currency")
+        to_currency = col2.selectbox("To 통화", ["USD", "KRW"], key="fx_to_currency")
+        from_amount = col3.number_input("From 금액", min_value=0.0, step=1.0, format="%.2f")
+        fx_rate = col4.number_input("적용 환율", min_value=0.01, step=1.0, value=float(st.session_state.get("usd_krw") or 1380.0), format="%.2f")
+        fee = col5.number_input("수수료", min_value=0.0, step=1.0, format="%.2f")
+        event_date = col6.date_input("날짜", value=date.today(), key="fx_conversion_date")
+        memo = st.text_input("환전 메모", placeholder="선택 입력")
+        submitted = st.form_submit_button("환전 저장", type="primary")
+    if not submitted:
+        return
+    try:
+        _queue_cash_ledger_rows(
+            create_fx_conversion_entries(
+                from_currency=from_currency,
+                to_currency=to_currency,
+                from_amount=from_amount,
+                fx_rate_to_krw=fx_rate,
+                fee=fee,
+                event_date=event_date,
+                portfolio_id=_current_portfolio_name(),
+                memo=memo or None,
+            )
+        )
+    except ValueError as exc:
+        st.error(f"환전을 반영할 수 없습니다: {exc}")
+
+
+def _render_manual_cash_adjustment() -> None:
+    with st.expander("고급: 수동 현금 조정", expanded=False):
+        st.caption("목표 현금 잔고를 입력하면 현재 원장 합계와의 차이만 manual_adjustment로 추가합니다.")
         with st.form("inline_cash_fx_form"):
             col1, col2, col3 = st.columns(3)
-            col1.number_input("원화 현금", min_value=0.0, step=100000.0, key=INLINE_CASH_KRW_KEY)
-            col2.number_input("달러 현금", min_value=0.0, step=100.0, key=INLINE_CASH_USD_KEY)
+            col1.number_input("목표 원화 현금", step=100000.0, key=INLINE_CASH_KRW_KEY)
+            col2.number_input("목표 달러 현금", step=100.0, key=INLINE_CASH_USD_KEY)
             col3.number_input("USD/KRW 환율", min_value=0.01, step=1.0, key=INLINE_USD_KRW_KEY)
-            submitted = st.form_submit_button("현금/환율 적용", type="primary")
+            submitted = st.form_submit_button("현금 조정/환율 적용", type="primary")
         if submitted:
-            _queue_inline_cash_fx_update()
+            _queue_manual_cash_adjustment()
+
+
+def _ledger_display_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    display_rows = []
+    for index, row in enumerate(rows, start=1):
+        amount = float(row.get("amount") or 0.0)
+        currency = str(row.get("currency") or "")
+        display_rows.append(
+            {
+                "선택": index,
+                "날짜": row.get("event_date") or "",
+                "구분": CASH_LEDGER_EVENT_LABELS.get(str(row.get("event_type")), str(row.get("event_type") or "")),
+                "통화": currency,
+                "금액": format_price(amount, currency),
+                "연결 거래": row.get("linked_transaction_id") or "-",
+                "메모": row.get("memo") or "",
+                "생성시각": format_kst(row.get("created_at"), compact=True) if row.get("created_at") else "-",
+            }
+        )
+    return display_rows
+
+
+def _render_cash_ledger_table() -> None:
+    st.subheader("현금 원장")
+    try:
+        ledger_rows = normalize_cash_ledger_rows(st.session_state.get("cash_ledger_entries", []))
+    except ValueError as exc:
+        st.error(f"현금 원장을 표시할 수 없습니다: {exc}")
+        return
+    if not ledger_rows:
+        st.info("입출금, 환전, 매입/매도 거래를 저장하면 현금 원장이 표시됩니다.")
+        return
+
+    filter_cols = st.columns([1.0, 1.4, 1.2, 1.2], gap="small")
+    currency_filter = filter_cols[0].selectbox("통화", ["전체", "KRW", "USD"], key="cash_ledger_filter_currency")
+    event_options = ["전체"] + list(CASH_LEDGER_EVENT_LABELS.values())
+    event_filter = filter_cols[1].selectbox("구분", event_options, key="cash_ledger_filter_event")
+    min_date = min(date.fromisoformat(str(row["event_date"])) for row in ledger_rows)
+    max_date = max(date.fromisoformat(str(row["event_date"])) for row in ledger_rows)
+    start_date = filter_cols[2].date_input("시작일", value=min_date, key="cash_ledger_filter_start")
+    end_date = filter_cols[3].date_input("종료일", value=max_date, key="cash_ledger_filter_end")
+
+    filtered_rows = []
+    for row in ledger_rows:
+        row_date = date.fromisoformat(str(row["event_date"]))
+        row_label = CASH_LEDGER_EVENT_LABELS.get(str(row.get("event_type")), str(row.get("event_type") or ""))
+        if currency_filter != "전체" and row.get("currency") != currency_filter:
+            continue
+        if event_filter != "전체" and row_label != event_filter:
+            continue
+        if row_date < start_date or row_date > end_date:
+            continue
+        filtered_rows.append(row)
+
+    st.dataframe(
+        pd.DataFrame(_ledger_display_rows(filtered_rows)),
+        hide_index=True,
+        width="stretch",
+    )
+
+    with st.expander("원장 취소 조정", expanded=False):
+        st.caption("원장 row를 직접 삭제하지 않고, 선택 항목의 반대 금액을 수동 조정으로 추가합니다.")
+        if not filtered_rows:
+            st.info("취소할 원장 항목이 없습니다.")
+            return
+        labels = [
+            f"{index}. {row['event_date']} · {CASH_LEDGER_EVENT_LABELS.get(str(row['event_type']), row['event_type'])} · "
+            f"{format_price(float(row['amount']), row['currency'])}"
+            for index, row in enumerate(filtered_rows, start=1)
+        ]
+        with st.form("cash_ledger_cancel_form"):
+            selected_label = st.selectbox("취소할 항목", labels)
+            cancel_date = st.date_input("취소 일자", value=date.today(), key="cash_ledger_cancel_date")
+            memo = st.text_input("취소 메모", value="원장 취소 조정")
+            submitted = st.form_submit_button("취소 조정 추가")
+        if submitted:
+            selected_row = filtered_rows[labels.index(selected_label)]
+            try:
+                _queue_cash_ledger_rows(
+                    [
+                        create_cash_movement_entry(
+                            event_type="manual_adjustment",
+                            currency=str(selected_row["currency"]),
+                            amount=-(selected_row["amount"]),
+                            event_date=cancel_date,
+                            portfolio_id=_current_portfolio_name(),
+                            memo=memo,
+                        )
+                    ]
+                )
+            except ValueError as exc:
+                st.error(f"취소 조정을 추가할 수 없습니다: {exc}")
+
+
+def _render_cash_fx_tools(config: AppSecurityConfig, *, public_auth_enabled: bool = False) -> None:
+    _sync_inline_cash_fx_inputs()
+    _sync_cash_balances_from_ledger()
+    st.subheader("현금·입출금·환율")
+    status_message = st.session_state.pop(CASH_LEDGER_STATUS_KEY, None)
+    if status_message:
+        st.warning(status_message)
+    _render_cash_balance_cards()
+    with st.expander("환율", expanded=True):
         if st.button("USD/KRW 환율 갱신", icon=":material/currency_exchange:", key="inline_fx_refresh"):
             _refresh_fx(config, public_auth_enabled=public_auth_enabled)
         st.caption(st.session_state.fx_status_message)
         if st.session_state.fx_fetched_at:
             st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
-        _render_cash_movement_form()
+    _render_cash_movement_form()
+    _render_fx_conversion_form()
+    _render_manual_cash_adjustment()
+    _render_negative_cash_options()
+    _render_cash_ledger_table()
 
 
 def _load_portfolio_record_now(record) -> None:

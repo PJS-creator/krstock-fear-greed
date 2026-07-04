@@ -7,9 +7,11 @@ import streamlit as st
 
 from portfolio.symbols import load_korea_listing_records
 from portfolio.cash_ledger import (
+    TRADE_SETTLEMENT_EVENT_TYPES,
     calculate_cash_balances,
     create_cash_ledger_entries_for_trade,
     create_opening_balance_entries,
+    normalize_cash_ledger_rows,
     serialize_cash_ledger_rows,
 )
 from portfolio.holdings import normalize_holding_rows
@@ -38,6 +40,8 @@ TRANSACTION_MESSAGE_KEY = "transaction_message"
 QUICK_TRANSACTION_COLUMNS = ["transaction_type", "ticker_or_name", "unit_price", "quantity", "occurred_at"]
 DIRECT_HOLDING_OPTION = "직접 입력"
 AUTO_CURRENCY_OPTION = "시장 기준 자동"
+ALLOW_NEGATIVE_CASH_KEY = "allow_negative_cash_balance"
+TRANSACTION_LEDGER_EVENT_TYPES = TRADE_SETTLEMENT_EVENT_TYPES
 
 
 @st.cache_data(ttl=60 * 60 * 12, show_spinner=False)
@@ -166,22 +170,37 @@ def _rebuild_holdings_from_transactions(transactions: list[dict[str, object]]) -
     )
 
 
+def _negative_cash_allowed() -> bool:
+    return bool(st.session_state.get(ALLOW_NEGATIVE_CASH_KEY, False))
+
+
+def _reject_negative_cash_balances(cash_balances: dict[str, object]) -> None:
+    if _negative_cash_allowed():
+        return
+    negative_balances = [currency for currency, amount in cash_balances.items() if amount < 0]
+    if negative_balances:
+        currencies = ", ".join(negative_balances)
+        raise ValueError(f"{currencies} 현금 잔고가 부족합니다. 현금·입출금·환율에서 입금 또는 시작 현금을 먼저 입력하세요.")
+
+
+def _opening_entries_if_needed(current_ledger: list[dict[str, object]], normalized_transactions: list[dict[str, object]]) -> list[dict[str, object]]:
+    if current_ledger or not normalized_transactions:
+        return []
+    first_trade_date = str(normalized_transactions[0]["occurred_at"])[:10]
+    return create_opening_balance_entries(
+        {
+            "KRW": st.session_state.get("cash_krw", 0.0),
+            "USD": st.session_state.get("cash_usd", 0.0),
+        },
+        event_date=first_trade_date,
+        portfolio_id=str(st.session_state.get("portfolio_name") or "main"),
+    )
+
+
 def _cash_ledger_for_new_transactions(new_transactions: list[dict[str, object]]) -> tuple[list[dict[str, object]], dict[str, object]]:
     current_ledger = list(st.session_state.get("cash_ledger_entries") or [])
     normalized_transactions = normalize_transaction_rows(new_transactions)
-    additions: list[dict[str, object]] = []
-    if not current_ledger and normalized_transactions:
-        first_trade_date = str(normalized_transactions[0]["occurred_at"])[:10]
-        additions.extend(
-            create_opening_balance_entries(
-                {
-                    "KRW": st.session_state.get("cash_krw", 0.0),
-                    "USD": st.session_state.get("cash_usd", 0.0),
-                },
-                event_date=first_trade_date,
-                portfolio_id=str(st.session_state.get("portfolio_name") or "main"),
-            )
-        )
+    additions = _opening_entries_if_needed(current_ledger, normalized_transactions)
     for transaction in normalized_transactions:
         additions.extend(
             create_cash_ledger_entries_for_trade(
@@ -191,10 +210,29 @@ def _cash_ledger_for_new_transactions(new_transactions: list[dict[str, object]])
         )
     next_ledger = serialize_cash_ledger_rows(current_ledger + additions)
     cash_balances = calculate_cash_balances(next_ledger)
-    negative_balances = [currency for currency, amount in cash_balances.items() if amount < 0]
-    if negative_balances:
-        currencies = ", ".join(negative_balances)
-        raise ValueError(f"{currencies} 현금 잔고가 부족합니다. 현금·환율에서 입금 또는 시작 현금을 먼저 입력하세요.")
+    _reject_negative_cash_balances(cash_balances)
+    return next_ledger, cash_balances
+
+
+def _cash_ledger_for_all_transactions(transactions: list[dict[str, object]]) -> tuple[list[dict[str, object]], dict[str, object]]:
+    normalized_transactions = normalize_transaction_rows(transactions)
+    current_ledger = normalize_cash_ledger_rows(st.session_state.get("cash_ledger_entries", []))
+    preserved_ledger = [
+        row
+        for row in current_ledger
+        if str(row.get("event_type")) not in TRANSACTION_LEDGER_EVENT_TYPES
+    ]
+    additions = _opening_entries_if_needed(preserved_ledger, normalized_transactions)
+    for transaction in normalized_transactions:
+        additions.extend(
+            create_cash_ledger_entries_for_trade(
+                transaction,
+                portfolio_id=str(st.session_state.get("portfolio_name") or "main"),
+            )
+        )
+    next_ledger = serialize_cash_ledger_rows(preserved_ledger + additions)
+    cash_balances = calculate_cash_balances(next_ledger)
+    _reject_negative_cash_balances(cash_balances)
     return next_ledger, cash_balances
 
 
@@ -489,8 +527,13 @@ def _render_transaction_ledger() -> None:
         )
         if st.button("거래내역 수정 적용"):
             try:
-                _rebuild_holdings_from_transactions(edited.to_dict("records"))
-                _set_message("수정한 거래내역을 반영했습니다.")
+                edited_transactions = edited.to_dict("records")
+                next_ledger, cash_balances = _cash_ledger_for_all_transactions(edited_transactions)
+                _rebuild_holdings_from_transactions(edited_transactions)
+                st.session_state.cash_ledger_entries = next_ledger
+                st.session_state.cash_krw = float(cash_balances["KRW"])
+                st.session_state.cash_usd = float(cash_balances["USD"])
+                _set_message("수정한 거래내역과 현금 원장을 반영했습니다.")
                 st.rerun()
             except ValueError as exc:
                 st.error(_format_transaction_error(exc))
