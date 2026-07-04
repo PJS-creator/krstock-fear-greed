@@ -239,22 +239,26 @@ Potential issues:
 
 ## target_allocations 저장 원천 분석
 
-현재 authoritative source of truth는 `portfolio_snapshots.payload_json` 안의 `target_allocations` 필드이다.
+현재 source of truth 우선순위는 `target_allocations` 테이블 우선, `portfolio_snapshots.payload_json.target_allocations` fallback이다.
 
 Evidence:
 
 - `app/portfolio_dashboard.py` passes `st.session_state["target_allocations"]` to `serialize_portfolio_payload()`.
 - `_auto_save_public_portfolio()` persists the full payload through `PortfolioStore.save_portfolio()`.
-- `queue_portfolio_record_load()` restores `target_allocations` from payload.
+- `portfolio/storage/target_allocations.py` defines `SupabaseTargetAllocationStore` and table-first helpers.
+- `queue_portfolio_record_load()` now calls `load_target_allocations_prefer_table()` so accessible table rows override payload rows.
+- If the table is accessible but empty and payload rows exist, the helper backfills table rows from the payload.
+- If table access fails because the migration is missing or RLS blocks access, payload rows remain the fallback without breaking app load.
 - `app/ui/rebalancing.py` `on_save` only updates `st.session_state["target_allocations"]`.
-- `docs/supabase_migration_v5_target_allocations.sql` creates a separate `target_allocations` table with RLS, but no app store currently reads/writes that table.
+- `_persist_current_portfolio()` and private `render_storage_tools()` call `save_target_allocations_if_available()` after snapshot save.
+- `docs/supabase_migration_v5_target_allocations.sql` creates the additive table with `user_id = auth.uid()` RLS.
 
 Decision for current stabilization:
 
-- Do not add a new destructive or partially wired storage path.
-- Keep `portfolio_snapshots.payload_json` as the app source of truth for now.
-- Treat `target_allocations` table migration as additive future storage support.
-- Improve docs and UI to make payload fallback implicit and stable.
+- Use `target_allocations` table when it is present and accessible through the logged-in user's RLS policy.
+- Preserve `portfolio_snapshots.payload_json.target_allocations` as the compatibility fallback and migration bridge.
+- Do not show fallback debug details in the public UI; users only need stable save/restore behavior.
+- Keep all migration behavior additive and non-destructive.
 
 ## 우선순위별 수정 계획
 
@@ -310,7 +314,7 @@ Decision for current stabilization:
 - 온보딩은 no-data에서만 크게 보이고, partial data에서는 다음 단계 안내로 축소했다.
 - 차트 공통 sanitization/all-zero guard를 추가하고 실제 기록, 성과분석, 리스크분석에 적용했다.
 - 리밸런싱은 총자산 0원/no-data에서 editor 대신 명확한 안내를 표시한다.
-- 리밸런싱 target allocation은 현재 `portfolio_snapshots.payload_json` source of truth를 유지하며 저장/로드 회귀 테스트를 추가했다.
+- 리밸런싱 target allocation은 `target_allocations` 테이블 우선, snapshot payload fallback 방식으로 저장/로드되며 회귀 테스트를 추가했다.
 - 빈 포트폴리오에서 상단 가격·환율 갱신 버튼이 외부 가격/환율 조회를 시작하지 않도록 guard를 추가했다.
 - 가격·환율 갱신 중복 클릭 방지를 위한 `price_refresh_in_progress` session key와 spinner wrapper를 추가했다.
 - 라이트 모드 table/data_editor readability를 CSS token 기반으로 보강했다.
@@ -367,6 +371,6 @@ Decision for current stabilization:
 
 - Streamlit native `data_editor` theme may still follow `.streamlit/config.toml` dark base in app light mode.
 - HTML-heavy summary card has the largest light/dark contrast risk.
-- A separate target allocation table exists but app storage still uses snapshot payload, so future table integration must be deliberate.
+- `target_allocations` table integration now exists, but live Supabase RLS behavior still needs A/B account manual QA in the deployed project.
 - `historical_reconstruction.py`의 세부 editor와 대량 조회 흐름은 별도 UX/performance pass가 필요하다.
 - 실제 Streamlit Cloud의 브라우저/권한별 `Manage app` 노출은 앱 코드가 아니라 workspace 권한과 로그인 상태에 따라 달라지므로 수동 QA가 필요하다.

@@ -2,7 +2,23 @@ import pytest
 
 from app.ui.rebalancing import rebalancing_empty_result_message
 from portfolio.rebalancing import is_target_weight_sum_valid, serialize_target_allocations, target_weight_sum
-from portfolio.storage import MemoryPortfolioStore, deserialize_portfolio_payload_v2, serialize_portfolio_payload
+from portfolio.storage import (
+    MemoryPortfolioStore,
+    MemoryTargetAllocationStore,
+    PortfolioStoreError,
+    deserialize_portfolio_payload_v2,
+    load_target_allocations_prefer_table,
+    save_target_allocations_if_available,
+    serialize_portfolio_payload,
+)
+
+
+class FailingTargetAllocationStore:
+    def list_target_allocations(self, user_id, portfolio_id):
+        raise PortfolioStoreError("target_allocations unavailable")
+
+    def replace_target_allocations(self, user_id, portfolio_id, rows):
+        raise PortfolioStoreError("target_allocations unavailable")
 
 
 def test_target_allocations_round_trip_through_snapshot_payload_source_of_truth():
@@ -36,6 +52,36 @@ def test_target_allocations_payload_storage_is_owner_scoped():
 
     assert deserialize_portfolio_payload_v2(store.get_portfolio("user-a", "main").payload_json)["target_allocations"][0]["symbol"] == "CASH_KRW"
     assert deserialize_portfolio_payload_v2(store.get_portfolio("user-b", "main").payload_json)["target_allocations"][0]["symbol"] == "CASH_USD"
+
+
+def test_target_allocations_table_rows_take_priority_over_payload_fallback():
+    target_store = MemoryTargetAllocationStore()
+    payload_rows = [{"asset_type": "cash", "currency": "KRW", "target_weight_pct": 100}]
+    table_rows = [{"asset_type": "cash", "currency": "USD", "target_weight_pct": 100}]
+    target_store.replace_target_allocations("user-a", "main", table_rows)
+
+    loaded = load_target_allocations_prefer_table(target_store, "user-a", "main", payload_rows)
+
+    assert loaded == serialize_target_allocations(table_rows)
+
+
+def test_target_allocations_payload_rows_backfill_empty_table():
+    target_store = MemoryTargetAllocationStore()
+    payload_rows = [{"asset_type": "stock", "symbol": "AAPL", "market": "US", "currency": "USD", "target_weight_pct": 100}]
+
+    loaded = load_target_allocations_prefer_table(target_store, "user-a", "main", payload_rows)
+
+    assert loaded == serialize_target_allocations(payload_rows)
+    assert target_store.list_target_allocations("user-a", "main") == serialize_target_allocations(payload_rows)
+
+
+def test_target_allocations_table_failure_keeps_payload_fallback():
+    payload_rows = [{"asset_type": "cash", "currency": "KRW", "target_weight_pct": 100}]
+
+    loaded = load_target_allocations_prefer_table(FailingTargetAllocationStore(), "user-a", "main", payload_rows)
+
+    assert loaded == serialize_target_allocations(payload_rows)
+    assert not save_target_allocations_if_available(FailingTargetAllocationStore(), "user-a", "main", payload_rows)
 
 
 def test_target_weight_sum_edge_cases():

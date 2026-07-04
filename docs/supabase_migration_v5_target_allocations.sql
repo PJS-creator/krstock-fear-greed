@@ -1,6 +1,6 @@
 -- Optional normalized target allocation table for rebalancing.
--- The app stores target allocations in portfolio_snapshots.payload_json today.
--- This additive table is a future-safe path for moving allocations into rows.
+-- The app prefers this table when it is present and accessible through RLS.
+-- portfolio_snapshots.payload_json.target_allocations remains the compatible fallback.
 
 CREATE TABLE IF NOT EXISTS public.target_allocations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

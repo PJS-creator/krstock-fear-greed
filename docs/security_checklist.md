@@ -30,7 +30,7 @@
 - [ ] `cash_ledger`: RLS enabled, `user_id = auth.uid()`
 - [ ] `target_allocations`: RLS enabled, `user_id = auth.uid()`
 
-현재 앱의 목표 비중 source of truth는 `portfolio_snapshots.payload_json.target_allocations`이다. `target_allocations` 테이블 migration은 additive future storage로 유지하며, 별도 테이블로 전환할 때는 read/write 경로와 RLS 테스트를 함께 추가한다.
+목표 비중은 `target_allocations` 테이블이 존재하고 RLS로 접근 가능하면 그 테이블을 우선 source of truth로 사용한다. 테이블이 없거나 권한/스키마 문제로 실패하면 기존 `portfolio_snapshots.payload_json.target_allocations`를 fallback으로 사용해 기존 사용자 데이터를 보존한다.
 
 공용 시장 데이터 캐시는 사용자 민감정보를 저장하지 않아야 한다.
 

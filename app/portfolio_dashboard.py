@@ -89,8 +89,10 @@ from portfolio.pricing import (
 )
 from portfolio.storage import (
     PortfolioStoreError,
+    build_target_allocation_store,
     build_supabase_store,
     has_supabase_credentials,
+    save_target_allocations_if_available,
     serialize_portfolio_payload,
     should_enable_storage,
     supabase_config_from_secrets,
@@ -595,16 +597,17 @@ def _render_security_status(config: AppSecurityConfig, *, public_auth_enabled: b
 @st.cache_resource(show_spinner=False)
 def _build_stores(storage_config):
     if not has_supabase_credentials(storage_config):
-        return None, None, None
+        return None, None, None, None
     try:
         return (
             build_supabase_store(storage_config),
             build_supabase_history_store(storage_config),
             build_supabase_historical_schedule_store(storage_config),
+            build_target_allocation_store(storage_config),
         )
     except (PortfolioStoreError, HistoricalScheduleStoreError, RuntimeError) as exc:
         st.sidebar.warning(f"Supabase 저장소를 초기화할 수 없습니다: {exc}")
-        return None, None, None
+        return None, None, None, None
 
 
 def _resolve_owner_id(storage_config) -> str | None:
@@ -665,20 +668,26 @@ def _current_portfolio_payload():
     )
 
 
-def _persist_current_portfolio(owner_id, store) -> None:
+def _persist_current_portfolio(owner_id, store, target_allocation_store=None) -> None:
     portfolio_name = _current_portfolio_name()
     store.save_portfolio(owner_id, portfolio_name, _current_portfolio_payload())
+    save_target_allocations_if_available(
+        target_allocation_store,
+        owner_id,
+        portfolio_name,
+        st.session_state.get("target_allocations", []),
+    )
     st.cache_data.clear()
     _mark_portfolio_clean()
 
 
-def _save_current_portfolio(owner_id, store, history_store, metrics) -> None:
+def _save_current_portfolio(owner_id, store, target_allocation_store, history_store, metrics) -> None:
     if owner_id is None or store is None:
         st.warning("Supabase 저장소가 설정되지 않아 저장할 수 없습니다.")
         return
     portfolio_name = _current_portfolio_name()
     try:
-        _persist_current_portfolio(owner_id, store)
+        _persist_current_portfolio(owner_id, store, target_allocation_store)
         if history_store is not None:
             history_store.save_snapshot(
                 build_history_record(
@@ -694,7 +703,7 @@ def _save_current_portfolio(owner_id, store, history_store, metrics) -> None:
         st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
 
 
-def _auto_save_public_portfolio(owner_id, store, history_store, metrics) -> None:
+def _auto_save_public_portfolio(owner_id, store, target_allocation_store, history_store, metrics) -> None:
     if not _is_authenticated():
         return
     st.session_state[PORTFOLIO_NAME_KEY] = PUBLIC_PORTFOLIO_NAME
@@ -710,7 +719,7 @@ def _auto_save_public_portfolio(owner_id, store, history_store, metrics) -> None
         return
     try:
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 중"
-        _persist_current_portfolio(owner_id, store)
+        _persist_current_portfolio(owner_id, store, target_allocation_store)
         if history_store is not None:
             history_store.save_snapshot(
                 build_history_record(
@@ -1192,14 +1201,14 @@ def _render_cash_fx_tools(config: AppSecurityConfig, *, public_auth_enabled: boo
     _render_cash_ledger_table()
 
 
-def _load_portfolio_record_now(record) -> None:
-    queue_portfolio_record_load(record)
+def _load_portfolio_record_now(record, target_allocation_store=None) -> None:
+    queue_portfolio_record_load(record, target_allocation_store=target_allocation_store)
     _apply_pending_portfolio_state()
     if st.session_state.pop(MARK_CLEAN_KEY, False):
         _mark_portfolio_clean()
 
 
-def _auto_load_account_portfolio(owner_id, store) -> None:
+def _auto_load_account_portfolio(owner_id, store, target_allocation_store=None) -> None:
     if owner_id is None or store is None:
         return
     portfolio_name = _current_portfolio_name()
@@ -1215,7 +1224,7 @@ def _auto_load_account_portfolio(owner_id, store) -> None:
     if record is None:
         return
     try:
-        _load_portfolio_record_now(record)
+        _load_portfolio_record_now(record, target_allocation_store)
     except (PortfolioStoreError, ValueError) as exc:
         st.session_state[ACCOUNT_STATUS_KEY] = f"저장된 포트폴리오를 불러올 수 없습니다: {exc}"
         return
@@ -1223,7 +1232,7 @@ def _auto_load_account_portfolio(owner_id, store) -> None:
     st.session_state[ACCOUNT_STATUS_KEY] = f"{record.portfolio_name} 포트폴리오를 자동으로 불러왔습니다."
 
 
-def _auto_refresh_loaded_prices(owner_id, store, history_store) -> None:
+def _auto_refresh_loaded_prices(owner_id, store, target_allocation_store, history_store) -> None:
     holdings_rows = list(st.session_state.get("holdings_rows") or [])
     has_usd_cash = float(st.session_state.get("cash_usd") or 0.0) > 0
     if owner_id is None or (not holdings_rows and not has_usd_cash):
@@ -1239,7 +1248,7 @@ def _auto_refresh_loaded_prices(owner_id, store, history_store) -> None:
         return
     if store is not None:
         try:
-            _persist_current_portfolio(owner_id, store)
+            _persist_current_portfolio(owner_id, store, target_allocation_store)
         except (PortfolioStoreError, ValueError) as exc:
             st.session_state[ACCOUNT_STATUS_KEY] = f"가격 자동 갱신은 완료했지만 저장에 실패했습니다: {exc}"
             return
@@ -1320,7 +1329,7 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
             st.caption("실패 종목 재시도 버튼은 실패한 종목만 다시 조회합니다.")
 
 
-def _render_header(config: AppSecurityConfig, owner_id, store, history_store, metrics, *, public_auth_enabled: bool = False) -> None:
+def _render_header(config: AppSecurityConfig, owner_id, store, target_allocation_store, history_store, metrics, *, public_auth_enabled: bool = False) -> None:
     dirty = _portfolio_is_dirty()
     summary = aggregate_price_statuses(st.session_state.get("price_update_statuses", []))
     last_refresh = metrics.last_price_refresh_at or st.session_state.last_price_refresh_at
@@ -1348,7 +1357,7 @@ def _render_header(config: AppSecurityConfig, owner_id, store, history_store, me
         st.session_state[PRICE_REFRESH_MODE_KEY] = "실패 종목만"
         _run_price_refresh(config, owner_id, history_store, mode="실패 종목만", refresh_fx=False, public_auth_enabled=public_auth_enabled)
     if actions["save"]:
-        _save_current_portfolio(owner_id, store, history_store, metrics)
+        _save_current_portfolio(owner_id, store, target_allocation_store, history_store, metrics)
 
 
 def _render_status_messages() -> None:
@@ -1446,7 +1455,7 @@ def _render_rebalancing_section(metrics) -> None:
     )
 
 
-def _render_manage_section(owner_id, portfolio_store, history_store) -> None:
+def _render_manage_section(owner_id, portfolio_store, target_allocation_store, history_store) -> None:
     render_csv_tools()
     render_data_portability_tools(portfolio_snapshot=_current_portfolio_payload())
     render_storage_tools(
@@ -1454,12 +1463,13 @@ def _render_manage_section(owner_id, portfolio_store, history_store) -> None:
         store=portfolio_store,
         history_store=history_store,
         metrics=_current_metrics(),
+        target_allocation_store=target_allocation_store,
         on_capture=lambda _: _mark_portfolio_clean(),
     )
     render_manual_capture(owner_id=owner_id, history_store=history_store, metrics=_current_metrics())
 
 
-def _render_private_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
+def _render_private_dashboard_sections(security_config, owner_id, portfolio_store, target_allocation_store, history_store, historical_schedule_store, metrics) -> None:
     summary_card_tab, overview_tab, holdings_tab, history_tab, rebalancing_tab, manage_tab = st.tabs(["총괄현황", "세부내역", "사용자 입력", "자산추이", "리밸런싱", "저장 관리"])
     with summary_card_tab:
         safe_render_section("총괄현황", lambda: _render_summary_card_section(metrics))
@@ -1472,7 +1482,7 @@ def _render_private_dashboard_sections(security_config, owner_id, portfolio_stor
     with rebalancing_tab:
         safe_render_section("리밸런싱", lambda: _render_rebalancing_section(metrics))
     with manage_tab:
-        safe_render_section("저장 관리", lambda: _render_manage_section(owner_id, portfolio_store, history_store))
+        safe_render_section("저장 관리", lambda: _render_manage_section(owner_id, portfolio_store, target_allocation_store, history_store))
 
 
 def _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
@@ -1512,23 +1522,23 @@ if public_auth_enabled and not _is_authenticated():
 if not public_auth_enabled and should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
 
-portfolio_store, history_store, historical_schedule_store = _build_stores(storage_config)
+portfolio_store, history_store, historical_schedule_store, target_allocation_store = _build_stores(storage_config)
 owner_id = _resolve_owner_id(storage_config)
-_auto_load_account_portfolio(owner_id, portfolio_store)
+_auto_load_account_portfolio(owner_id, portfolio_store, target_allocation_store)
 if not public_auth_enabled:
-    _auto_refresh_loaded_prices(owner_id, portfolio_store, history_store)
+    _auto_refresh_loaded_prices(owner_id, portfolio_store, target_allocation_store, history_store)
 _render_sidebar(security_config, owner_id, portfolio_store, public_auth_enabled=public_auth_enabled)
 _render_security_status(security_config, public_auth_enabled=public_auth_enabled)
 if not public_auth_enabled and should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
 metrics = _current_metrics()
 if public_auth_enabled:
-    _auto_save_public_portfolio(owner_id, portfolio_store, history_store, metrics)
-_render_header(security_config, owner_id, portfolio_store, history_store, metrics, public_auth_enabled=public_auth_enabled)
+    _auto_save_public_portfolio(owner_id, portfolio_store, target_allocation_store, history_store, metrics)
+_render_header(security_config, owner_id, portfolio_store, target_allocation_store, history_store, metrics, public_auth_enabled=public_auth_enabled)
 _render_status_messages()
 
 if public_auth_enabled:
     safe_render_section("온보딩", lambda: render_onboarding(portfolio_snapshot=_current_portfolio_payload()))
     _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)
 else:
-    _render_private_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)
+    _render_private_dashboard_sections(security_config, owner_id, portfolio_store, target_allocation_store, history_store, historical_schedule_store, metrics)
