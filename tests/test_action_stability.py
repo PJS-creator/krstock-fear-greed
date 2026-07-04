@@ -34,3 +34,34 @@ def test_streamlit_rerun_is_centralized_through_stability_helper():
             direct_calls.append(path.as_posix())
 
     assert direct_calls == []
+
+
+def test_high_risk_state_actions_are_guarded():
+    expected_guards = {
+        "app/portfolio_dashboard.py": [
+            "price_refresh",
+            "fx_refresh",
+            "sidebar_load_portfolio",
+            "sidebar_restore_last_saved",
+            "sidebar_reset_portfolio",
+        ],
+        "app/ui/historical_reconstruction.py": [
+            "historical_apply_preview",
+            "historical_apply_holdings_csv",
+            "historical_apply_cash_csv",
+            "historical_run_reconstruction",
+        ],
+        "app/ui/manage.py": [
+            "storage_save_portfolio",
+            "storage_load_portfolio",
+            "storage_rename_portfolio",
+            "storage_delete_portfolio",
+            "manual_history_capture",
+        ],
+        "app/ui/risk.py": ["risk_beta_calculation"],
+    }
+
+    for path, guard_keys in expected_guards.items():
+        source = Path(path).read_text(encoding="utf-8")
+        for guard_key in guard_keys:
+            assert guard_key in source

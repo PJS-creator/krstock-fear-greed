@@ -15,7 +15,7 @@ from portfolio.holdings import PortfolioMetrics
 from portfolio.sample_data import sample_portfolio
 
 from .formatters import compact_krw, full_krw, instrument_label, percentage, signed_krw, signed_percentage
-from .stability import request_app_rerun
+from .stability import begin_ui_action, request_app_rerun
 from .status import aggregate_price_statuses, build_price_log_rows, present_diagnostic, quote_status_label, split_diagnostics
 from .theme import DIMENSIONS, chart_config
 
@@ -170,6 +170,8 @@ def render_empty_portfolio() -> None:
     )
     st.caption("샘플은 기능 확인용 가상 데이터이며 실제 보유 내역이 아닙니다.")
     if st.button("샘플 불러오기", key="load_sample_portfolio"):
+        if not begin_ui_action("load_legacy_sample_portfolio"):
+            return
         positions, quotes, usd_krw, cash_krw = sample_portfolio()
         rows = []
         for position in positions:

@@ -21,6 +21,7 @@ from portfolio.risk_metrics import (
 from .charts import apply_chart_layout, is_all_zero_series
 from .components import render_empty_state, render_plotly_chart
 from .formatters import format_number, full_krw, percentage
+from .stability import begin_ui_action, finish_ui_action
 from .theme import DIMENSIONS, SEMANTIC_COLORS
 
 
@@ -283,35 +284,46 @@ def render_risk_analysis(*, history_records: list[object] | None, load_error: st
         st.info("사용자 지정 티커를 입력하면 Beta를 계산할 수 있습니다.")
         return
     if st.button("Beta 계산", type="primary", icon=":material/analytics:"):
+        if not begin_ui_action(
+            "risk_beta_calculation",
+            payload={"symbol": symbol, "period": str(period_label), "basis": str(basis_label)},
+            cooldown_seconds=2.0,
+        ):
+            return
+        success = False
         period = YFINANCE_PERIODS[str(period_label)]
         try:
-            benchmark_values = _load_yfinance_value_series(symbol, period)
-        except Exception as exc:
-            st.warning(f"벤치마크 데이터를 불러올 수 없습니다: {exc}")
-            return
-
-        actual_basis = str(basis_label)
-        if basis_label == "KRW 기준" and benchmark_label in USD_BENCHMARKS:
             try:
-                fx_values = _load_yfinance_value_series("KRW=X", period)
-                benchmark_values = _apply_krw_fx(benchmark_values, fx_values)
+                benchmark_values = _load_yfinance_value_series(symbol, period)
             except Exception as exc:
-                actual_basis = "현지통화 기준"
-                st.warning(f"USD/KRW 환율 시계열을 가져오지 못해 현지통화 기준 Beta로 계산합니다: {exc}")
+                st.warning(f"벤치마크 데이터를 불러올 수 없습니다: {exc}")
+                return
 
-        benchmark_values = filter_value_series_by_days(benchmark_values, RISK_PERIOD_DAYS[str(period_label)])
-        benchmark_returns = pct_change_series(benchmark_values)
-        try:
-            beta = calculate_beta(portfolio_returns, benchmark_returns, min_observations=MIN_BETA_OBSERVATIONS)
-        except ValueError as exc:
-            st.warning(f"Beta를 계산할 수 없습니다: {exc}")
-            return
+            actual_basis = str(basis_label)
+            if basis_label == "KRW 기준" and benchmark_label in USD_BENCHMARKS:
+                try:
+                    fx_values = _load_yfinance_value_series("KRW=X", period)
+                    benchmark_values = _apply_krw_fx(benchmark_values, fx_values)
+                except Exception as exc:
+                    actual_basis = "현지통화 기준"
+                    st.warning(f"USD/KRW 환율 시계열을 가져오지 못해 현지통화 기준 Beta로 계산합니다: {exc}")
 
-        _render_beta_cards(beta, benchmark_label=f"{benchmark_label} ({symbol})", basis_label=actual_basis)
-        if beta.start_date and beta.end_date:
-            st.caption(f"Beta 사용 기간: {beta_source}, {beta.start_date.isoformat()} ~ {beta.end_date.isoformat()}, 날짜 inner join 후 관측치 {beta.observations}개")
-        scatter = _plot_return_scatter(portfolio_returns, benchmark_returns)
-        if scatter is not None:
-            render_plotly_chart(scatter, key="risk_beta_scatter")
+            benchmark_values = filter_value_series_by_days(benchmark_values, RISK_PERIOD_DAYS[str(period_label)])
+            benchmark_returns = pct_change_series(benchmark_values)
+            try:
+                beta = calculate_beta(portfolio_returns, benchmark_returns, min_observations=MIN_BETA_OBSERVATIONS)
+            except ValueError as exc:
+                st.warning(f"Beta를 계산할 수 없습니다: {exc}")
+                return
+
+            _render_beta_cards(beta, benchmark_label=f"{benchmark_label} ({symbol})", basis_label=actual_basis)
+            if beta.start_date and beta.end_date:
+                st.caption(f"Beta 사용 기간: {beta_source}, {beta.start_date.isoformat()} ~ {beta.end_date.isoformat()}, 날짜 inner join 후 관측치 {beta.observations}개")
+            scatter = _plot_return_scatter(portfolio_returns, benchmark_returns)
+            if scatter is not None:
+                render_plotly_chart(scatter, key="risk_beta_scatter")
+            success = True
+        finally:
+            finish_ui_action(success=success)
 
     st.caption("Beta와 MDD는 사용자가 저장한 포트폴리오 기록과 무료 벤치마크 데이터를 기준으로 계산됩니다. 데이터 결측, 기간 부족, 환율 시계열 누락이 있으면 결과가 표시되지 않거나 기준이 제한됩니다.")

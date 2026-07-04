@@ -1352,6 +1352,8 @@ def _render_saved_portfolio_selector(owner_id, store) -> None:
         if _portfolio_is_dirty():
             st.warning("저장하지 않은 변경이 있습니다. 관리 탭에서 저장한 뒤 다른 포트폴리오를 불러오세요.")
         if st.button("선택 포트폴리오 불러오기", disabled=_portfolio_is_dirty(), width="stretch", icon=":material/folder_open:"):
+            if not begin_ui_action("sidebar_load_portfolio", payload={"portfolio_name": selected.portfolio_name}):
+                return
             try:
                 queue_portfolio_record_load(selected)
                 request_app_rerun()
@@ -1376,12 +1378,16 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
         if _portfolio_is_dirty():
             st.caption("저장하지 않은 변경 있음")
             if st.button("변경사항 되돌리기", width="stretch", icon=":material/undo:"):
+                if not begin_ui_action("sidebar_restore_last_saved", payload={"portfolio_name": _current_portfolio_name()}):
+                    return
                 _restore_last_saved_state()
                 request_app_rerun()
         else:
             st.caption("저장됨")
         confirm_reset = st.checkbox("현재 입력 초기화 확인", key="confirm_reset_portfolio")
         if st.button("현재 입력 초기화", disabled=not confirm_reset, width="stretch", icon=":material/delete:"):
+            if not begin_ui_action("sidebar_reset_portfolio", payload={"portfolio_name": _current_portfolio_name()}):
+                return
             _reset_current_portfolio_state(_current_portfolio_name())
             request_app_rerun()
         with st.expander("현금 및 환율", expanded=True):
