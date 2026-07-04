@@ -6,6 +6,7 @@ from typing import Any
 
 from portfolio.cash_ledger import serialize_cash_ledger_rows
 from portfolio.holdings import normalize_holding_rows, parse_non_negative_float
+from portfolio.journal import normalize_journal_notes
 from portfolio.manual_input import normalize_portfolio_rows
 from portfolio.rebalancing import serialize_target_allocations
 from portfolio.transactions import normalize_transaction_rows
@@ -79,6 +80,7 @@ def serialize_portfolio_payload(
     cash_ledger: Iterable[Mapping[str, Any]] | None = None,
     fx_metadata: Mapping[str, Any] | None = None,
     target_allocations: Iterable[Mapping[str, Any]] | None = None,
+    journal_notes: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict[str, object]:
     try:
         holdings = normalize_holding_rows(rows)
@@ -103,12 +105,17 @@ def serialize_portfolio_payload(
         clean_target_allocations = serialize_target_allocations(target_allocations or [])
     except ValueError as exc:
         raise PortfolioPayloadError(str(exc)) from exc
+    try:
+        clean_journal_notes = normalize_journal_notes(journal_notes or [])
+    except ValueError as exc:
+        raise PortfolioPayloadError(str(exc)) from exc
     return {
         "schema_version": SCHEMA_VERSION,
         "holdings": holdings,
         "transactions": clean_transactions,
         "cash_ledger": clean_cash_ledger,
         "target_allocations": clean_target_allocations,
+        "journal_notes": clean_journal_notes,
         "cash_balances": {"KRW": clean_cash_krw, "USD": clean_cash_usd},
         "last_known_quotes": _last_known_quotes(holdings),
         "quote_status": _quote_status(holdings),
@@ -166,6 +173,7 @@ def deserialize_portfolio_payload_v2(payload_json: Mapping[str, Any]) -> dict[st
         cash_ledger=payload_json.get("cash_ledger") if schema_version == SCHEMA_VERSION else [],
         fx_metadata=payload_json.get("fx_metadata") if isinstance(payload_json.get("fx_metadata"), Mapping) else {},
         target_allocations=payload_json.get("target_allocations") if schema_version == SCHEMA_VERSION else [],
+        journal_notes=payload_json.get("journal_notes") if schema_version == SCHEMA_VERSION else [],
     )
     last_known_quotes = payload_json.get("last_known_quotes")
     quote_status = payload_json.get("quote_status")

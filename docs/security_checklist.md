@@ -29,6 +29,7 @@
 - [ ] `historical_holding_schedules`: RLS enabled, `owner_id = auth.uid()::text`
 - [ ] `cash_ledger`: RLS enabled, `user_id = auth.uid()`
 - [ ] `target_allocations`: RLS enabled, `user_id = auth.uid()`
+- [ ] `journal_notes`: RLS enabled, `user_id = auth.uid()`
 
 목표 비중은 `target_allocations` 테이블이 존재하고 RLS로 접근 가능하면 그 테이블을 우선 source of truth로 사용한다. 테이블이 없거나 권한/스키마 문제로 실패하면 기존 `portfolio_snapshots.payload_json.target_allocations`를 fallback으로 사용해 기존 사용자 데이터를 보존한다.
 
@@ -44,6 +45,7 @@ Supabase SQL Editor 또는 API 테스트에서 사용자 A/B를 각각 로그인
 
 - [ ] 사용자 A가 생성한 `cash_ledger` row를 사용자 B가 조회할 수 없다.
 - [ ] 사용자 A가 생성한 `target_allocations` row를 사용자 B가 수정할 수 없다.
+- [ ] 사용자 A가 생성한 `journal_notes` row를 사용자 B가 조회, 수정, 삭제할 수 없다.
 - [ ] 사용자 B가 사용자 A의 `portfolio_snapshots`를 조회할 수 없다.
 - [ ] anon role 또는 로그아웃 상태에서는 사용자 데이터 테이블을 조회할 수 없다.
 - [ ] 가격/환율 공용 캐시 조회는 사용자 민감정보 없이 동작한다.

@@ -62,6 +62,9 @@ def test_portfolio_payload_round_trip():
             {"asset_type": "stock", "symbol": "ABC", "market": "US", "currency": "USD", "display_name": "ABC", "target_weight_pct": 70},
             {"asset_type": "cash", "currency": "KRW", "target_weight_pct": 30},
         ],
+        journal_notes=[
+            {"note_date": "2026-02-01", "title": "첫 메모", "body": "복기", "symbol": "ABC", "tags": ["복기"]},
+        ],
     )
 
     rows, usd_krw, cash_krw = deserialize_portfolio_payload(payload)
@@ -85,6 +88,7 @@ def test_portfolio_payload_round_trip():
     assert v2["transactions"][0]["ticker"] == "ABC"
     assert v2["cash_ledger"][0]["event_type"] == "deposit"
     assert v2["cash_ledger"][0]["amount"] == "10000"
+    assert v2["journal_notes"][0]["title"] == "첫 메모"
 
 
 def test_v1_payload_migrates_to_current_schema():

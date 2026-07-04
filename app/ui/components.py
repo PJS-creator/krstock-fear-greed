@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from html import escape
 from uuid import uuid4
 
@@ -14,7 +14,7 @@ from portfolio.history import PortfolioHistoryRecord
 from portfolio.holdings import PortfolioMetrics
 from portfolio.sample_data import sample_portfolio
 
-from .formatters import compact_krw, full_krw, instrument_label, percentage, signed_krw, signed_percentage
+from .formatters import compact_krw, format_number, format_price, full_krw, instrument_label, percentage, signed_krw, signed_percentage
 from .stability import begin_ui_action, request_app_rerun
 from .status import aggregate_price_statuses, build_price_log_rows, present_diagnostic, quote_status_label, split_diagnostics
 from .theme import DIMENSIONS, chart_config
@@ -124,6 +124,233 @@ def render_empty_state(
             target = cols[1] if primary_label else cols[0]
             secondary_clicked = target.button(secondary_label, key=secondary_key, use_container_width=True)
     return primary_clicked, secondary_clicked
+
+
+def render_page_header(
+    title: str,
+    description: str,
+    *,
+    status_text: str = "",
+    save_status_text: str = "",
+) -> None:
+    status_html = f"<span class='app-badge app-badge-info'>{escape(status_text)}</span>" if status_text else ""
+    save_html = f"<span class='muted-text'>{escape(save_status_text)}</span>" if save_status_text else ""
+    st.markdown(
+        (
+            "<div class='app-page-header'>"
+            "<div>"
+            f"<h2>{escape(title)}</h2>"
+            f"<p>{escape(description)}</p>"
+            "</div>"
+            f"<div class='app-page-header-status'>{status_html}{save_html}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _tone_class(value: float | None) -> str:
+    if value is None or value == 0:
+        return "value-neutral"
+    return "value-positive" if value > 0 else "value-negative"
+
+
+def render_total_asset_hero(
+    *,
+    total_asset_krw: float,
+    day_change_krw: float | None,
+    day_change_pct: float | None,
+    status_text: str,
+    last_refresh_text: str,
+    sample_mode: bool = False,
+) -> None:
+    badge = "<span class='app-badge app-badge-warning'>샘플</span>" if sample_mode else ""
+    change_text = f"{signed_krw(day_change_krw)} · {signed_percentage(day_change_pct)}" if day_change_krw is not None else "일간 변동 데이터 부족"
+    st.markdown(
+        (
+            "<section class='hero-card'>"
+            "<div class='hero-main'>"
+            "<div class='muted-text'>총자산</div>"
+            f"<div class='hero-total'>{escape(full_krw(total_asset_krw))}</div>"
+            f"<div class='hero-change {_tone_class(day_change_krw)}'>{escape(change_text)}</div>"
+            "</div>"
+            "<div class='hero-side'>"
+            f"{badge}"
+            f"<div><span class='muted-text'>가격·환율</span><strong>{escape(status_text)}</strong></div>"
+            f"<div><span class='muted-text'>마지막 갱신</span><strong>{escape(last_refresh_text)}</strong></div>"
+            "</div>"
+            "</section>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def render_action_nav(
+    items: list[tuple[str, str, str]],
+    *,
+    active_key: str | None = None,
+    state_key: str | None = None,
+) -> str | None:
+    selected = None
+    columns = st.columns(len(items))
+    for column, (key, label, caption) in zip(columns, items):
+        button_type = "primary" if key == active_key else "secondary"
+        with column:
+            if st.button(label, key=f"quick_nav_{key}", type=button_type, use_container_width=True, help=caption):
+                selected = key
+                if state_key:
+                    st.session_state[state_key] = key
+    return selected
+
+
+def render_segmented_control(
+    label: str,
+    options: list[str],
+    *,
+    key: str,
+    default: str | None = None,
+) -> str:
+    if hasattr(st, "segmented_control"):
+        value = st.segmented_control(label, options=options, default=default or options[0], key=key)
+        return str(value or default or options[0])
+    index = options.index(default) if default in options else 0
+    return str(st.radio(label, options=options, index=index, horizontal=True, key=key))
+
+
+def render_section_card(title: str, *, help_text: str | None = None, action_label: str | None = None) -> None:
+    help_html = f"<p>{escape(help_text)}</p>" if help_text else ""
+    action_html = f"<span class='app-badge'>{escape(action_label)}</span>" if action_label else ""
+    st.markdown(
+        (
+            "<div class='section-card-heading'>"
+            "<div>"
+            f"<h3>{escape(title)}</h3>"
+            f"{help_html}"
+            "</div>"
+            f"{action_html}"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def _initials(value: str) -> str:
+    text = "".join(part[0] for part in value.replace("-", " ").split() if part)
+    return (text or value[:2] or "?").upper()[:2]
+
+
+def render_asset_row(row: Mapping[str, object]) -> None:
+    name = str(row.get("name") or row.get("display_name") or row.get("ticker") or "-")
+    ticker = str(row.get("ticker") or "")
+    market = str(row.get("market") or "")
+    currency = str(row.get("currency") or "")
+    quantity = format_number(float(row.get("quantity") or 0.0), digits=4, trim=True)
+    value_krw = full_krw(float(row.get("value_krw") or 0.0))
+    pnl = row.get("total_pnl_krw")
+    pnl_text = signed_krw(pnl) if pnl is not None else "손익 데이터 부족"
+    pnl_pct = row.get("total_pnl_pct")
+    pct_text = signed_percentage(pnl_pct) if pnl_pct is not None else "-"
+    status = str(row.get("status") or "")
+    st.markdown(
+        (
+            "<div class='asset-row'>"
+            f"<div class='asset-icon'>{escape(_initials(ticker or name))}</div>"
+            "<div class='asset-main'>"
+            f"<strong>{escape(name)}</strong>"
+            f"<span>{escape(market)} · {escape(ticker)} · {escape(quantity)}주 · {escape(currency)}</span>"
+            "</div>"
+            "<div class='asset-values'>"
+            f"<strong>{escape(value_krw)}</strong>"
+            f"<span class='{_tone_class(float(pnl) if pnl is not None else None)}'>{escape(pnl_text)} · {escape(pct_text)}</span>"
+            f"<small>{escape(status)}</small>"
+            "</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def render_cash_row(row: Mapping[str, object]) -> None:
+    currency = str(row.get("currency") or "")
+    amount = float(row.get("amount") or 0.0)
+    value_krw = float(row.get("value_krw") or 0.0)
+    weight = row.get("weight")
+    amount_text = f"{format_number(amount)} {currency}" if currency == "USD" else f"{format_number(amount)}원"
+    st.markdown(
+        (
+            "<div class='asset-row cash-row'>"
+            f"<div class='asset-icon cash-icon'>{escape(currency[:1] or 'C')}</div>"
+            "<div class='asset-main'>"
+            f"<strong>{'달러 현금' if currency == 'USD' else '원화 현금'}</strong>"
+            f"<span>{escape(amount_text)}</span>"
+            "</div>"
+            "<div class='asset-values'>"
+            f"<strong>{escape(full_krw(value_krw))}</strong>"
+            f"<span>총자산 {escape(percentage(weight))}</span>"
+            "</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def render_profit_summary_card(summary: Mapping[str, object], *, detail: bool = False) -> None:
+    items = [
+        ("평가수익", summary.get("evaluation_profit_krw"), summary.get("evaluation_profit_pct")),
+        ("실현수익", summary.get("realized_profit_krw"), None),
+        ("배당/이자", summary.get("dividend_interest_krw"), None),
+        ("수수료/세금", summary.get("fees_taxes_krw"), None),
+        ("합계", summary.get("total_profit_krw"), summary.get("simple_return")),
+    ]
+    cards = []
+    for label, value, pct_value in items:
+        if value is None:
+            value_text = "데이터 부족"
+            tone = "value-neutral"
+        elif label == "수수료/세금":
+            value_text = full_krw(float(value))
+            tone = "value-neutral"
+        else:
+            value_text = signed_krw(float(value))
+            tone = _tone_class(float(value))
+        pct_text = signed_percentage(pct_value) if pct_value is not None else ""
+        cards.append(
+            "<div class='profit-card'>"
+            f"<span>{escape(label)}</span>"
+            f"<strong class='{tone}'>{escape(value_text)}</strong>"
+            f"<small>{escape(pct_text)}</small>"
+            "</div>"
+        )
+    st.markdown("<div class='profit-grid'>" + "".join(cards) + "</div>", unsafe_allow_html=True)
+    if detail:
+        reasons = summary.get("insufficient_reasons") or []
+        for reason in reasons:
+            st.caption(str(reason))
+
+
+def render_timeline_event(event: Mapping[str, object]) -> None:
+    tags = event.get("tags") or []
+    tag_html = "".join(f"<span class='app-badge'>{escape(str(tag))}</span>" for tag in tags)
+    amount = event.get("amount")
+    amount_text = ""
+    if amount is not None:
+        amount_text = format_price(amount, event.get("currency"))
+    cash_impact = event.get("cash_impact")
+    cash_text = signed_krw(cash_impact) if isinstance(cash_impact, (int, float)) else ""
+    st.markdown(
+        (
+            "<div class='timeline-event'>"
+            "<div class='timeline-dot'></div>"
+            "<div class='timeline-body'>"
+            f"<div class='timeline-date'>{escape(str(event.get('event_date') or ''))}</div>"
+            f"<strong>{escape(str(event.get('title') or ''))}</strong>"
+            f"<p>{escape(str(event.get('subtitle') or ''))}</p>"
+            f"<div class='timeline-meta'><span>{escape(str(event.get('event_type') or ''))}</span><span>{escape(amount_text)}</span><span>{escape(cash_text)}</span>{tag_html}</div>"
+            "</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def render_info_box(title: str, message: str) -> None:
