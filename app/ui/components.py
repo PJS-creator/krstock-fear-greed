@@ -125,7 +125,7 @@ def render_price_update_log(statuses: list[object], holdings_rows: list[dict[str
         st.success(f"가격 갱신 완료 · {summary.short_text}")
     rows = build_price_log_rows(statuses, holdings_rows)
     with st.expander(f"데이터 업데이트 상세 · 성공 {summary.success} / 캐시 {summary.cached} / 실패 {summary.failed}", expanded=False):
-        issue_only = st.checkbox("실패·이전 가격·미조회만 보기", value=summary.has_issues, key="price_log_issue_only")
+        issue_only = st.checkbox("실패·이전저장값·미조회만 보기", value=summary.has_issues, key="price_log_issue_only")
         visible_rows = [row for row in rows if row["raw_status"] in {"stale", "failed", "missing", "missing_api_key"}] if issue_only else rows
         if not visible_rows:
             st.caption("확인할 실패 항목이 없습니다.")

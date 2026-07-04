@@ -32,7 +32,16 @@ def _row(**overrides):
 
 def test_portfolio_payload_round_trip():
     payload = serialize_portfolio_payload(
-        [_row(symbol="abc")],
+        [
+            _row(
+                symbol="abc",
+                provider="yfinance",
+                source="yfinance",
+                price_date="2026-06-30",
+                as_of_timestamp="2026-06-30T15:00:00+00:00",
+                quote_status="updated",
+            )
+        ],
         usd_krw=1300,
         cash_krw=10000,
         cash_usd=5,
@@ -42,6 +51,13 @@ def test_portfolio_payload_round_trip():
         cash_ledger=[
             {"event_date": "2026-01-01", "currency": "KRW", "event_type": "deposit", "amount": "10000"}
         ],
+        fx_metadata={
+            "rate_date": "2026-06-30",
+            "as_of_timestamp": "2026-06-30T15:00:00+00:00",
+            "source": "yahoo-chart",
+            "status": "updated",
+            "fetched_at": "2026-06-30T15:01:00+00:00",
+        },
     )
 
     rows, usd_krw, cash_krw = deserialize_portfolio_payload(payload)
@@ -54,6 +70,10 @@ def test_portfolio_payload_round_trip():
     assert cash_krw == 10000.0
     assert v2["cash_balances"]["USD"] == 5.0
     assert v2["last_known_quotes"]["ABC"]["current_price"] == 125.0
+    assert v2["last_known_quotes"]["ABC"]["source"] == "yfinance"
+    assert v2["last_known_quotes"]["ABC"]["price_date"] == "2026-06-30"
+    assert v2["fx_metadata"]["source"] == "yahoo-chart"
+    assert v2["fx_metadata"]["rate_date"] == "2026-06-30"
     assert v2["transactions"][0]["transaction_type"] == "buy"
     assert v2["transactions"][0]["ticker"] == "ABC"
     assert v2["cash_ledger"][0]["event_type"] == "deposit"

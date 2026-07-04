@@ -54,6 +54,7 @@ def queue_portfolio_record_load(record: PortfolioRecord) -> None:
     payload = deserialize_portfolio_payload_v2(record.payload_json)
     cash = payload["cash_balances"]
     cash_ledger = list(payload.get("cash_ledger", []))
+    fx_metadata = payload.get("fx_metadata") if isinstance(payload.get("fx_metadata"), dict) else {}
     if cash_ledger:
         ledger_balances = calculate_cash_balances(cash_ledger)
         cash_krw = float(ledger_balances["KRW"])
@@ -69,6 +70,12 @@ def queue_portfolio_record_load(record: PortfolioRecord) -> None:
         usd_krw=float(payload["usd_krw"]),
         cash_krw=cash_krw,
         cash_usd=cash_usd,
+        fx_rate_date=fx_metadata.get("rate_date"),
+        fx_as_of_timestamp=fx_metadata.get("as_of_timestamp"),
+        fx_source=fx_metadata.get("source"),
+        fx_status=fx_metadata.get("status"),
+        fx_error_message=fx_metadata.get("error_message"),
+        fx_fetched_at=fx_metadata.get("fetched_at"),
     )
     _set_storage_status(f"{record.portfolio_name} 포트폴리오를 불러왔습니다.")
 
@@ -125,6 +132,14 @@ def render_storage_tools(
                     cash_usd=st.session_state.get("cash_usd", 0.0),
                     transactions=st.session_state.get("portfolio_transactions", []),
                     cash_ledger=st.session_state.get("cash_ledger_entries", []),
+                    fx_metadata={
+                        "rate_date": st.session_state.get("fx_rate_date"),
+                        "as_of_timestamp": st.session_state.get("fx_as_of_timestamp"),
+                        "source": st.session_state.get("fx_source"),
+                        "status": st.session_state.get("fx_status"),
+                        "error_message": st.session_state.get("fx_error_message"),
+                        "fetched_at": st.session_state.get("fx_fetched_at"),
+                    },
                 )
                 store.save_portfolio(owner_id, clean_name, payload)
                 if history_store is not None:

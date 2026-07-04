@@ -35,6 +35,10 @@ class PriceUpdateStatus:
     status: str
     message: str
     fetched_at: str | None = None
+    price_date: str | None = None
+    as_of_timestamp: str | None = None
+    source: str | None = None
+    error_message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -42,6 +46,10 @@ class FxUpdateStatus:
     status: str
     message: str
     fetched_at: str | None = None
+    rate_date: str | None = None
+    as_of_timestamp: str | None = None
+    source: str | None = None
+    error_message: str | None = None
 
 
 class _ProviderRequestPacer:
@@ -106,26 +114,38 @@ def update_us_quotes(
         currency = str(row["currency"])
 
         if not is_us_quote_target(row):
+            updated_row = _mark_quote_error(updated_row, status=QUOTE_STATUS_MANUAL, error_message=None)
             statuses.append(
                 PriceUpdateStatus(
                     symbol=symbol,
                     market=market,
                     currency=currency,
-                    status="manual",
+                    status=QUOTE_STATUS_MANUAL,
                     message="수동 입력 유지: 미국 USD 종목만 자동 업데이트합니다.",
+                    fetched_at=updated_row.get("fetched_at"),
+                    price_date=updated_row.get("price_date"),
+                    as_of_timestamp=updated_row.get("as_of_timestamp"),
+                    source=updated_row.get("source") or updated_row.get("provider"),
+                    error_message=updated_row.get("error_message"),
                 )
             )
             updated_rows.append(updated_row)
             continue
 
         if provider is None:
+            updated_row = _mark_quote_error(updated_row, status=QUOTE_STATUS_MISSING, error_message="미국 주식 가격 provider를 사용할 수 없습니다.")
             statuses.append(
                 PriceUpdateStatus(
                     symbol=symbol,
                     market=market,
                     currency=currency,
-                    status="missing",
+                    status=QUOTE_STATUS_MISSING,
                     message="미국 주식 가격 provider를 사용할 수 없어 수동 입력 가격을 유지했습니다.",
+                    fetched_at=updated_row.get("fetched_at"),
+                    price_date=updated_row.get("price_date"),
+                    as_of_timestamp=updated_row.get("as_of_timestamp"),
+                    source=updated_row.get("source") or updated_row.get("provider"),
+                    error_message=updated_row.get("error_message"),
                 )
             )
             updated_rows.append(updated_row)
@@ -134,28 +154,33 @@ def update_us_quotes(
         try:
             quote = quote_cache.get_or_fetch(symbol, provider.get_quote)
         except PriceProviderError as exc:
+            updated_row = _mark_quote_error(updated_row, status=QUOTE_STATUS_FAILED, error_message=exc)
             statuses.append(
                 PriceUpdateStatus(
                     symbol=symbol,
                     market=market,
                     currency=currency,
-                    status="failed",
+                    status=QUOTE_STATUS_FAILED,
                     message=f"미국 주식 가격 업데이트 실패: {exc}. 기존 입력 가격을 유지했습니다.",
+                    fetched_at=updated_row.get("fetched_at"),
+                    price_date=updated_row.get("price_date"),
+                    as_of_timestamp=updated_row.get("as_of_timestamp"),
+                    source=updated_row.get("source") or updated_row.get("provider"),
+                    error_message=updated_row.get("error_message"),
                 )
             )
             updated_rows.append(updated_row)
             continue
 
-        updated_row["current_price"] = quote.price
-        updated_row["previous_close"] = quote.previous_close
+        updated_row = _update_row_from_quote(updated_row, quote, status=QUOTE_STATUS_UPDATED, provider=provider)
         statuses.append(
-            PriceUpdateStatus(
+            _status_from_quote(
                 symbol=symbol,
                 market=market,
                 currency=currency,
-                status="updated",
+                status=QUOTE_STATUS_UPDATED,
                 message="미국 주식 최근 제공 가격으로 current_price와 previous_close를 업데이트했습니다.",
-                fetched_at=quote.fetched_at.isoformat(),
+                quote=quote,
             )
         )
         updated_rows.append(updated_row)
@@ -227,6 +252,10 @@ def _update_row_from_quote(
     updated_row["quote_status"] = status
     updated_row["fetched_at"] = quote.fetched_at.isoformat()
     updated_row["provider"] = quote.provider
+    updated_row["source"] = quote.provider
+    updated_row["price_date"] = quote.price_date.isoformat() if quote.price_date is not None else None
+    updated_row["as_of_timestamp"] = quote.as_of_timestamp.isoformat() if quote.as_of_timestamp is not None else quote.fetched_at.isoformat()
+    updated_row["error_message"] = None
     if provider is not None:
         display_name = str(updated_row.get("display_name") or "").strip()
         if not display_name or display_name == str(row.get("ticker")):
@@ -234,6 +263,36 @@ def _update_row_from_quote(
             if provider_name:
                 updated_row["display_name"] = provider_name
                 updated_row["name"] = provider_name
+    return updated_row
+
+
+def _status_from_quote(
+    *,
+    symbol: str,
+    market: str,
+    currency: str,
+    status: str,
+    message: str,
+    quote: ProviderQuote,
+) -> PriceUpdateStatus:
+    return PriceUpdateStatus(
+        symbol=symbol,
+        market=market,
+        currency=currency,
+        status=status,
+        message=message,
+        fetched_at=quote.fetched_at.isoformat(),
+        price_date=quote.price_date.isoformat() if quote.price_date is not None else None,
+        as_of_timestamp=quote.as_of_timestamp.isoformat() if quote.as_of_timestamp is not None else quote.fetched_at.isoformat(),
+        source=quote.provider,
+    )
+
+
+def _mark_quote_error(row: dict[str, object], *, status: str, error_message: object | None) -> dict[str, object]:
+    updated_row = dict(row)
+    updated_row["quote_status"] = status
+    updated_row["error_message"] = str(error_message or "").strip() or None
+    updated_row["source"] = updated_row.get("source") or updated_row.get("provider")
     return updated_row
 
 
@@ -292,7 +351,7 @@ def refresh_holding_quotes(
         if is_us_quote_target(row):
             if provider is None:
                 status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_MISSING
-                updated_row["quote_status"] = status
+                updated_row = _mark_quote_error(updated_row, status=status, error_message="미국 주식 가격 provider를 사용할 수 없습니다.")
                 statuses.append(
                     PriceUpdateStatus(
                         symbol=symbol,
@@ -301,6 +360,10 @@ def refresh_holding_quotes(
                         status=status,
                         message="미국 주식 가격 provider를 사용할 수 없어 최근 제공 가격을 갱신하지 못했습니다.",
                         fetched_at=updated_row.get("fetched_at"),
+                        price_date=updated_row.get("price_date"),
+                        as_of_timestamp=updated_row.get("as_of_timestamp"),
+                        source=updated_row.get("source") or updated_row.get("provider"),
+                        error_message=updated_row.get("error_message"),
                     )
                 )
                 updated_rows.append(updated_row)
@@ -310,7 +373,7 @@ def refresh_holding_quotes(
                 quote, was_cached = _get_quote_with_cache_and_pacing(symbol, provider, quote_cache, pacer)
             except PriceProviderError as exc:
                 status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_FAILED
-                updated_row["quote_status"] = status
+                updated_row = _mark_quote_error(updated_row, status=status, error_message=exc)
                 statuses.append(
                     PriceUpdateStatus(
                         symbol=symbol,
@@ -319,6 +382,10 @@ def refresh_holding_quotes(
                         status=status,
                         message=f"최근 제공 가격 갱신 실패: {exc}. 마지막 정상 가격을 유지했습니다." if has_last_price else f"최근 제공 가격 갱신 실패: {exc}.",
                         fetched_at=updated_row.get("fetched_at"),
+                        price_date=updated_row.get("price_date"),
+                        as_of_timestamp=updated_row.get("as_of_timestamp"),
+                        source=updated_row.get("source") or updated_row.get("provider"),
+                        error_message=updated_row.get("error_message"),
                     )
                 )
                 updated_rows.append(updated_row)
@@ -328,13 +395,13 @@ def refresh_holding_quotes(
             quoted_row = _update_row_from_quote(updated_row, quote, status=status, provider=provider)
             updated_rows.append(_attach_intraday_prices(quoted_row, intraday_provider, symbol=quote.symbol, market=market))
             statuses.append(
-                PriceUpdateStatus(
+                _status_from_quote(
                     symbol=quote.symbol,
                     market=market,
                     currency=currency,
                     status=status,
                     message="캐시된 최근 제공 가격을 사용했습니다." if was_cached else "미국 주식 최근 제공 가격으로 업데이트했습니다.",
-                    fetched_at=quote.fetched_at.isoformat(),
+                    quote=quote,
                 )
             )
             _report_progress(on_progress, len(updated_rows), total_rows, quote.symbol)
@@ -343,7 +410,7 @@ def refresh_holding_quotes(
         if is_korea_update_target(row):
             if korea_provider is None:
                 status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_MISSING
-                updated_row["quote_status"] = status
+                updated_row = _mark_quote_error(updated_row, status=status, error_message="국내 주식 가격 provider를 사용할 수 없습니다.")
                 statuses.append(
                     PriceUpdateStatus(
                         symbol=symbol,
@@ -352,6 +419,10 @@ def refresh_holding_quotes(
                         status=status,
                         message="국내 주식 가격 provider를 사용할 수 없어 마지막 입력 가격을 유지했습니다.",
                         fetched_at=updated_row.get("fetched_at"),
+                        price_date=updated_row.get("price_date"),
+                        as_of_timestamp=updated_row.get("as_of_timestamp"),
+                        source=updated_row.get("source") or updated_row.get("provider"),
+                        error_message=updated_row.get("error_message"),
                     )
                 )
                 updated_rows.append(updated_row)
@@ -361,7 +432,7 @@ def refresh_holding_quotes(
                 quote, was_cached = _get_quote_with_cache(symbol, korea_provider, quote_cache)
             except PriceProviderError as exc:
                 status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_FAILED
-                updated_row["quote_status"] = status
+                updated_row = _mark_quote_error(updated_row, status=status, error_message=exc)
                 statuses.append(
                     PriceUpdateStatus(
                         symbol=symbol,
@@ -370,6 +441,10 @@ def refresh_holding_quotes(
                         status=status,
                         message=f"국내 주식 최근 제공 가격 갱신 실패: {exc}. 마지막 정상 가격을 유지했습니다." if has_last_price else f"국내 주식 최근 제공 가격 갱신 실패: {exc}.",
                         fetched_at=updated_row.get("fetched_at"),
+                        price_date=updated_row.get("price_date"),
+                        as_of_timestamp=updated_row.get("as_of_timestamp"),
+                        source=updated_row.get("source") or updated_row.get("provider"),
+                        error_message=updated_row.get("error_message"),
                     )
                 )
                 updated_rows.append(updated_row)
@@ -379,20 +454,20 @@ def refresh_holding_quotes(
             quoted_row = _update_row_from_quote(updated_row, quote, status=status, provider=korea_provider)
             updated_rows.append(_attach_intraday_prices(quoted_row, intraday_provider, symbol=quote.symbol, market=market))
             statuses.append(
-                PriceUpdateStatus(
+                _status_from_quote(
                     symbol=quote.symbol,
                     market=market,
                     currency=currency,
                     status=status,
                     message="캐시된 국내 주식 최근 제공 가격을 사용했습니다." if was_cached else "국내 주식 최근 제공 가격으로 업데이트했습니다.",
-                    fetched_at=quote.fetched_at.isoformat(),
+                    quote=quote,
                 )
             )
             _report_progress(on_progress, len(updated_rows), total_rows, quote.symbol)
             continue
 
         status = QUOTE_STATUS_MANUAL if has_last_price else QUOTE_STATUS_MISSING
-        updated_row["quote_status"] = status
+        updated_row = _mark_quote_error(updated_row, status=status, error_message=None)
         statuses.append(
             PriceUpdateStatus(
                 symbol=symbol,
@@ -401,6 +476,10 @@ def refresh_holding_quotes(
                 status=status,
                 message="자동 가격 새로고침 대상이 아니어서 마지막 입력 가격을 유지합니다.",
                 fetched_at=updated_row.get("fetched_at"),
+                price_date=updated_row.get("price_date"),
+                as_of_timestamp=updated_row.get("as_of_timestamp"),
+                source=updated_row.get("source") or updated_row.get("provider"),
+                error_message=updated_row.get("error_message"),
             )
         )
         updated_rows.append(updated_row)
@@ -421,6 +500,7 @@ def refresh_usd_krw(
         return current_usd_krw, FxUpdateStatus(
             status=QUOTE_STATUS_MISSING,
             message="USD/KRW 환율 provider를 사용할 수 없어 수동 환율을 유지했습니다.",
+            source="manual",
         )
     fx_cache = cache or DEFAULT_FX_CACHE
     try:
@@ -429,10 +509,14 @@ def refresh_usd_krw(
         return current_usd_krw, FxUpdateStatus(
             status=QUOTE_STATUS_FAILED,
             message=f"USD/KRW 환율 갱신 실패: {exc}. 기존 수동 환율을 유지했습니다.",
+            error_message=str(exc),
         )
     status = QUOTE_STATUS_CACHED if was_cached else QUOTE_STATUS_UPDATED
     return rate.rate, FxUpdateStatus(
         status=status,
         message="캐시된 USD/KRW 환율을 사용했습니다." if was_cached else "USD/KRW 환율을 갱신했습니다.",
         fetched_at=rate.fetched_at.isoformat(),
+        rate_date=rate.rate_date.isoformat() if rate.rate_date is not None else None,
+        as_of_timestamp=rate.as_of_timestamp.isoformat() if rate.as_of_timestamp is not None else rate.fetched_at.isoformat(),
+        source=rate.provider,
     )

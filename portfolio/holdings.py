@@ -44,6 +44,10 @@ HOLDING_COLUMNS = [
     "quote_status",
     "fetched_at",
     "provider",
+    "price_date",
+    "as_of_timestamp",
+    "source",
+    "error_message",
 ]
 
 
@@ -221,6 +225,10 @@ def normalize_holding_row(row: Mapping[str, Any]) -> dict[str, object]:
         "quote_status": quote_status,
         "fetched_at": clean_text(row.get("fetched_at")) or None,
         "provider": clean_text(row.get("provider")) or ("manual" if current_price is not None else None),
+        "price_date": clean_text(row.get("price_date")) or None,
+        "as_of_timestamp": clean_text(row.get("as_of_timestamp")) or None,
+        "source": clean_text(row.get("source")) or clean_text(row.get("provider")) or ("manual" if current_price is not None else None),
+        "error_message": clean_text(row.get("error_message")) or None,
         "intraday_prices": intraday_prices,
         "intraday_provider": clean_text(row.get("intraday_provider")) or None,
         "intraday_fetched_at": clean_text(row.get("intraday_fetched_at")) or None,

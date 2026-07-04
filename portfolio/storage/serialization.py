@@ -56,6 +56,11 @@ def _last_known_quotes(holdings: Iterable[Mapping[str, Any]]) -> dict[str, dict[
             "currency": row.get("currency"),
             "provider": row.get("provider"),
             "fetched_at": row.get("fetched_at"),
+            "price_date": row.get("price_date"),
+            "as_of_timestamp": row.get("as_of_timestamp"),
+            "source": row.get("source") or row.get("provider"),
+            "status": row.get("quote_status"),
+            "error_message": row.get("error_message"),
         }
     return quotes
 
@@ -71,6 +76,7 @@ def serialize_portfolio_payload(
     cash_usd: object = 0.0,
     transactions: Iterable[Mapping[str, Any]] | None = None,
     cash_ledger: Iterable[Mapping[str, Any]] | None = None,
+    fx_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, object]:
     try:
         holdings = normalize_holding_rows(rows)
@@ -100,6 +106,7 @@ def serialize_portfolio_payload(
         "last_known_quotes": _last_known_quotes(holdings),
         "quote_status": _quote_status(holdings),
         "usd_krw": clean_usd_krw,
+        "fx_metadata": dict(fx_metadata or {}),
     }
 
 
@@ -150,6 +157,7 @@ def deserialize_portfolio_payload_v2(payload_json: Mapping[str, Any]) -> dict[st
         cash_usd=parse_non_negative_float("cash_usd", cash_balances.get("USD", 0.0)),
         transactions=payload_json.get("transactions") if schema_version == SCHEMA_VERSION else [],
         cash_ledger=payload_json.get("cash_ledger") if schema_version == SCHEMA_VERSION else [],
+        fx_metadata=payload_json.get("fx_metadata") if isinstance(payload_json.get("fx_metadata"), Mapping) else {},
     )
     last_known_quotes = payload_json.get("last_known_quotes")
     quote_status = payload_json.get("quote_status")

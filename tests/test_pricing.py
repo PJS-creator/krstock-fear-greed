@@ -181,6 +181,7 @@ def test_yfinance_history_frame_parsing_uses_latest_and_previous_close():
     assert quote.price == pytest.approx(181.75)
     assert quote.previous_close == pytest.approx(182.25)
     assert quote.provider == "yfinance"
+    assert quote.price_date.isoformat() == "2026-06-30"
 
 
 def test_yfinance_provider_uses_configured_history_loader():
@@ -243,6 +244,7 @@ def test_yfinance_fx_provider_uses_krw_equals_symbol():
     assert rate.from_currency == "USD"
     assert rate.to_currency == "KRW"
     assert rate.rate == pytest.approx(1380.5)
+    assert rate.rate_date.isoformat() == "2026-06-30"
 
 
 def test_yahoo_chart_fx_response_uses_latest_valid_close():
@@ -257,7 +259,8 @@ def test_yahoo_chart_fx_response_uses_latest_valid_close():
                                     "close": [None, 1377.25, 1381.5],
                                 }
                             ]
-                        }
+                        },
+                        "timestamp": [1782777600, 1782864000, 1782950400],
                     }
                 ],
                 "error": None,
@@ -269,6 +272,7 @@ def test_yahoo_chart_fx_response_uses_latest_valid_close():
     assert rate.to_currency == "KRW"
     assert rate.rate == pytest.approx(1381.5)
     assert rate.provider == "yahoo-chart"
+    assert rate.as_of_timestamp is not None
 
 
 def test_yahoo_chart_fx_provider_uses_short_timeout_loader():
@@ -422,5 +426,8 @@ def test_fx_refresh_uses_cache_and_failure_keeps_manual_rate():
     assert provider.fx_calls == [("USD", "KRW")]
     assert first_status.status == "updated"
     assert second_status.status == "cached"
+    assert first_status.source == "fake"
+    assert first_status.as_of_timestamp is not None
     assert failed_rate == 1300
     assert failed_status.status == "failed"
+    assert failed_status.error_message == "temporary provider outage"

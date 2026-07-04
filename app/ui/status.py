@@ -23,13 +23,13 @@ from portfolio.symbols import build_input_preview, parse_symbol_quantity_lines, 
 from .formatters import format_kst
 
 STATUS_LABELS = {
-    "updated": "최신",
-    "cached": "캐시",
-    "stale": "이전 가격",
-    "failed": "실패",
-    "missing": "미조회",
+    "updated": "정상_최근종가",
+    "cached": "정상_캐시",
+    "stale": "이전저장값사용",
+    "failed": "조회실패",
+    "missing": "티커미확인",
     "missing_api_key": "API key 없음",
-    "manual": "수동",
+    "manual": "수동입력값",
 }
 
 ISSUE_STATUSES = {"stale", "failed", "missing", "missing_api_key"}
@@ -75,7 +75,7 @@ class PriceStatusSummary:
 
     @property
     def detail_text(self) -> str:
-        return f"최신 {self.updated} · 캐시 {self.cached} · 이전 가격 {self.stale} · 실패 {self.failed} · 미조회 {self.missing}"
+        return f"정상 {self.updated} · 캐시 {self.cached} · 이전저장값 {self.stale} · 실패 {self.failed} · 미조회 {self.missing}"
 
 
 @dataclass(frozen=True)
@@ -147,6 +147,10 @@ def build_price_log_rows(statuses: Iterable[object], holdings_rows: Iterable[Map
                 "provider": holding.get("provider") or "-",
                 "상태": quote_status_label(_get_value(status, "status", "")),
                 "조회 시각": format_kst(_get_value(status, "fetched_at", holding.get("fetched_at")), compact=True),
+                "가격 기준일": _get_value(status, "price_date", holding.get("price_date")) or "-",
+                "기준시각": format_kst(_get_value(status, "as_of_timestamp", holding.get("as_of_timestamp")), compact=True),
+                "출처": _get_value(status, "source", holding.get("source") or holding.get("provider") or "-"),
+                "오류": _get_value(status, "error_message", holding.get("error_message")) or "",
                 "message": str(_get_value(status, "message", "")).strip(),
                 "raw_status": str(_get_value(status, "status", "")).lower(),
             }

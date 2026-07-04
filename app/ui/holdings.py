@@ -28,7 +28,7 @@ STATUS_FILTERS = {
     "문제만": "__issues__",
     "최신": "updated",
     "캐시": "cached",
-    "이전 가격": "stale",
+    "이전저장값": "stale",
     "실패": "failed",
     "미조회": "missing",
     "수동": "manual",
@@ -44,6 +44,10 @@ ADVANCED_TEXT_COLUMNS = [
     "quote_status",
     "fetched_at",
     "provider",
+    "price_date",
+    "as_of_timestamp",
+    "source",
+    "error_message",
 ]
 
 
@@ -271,6 +275,10 @@ def _holdings_table_rows(metrics: PortfolioMetrics) -> list[dict[str, object]]:
                 "가격 상태": quote_status_label(holding.get("quote_status")),
                 "raw_status": str(holding.get("quote_status") or ""),
                 "조회 시각": format_kst(holding.get("fetched_at"), compact=True),
+                "가격 기준일": holding.get("price_date") or "-",
+                "기준시각": format_kst(holding.get("as_of_timestamp"), compact=True),
+                "출처": holding.get("source") or holding.get("provider") or "-",
+                "오류": holding.get("error_message") or "",
                 "provider": holding.get("provider") or "-",
                 "비중 표시": percentage(item.weight),
             }
@@ -374,7 +382,7 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
         return
 
     base_columns = ["종목", "시장", "수량 표시", "최근 제공 가격 표시", "평가액 표시", "오늘 변동액", "오늘 변동률", "비중", "가격 상태", "조회 시각"]
-    detail_columns = ["ticker", "종목명", "통화", "평균단가 표시", "provider", "비중 표시"]
+    detail_columns = ["ticker", "종목명", "통화", "평균단가 표시", "가격 기준일", "기준시각", "출처", "오류", "provider", "비중 표시"]
     visible_columns = base_columns + detail_columns if show_details else base_columns
     _render_mobile_holdings_cards(frame)
     st.dataframe(
@@ -396,5 +404,9 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
             "비중": st.column_config.ProgressColumn("비중", min_value=0, max_value=100, format="%.1f%%"),
             "가격 상태": st.column_config.TextColumn("가격 상태"),
             "조회 시각": st.column_config.TextColumn("조회 시각"),
+            "가격 기준일": st.column_config.TextColumn("가격 기준일"),
+            "기준시각": st.column_config.TextColumn("기준시각"),
+            "출처": st.column_config.TextColumn("출처"),
+            "오류": st.column_config.TextColumn("오류"),
         },
     )
