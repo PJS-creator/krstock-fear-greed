@@ -5,6 +5,7 @@ from typing import Callable
 import pandas as pd
 import streamlit as st
 
+from portfolio.cash_ledger import calculate_cash_balances
 from portfolio.history import PortfolioHistoryStore, build_history_record
 from portfolio.holdings import HOLDING_COLUMNS, PortfolioMetrics, normalize_holding_rows
 from portfolio.storage import (
@@ -52,13 +53,22 @@ def list_portfolios_cached(_store: PortfolioStore, owner_id: str) -> list[Portfo
 def queue_portfolio_record_load(record: PortfolioRecord) -> None:
     payload = deserialize_portfolio_payload_v2(record.payload_json)
     cash = payload["cash_balances"]
+    cash_ledger = list(payload.get("cash_ledger", []))
+    if cash_ledger:
+        ledger_balances = calculate_cash_balances(cash_ledger)
+        cash_krw = float(ledger_balances["KRW"])
+        cash_usd = float(ledger_balances["USD"])
+    else:
+        cash_krw = float(cash.get("KRW", 0.0))
+        cash_usd = float(cash.get("USD", 0.0))
     _queue_portfolio_state_update(
         portfolio_name=record.portfolio_name,
         portfolio_transactions=payload.get("transactions", []),
+        cash_ledger_entries=cash_ledger,
         holdings_rows=payload["holdings"],
         usd_krw=float(payload["usd_krw"]),
-        cash_krw=float(cash.get("KRW", 0.0)),
-        cash_usd=float(cash.get("USD", 0.0)),
+        cash_krw=cash_krw,
+        cash_usd=cash_usd,
     )
     _set_storage_status(f"{record.portfolio_name} 포트폴리오를 불러왔습니다.")
 
@@ -114,6 +124,7 @@ def render_storage_tools(
                     cash_krw=st.session_state.get("cash_krw", 0.0),
                     cash_usd=st.session_state.get("cash_usd", 0.0),
                     transactions=st.session_state.get("portfolio_transactions", []),
+                    cash_ledger=st.session_state.get("cash_ledger_entries", []),
                 )
                 store.save_portfolio(owner_id, clean_name, payload)
                 if history_store is not None:

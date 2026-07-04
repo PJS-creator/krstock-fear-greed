@@ -39,6 +39,9 @@ def test_portfolio_payload_round_trip():
         transactions=[
             {"transaction_type": "매입", "ticker_or_name": "ABC", "unit_price": "100", "quantity": "2", "occurred_at": "2026-01-01"}
         ],
+        cash_ledger=[
+            {"event_date": "2026-01-01", "currency": "KRW", "event_type": "deposit", "amount": "10000"}
+        ],
     )
 
     rows, usd_krw, cash_krw = deserialize_portfolio_payload(payload)
@@ -53,6 +56,8 @@ def test_portfolio_payload_round_trip():
     assert v2["last_known_quotes"]["ABC"]["current_price"] == 125.0
     assert v2["transactions"][0]["transaction_type"] == "buy"
     assert v2["transactions"][0]["ticker"] == "ABC"
+    assert v2["cash_ledger"][0]["event_type"] == "deposit"
+    assert v2["cash_ledger"][0]["amount"] == "10000"
 
 
 def test_v1_payload_migrates_to_current_schema():
