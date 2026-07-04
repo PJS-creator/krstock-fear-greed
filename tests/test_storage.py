@@ -58,6 +58,10 @@ def test_portfolio_payload_round_trip():
             "status": "updated",
             "fetched_at": "2026-06-30T15:01:00+00:00",
         },
+        target_allocations=[
+            {"asset_type": "stock", "symbol": "ABC", "market": "US", "currency": "USD", "display_name": "ABC", "target_weight_pct": 70},
+            {"asset_type": "cash", "currency": "KRW", "target_weight_pct": 30},
+        ],
     )
 
     rows, usd_krw, cash_krw = deserialize_portfolio_payload(payload)
@@ -74,6 +78,9 @@ def test_portfolio_payload_round_trip():
     assert v2["last_known_quotes"]["ABC"]["price_date"] == "2026-06-30"
     assert v2["fx_metadata"]["source"] == "yahoo-chart"
     assert v2["fx_metadata"]["rate_date"] == "2026-06-30"
+    assert v2["target_allocations"][0]["symbol"] == "ABC"
+    assert v2["target_allocations"][0]["target_weight_pct"] == 70.0
+    assert v2["target_allocations"][1]["symbol"] == "CASH_KRW"
     assert v2["transactions"][0]["transaction_type"] == "buy"
     assert v2["transactions"][0]["ticker"] == "ABC"
     assert v2["cash_ledger"][0]["event_type"] == "deposit"
@@ -104,6 +111,7 @@ def test_v2_payload_loads_without_transactions_for_backward_compatibility():
     assert payload["schema_version"] == 3
     assert payload["holdings"][0]["ticker"] == "ABC"
     assert payload["transactions"] == []
+    assert payload["target_allocations"] == []
 
 
 def test_memory_store_save_load_and_delete():
