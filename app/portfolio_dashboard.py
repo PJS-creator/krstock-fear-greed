@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import logging
 import os
 from pathlib import Path
 import sys
@@ -19,6 +20,7 @@ import pandas as pd
 import streamlit as st
 
 SUPPORTED_PYTHON_RUNTIMES = {(3, 11), (3, 12)}
+LOGGER = logging.getLogger(__name__)
 
 
 def _is_supported_python_runtime(version_info=sys.version_info) -> bool:
@@ -53,6 +55,7 @@ from app.ui.manage import (
 from app.ui.overview import render_overview
 from app.ui.rebalancing import render_rebalancing
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
+from app.ui.stability import begin_ui_action, finish_ui_action, render_action_guard_notice, request_app_rerun, reset_stale_ui_action_guard
 from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles
 from app.ui.theme import APP_THEME_KEY, DEFAULT_THEME_MODE, THEME_MODE_ALIAS_KEY, normalize_theme_mode
 from app.ui.transactions import render_transaction_cashflow, render_transaction_editor
@@ -454,6 +457,7 @@ def _apply_pending_portfolio_state() -> None:
 
 
 def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
+    reset_stale_ui_action_guard()
     st.session_state.setdefault(AUTHENTICATED_KEY, False)
     st.session_state.setdefault(PORTFOLIO_NAME_KEY, "main")
     pending_portfolio_name = st.session_state.pop(PENDING_PORTFOLIO_NAME_KEY, None)
@@ -516,7 +520,7 @@ def _render_login_form(config: AppSecurityConfig) -> None:
         account = verify_account(selected_account_id, candidate_password, config)
         if account is not None:
             _authenticate_account(account)
-            st.rerun()
+            request_app_rerun()
         st.error("계정 또는 비밀번호가 올바르지 않습니다.")
     st.stop()
 
@@ -546,7 +550,7 @@ def _render_public_auth_gate(storage_config) -> None:
                 st.error(str(exc))
             else:
                 _authenticate_public_account(account)
-                st.rerun()
+                request_app_rerun()
 
     with signup_tab:
         with st.form("public_signup_form"):
@@ -565,7 +569,7 @@ def _render_public_auth_gate(storage_config) -> None:
                 else:
                     if result.account is not None:
                         _authenticate_public_account(result.account)
-                        st.rerun()
+                        request_app_rerun()
                     if result.confirmation_required:
                         st.success("회원가입 요청을 보냈습니다. Supabase Auth 설정에서 이메일 확인이 켜져 있으면 메일 확인 후 로그인하세요.")
     st.stop()
@@ -579,7 +583,7 @@ def _render_security_status(config: AppSecurityConfig, *, public_auth_enabled: b
             st.caption(f"상태: 로그인됨 · {account_id}")
             if st.button("로그아웃", icon=":material/logout:"):
                 _logout()
-                st.rerun()
+                request_app_rerun()
             return
         if not config.has_password:
             st.warning(UNPROTECTED_WARNING)
@@ -589,7 +593,7 @@ def _render_security_status(config: AppSecurityConfig, *, public_auth_enabled: b
             st.caption(f"상태: 인증됨 · {account_id}")
             if st.button("로그아웃", icon=":material/logout:"):
                 _logout()
-                st.rerun()
+                request_app_rerun()
         else:
             st.caption("직접 입력 기능은 비밀번호가 필요합니다.")
 
@@ -698,8 +702,9 @@ def _save_current_portfolio(owner_id, store, target_allocation_store, history_st
                 )
             )
         st.session_state[SAVE_STATUS_KEY] = f"{portfolio_name} 포트폴리오를 저장했습니다."
-        st.rerun()
+        request_app_rerun()
     except (PortfolioStoreError, ValueError) as exc:
+        finish_ui_action(success=False)
         st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
 
 
@@ -792,12 +797,12 @@ def _refresh_prices(
     mode: str = "전체 강제 재조회",
     refresh_fx: bool = True,
     public_auth_enabled: bool = False,
-) -> None:
+) -> bool:
     holdings_rows = list(st.session_state.get("holdings_rows") or [])
     has_usd_cash = float(st.session_state.get("cash_usd") or 0.0) > 0
     if not holdings_rows and not (refresh_fx and has_usd_cash):
         st.info("조회할 보유종목 또는 달러 현금이 없습니다.")
-        return
+        return False
     progress = st.progress(0, text="최근 제공 가격 조회 준비 중") if holdings_rows else None
 
     def update_progress(completed: int, total: int, symbol: str) -> None:
@@ -806,9 +811,12 @@ def _refresh_prices(
         percent = int((completed / max(total, 1)) * 100)
         progress.progress(percent, text=f"최근 제공 가격 조회 중: {symbol} ({completed}/{total})")
 
-    refreshed = _refresh_price_rows(owner_id, history_store, mode=mode, include_intraday=True, on_progress=update_progress) if holdings_rows else False
-    if progress is not None:
-        progress.empty()
+    refreshed = False
+    try:
+        refreshed = _refresh_price_rows(owner_id, history_store, mode=mode, include_intraday=True, on_progress=update_progress) if holdings_rows else False
+    finally:
+        if progress is not None:
+            progress.empty()
     refreshed_fx = False
     if refresh_fx:
         fx_result = _fetch_fx_rate(public_auth_enabled=public_auth_enabled, force_refresh=True)
@@ -816,8 +824,8 @@ def _refresh_prices(
             refreshed_fx = _apply_fx_rate(*fx_result)
     if not refreshed and not refreshed_fx:
         st.info("새로 조회할 대상 종목이 없습니다.")
-        return
-    st.rerun()
+        return False
+    return True
 
 
 def _run_price_refresh(
@@ -832,10 +840,13 @@ def _run_price_refresh(
     if st.session_state.get(PRICE_REFRESH_IN_PROGRESS_KEY):
         st.warning("가격·환율 갱신이 이미 진행 중입니다.")
         return
+    if not begin_ui_action("price_refresh", payload={"mode": mode, "refresh_fx": refresh_fx}, cooldown_seconds=2.0):
+        return
     st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = True
+    should_rerun = False
     with st.spinner("가격·환율 갱신 중..."):
         try:
-            _refresh_prices(
+            should_rerun = _refresh_prices(
                 config,
                 owner_id,
                 history_store,
@@ -843,8 +854,14 @@ def _run_price_refresh(
                 refresh_fx=refresh_fx,
                 public_auth_enabled=public_auth_enabled,
             )
+        except Exception as exc:
+            LOGGER.exception("price_refresh_failed type=%s message=%s", type(exc).__name__, exc)
+            st.session_state[ACCOUNT_STATUS_KEY] = f"가격·환율 갱신 실패: {exc}. 기존 값을 유지했습니다."
         finally:
             st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = False
+            finish_ui_action(success=True)
+    if should_rerun:
+        request_app_rerun()
 
 
 def _fetch_fx_rate(*, public_auth_enabled: bool = False, force_refresh: bool = False):
@@ -877,9 +894,20 @@ def _apply_fx_rate(new_rate, status) -> bool:
 
 
 def _refresh_fx(_config: AppSecurityConfig, *, public_auth_enabled: bool = False) -> None:
+    if not begin_ui_action("fx_refresh", payload={"public": public_auth_enabled}, cooldown_seconds=2.0):
+        return
     with st.spinner("USD/KRW 환율 조회 중..."):
-        result = _fetch_fx_rate(public_auth_enabled=public_auth_enabled, force_refresh=True)
+        try:
+            result = _fetch_fx_rate(public_auth_enabled=public_auth_enabled, force_refresh=True)
+        except Exception as exc:
+            LOGGER.exception("fx_refresh_failed type=%s message=%s", type(exc).__name__, exc)
+            st.session_state.fx_status_message = f"USD/KRW 환율 갱신 실패: {exc}. 기존 값을 유지했습니다."
+            st.session_state.fx_status = "failed"
+            st.session_state.fx_error_message = str(exc)
+            finish_ui_action(success=False)
+            return
     if result is None:
+        finish_ui_action(success=False)
         return
     new_rate, status = result
     st.session_state[PENDING_PORTFOLIO_STATE_KEY] = {
@@ -892,7 +920,7 @@ def _refresh_fx(_config: AppSecurityConfig, *, public_auth_enabled: bool = False
         "fx_status": status.status,
         "fx_error_message": status.error_message,
     }
-    st.rerun()
+    request_app_rerun()
 
 
 def _cash_fx_input_signature() -> str:
@@ -945,7 +973,7 @@ def _queue_manual_cash_adjustment() -> None:
         pending_state["fx_status"] = "manual"
         pending_state["fx_error_message"] = None
     st.session_state[PENDING_PORTFOLIO_STATE_KEY] = pending_state
-    st.rerun()
+    request_app_rerun()
 
 
 def _queue_cash_ledger_rows(rows: list[dict[str, object]], *, allow_negative: bool | None = None) -> None:
@@ -964,7 +992,7 @@ def _queue_cash_ledger_rows(rows: list[dict[str, object]], *, allow_negative: bo
         "cash_krw": float(cash_balances["KRW"]),
         "cash_usd": float(cash_balances["USD"]),
     }
-    st.rerun()
+    request_app_rerun()
 
 
 def _render_cash_balance_cards() -> None:
@@ -1009,13 +1037,18 @@ def _render_cash_movement_form() -> None:
     if not submitted:
         return
     event_type = CASH_MOVEMENT_EVENT_BY_LABEL[event_label]
+    action_payload = {"event_type": event_type, "currency": currency, "amount": amount, "event_date": event_date.isoformat(), "memo": memo}
+    if not begin_ui_action("cash_movement", payload=action_payload):
+        return
     if event_type == "manual_adjustment":
         signed_amount = amount
         if abs(signed_amount) <= 1e-12:
+            finish_ui_action(success=False)
             st.error("수동 조정 금액은 0이 아니어야 합니다.")
             return
     else:
         if amount <= 0:
+            finish_ui_action(success=False)
             st.error("금액은 0보다 커야 합니다.")
             return
         signed_amount = -amount if event_type == "withdrawal" else amount
@@ -1033,6 +1066,7 @@ def _render_cash_movement_form() -> None:
             ]
         )
     except ValueError as exc:
+        finish_ui_action(success=False)
         st.error(f"현금 원장을 반영할 수 없습니다: {exc}")
 
 
@@ -1050,6 +1084,17 @@ def _render_fx_conversion_form() -> None:
         submitted = st.form_submit_button("환전 저장", type="primary")
     if not submitted:
         return
+    action_payload = {
+        "from_currency": from_currency,
+        "to_currency": to_currency,
+        "from_amount": from_amount,
+        "fx_rate": fx_rate,
+        "fee": fee,
+        "event_date": event_date.isoformat(),
+        "memo": memo,
+    }
+    if not begin_ui_action("fx_conversion", payload=action_payload):
+        return
     try:
         _queue_cash_ledger_rows(
             create_fx_conversion_entries(
@@ -1064,6 +1109,7 @@ def _render_fx_conversion_form() -> None:
             )
         )
     except ValueError as exc:
+        finish_ui_action(success=False)
         st.error(f"환전을 반영할 수 없습니다: {exc}")
 
 
@@ -1077,7 +1123,17 @@ def _render_manual_cash_adjustment() -> None:
             col3.number_input("USD/KRW 환율", min_value=0.01, step=1.0, key=INLINE_USD_KRW_KEY)
             submitted = st.form_submit_button("현금 조정/환율 적용", type="primary")
         if submitted:
-            _queue_manual_cash_adjustment()
+            action_payload = {
+                "cash_krw": st.session_state.get(INLINE_CASH_KRW_KEY),
+                "cash_usd": st.session_state.get(INLINE_CASH_USD_KEY),
+                "usd_krw": st.session_state.get(INLINE_USD_KRW_KEY),
+            }
+            if begin_ui_action("manual_cash_adjustment", payload=action_payload):
+                try:
+                    _queue_manual_cash_adjustment()
+                except ValueError as exc:
+                    finish_ui_action(success=False)
+                    st.error(f"현금 조정을 반영할 수 없습니다: {exc}")
 
 
 def _ledger_display_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -1155,6 +1211,14 @@ def _render_cash_ledger_table() -> None:
             submitted = st.form_submit_button("취소 조정 추가")
         if submitted:
             selected_row = filtered_rows[labels.index(selected_label)]
+            action_payload = {
+                "currency": selected_row.get("currency"),
+                "amount": selected_row.get("amount"),
+                "event_date": cancel_date.isoformat(),
+                "memo": memo,
+            }
+            if not begin_ui_action("cash_ledger_cancel", payload=action_payload):
+                return
             try:
                 _queue_cash_ledger_rows(
                     [
@@ -1169,6 +1233,7 @@ def _render_cash_ledger_table() -> None:
                     ]
                 )
             except ValueError as exc:
+                finish_ui_action(success=False)
                 st.error(f"취소 조정을 추가할 수 없습니다: {exc}")
 
 
@@ -1241,9 +1306,14 @@ def _auto_refresh_loaded_prices(owner_id, store, target_allocation_store, histor
     if st.session_state.get(AUTO_PRICE_REFRESHED_KEY) == refresh_key:
         return
     st.session_state[AUTO_PRICE_REFRESHED_KEY] = refresh_key
-    fx_result = _fetch_fx_rate()
-    refreshed_fx = _apply_fx_rate(*fx_result) if fx_result is not None else False
-    refreshed = _refresh_price_rows(owner_id, history_store, mode="전체 강제 재조회", include_intraday=False) if holdings_rows else False
+    try:
+        fx_result = _fetch_fx_rate()
+        refreshed_fx = _apply_fx_rate(*fx_result) if fx_result is not None else False
+        refreshed = _refresh_price_rows(owner_id, history_store, mode="전체 강제 재조회", include_intraday=False) if holdings_rows else False
+    except Exception as exc:
+        LOGGER.exception("auto_price_refresh_failed type=%s message=%s", type(exc).__name__, exc)
+        st.session_state[ACCOUNT_STATUS_KEY] = f"자동 가격 갱신에 실패했습니다: {exc}. 저장된 값을 유지했습니다."
+        return
     if not refreshed and not refreshed_fx:
         return
     if store is not None:
@@ -1282,10 +1352,13 @@ def _render_saved_portfolio_selector(owner_id, store) -> None:
         if _portfolio_is_dirty():
             st.warning("저장하지 않은 변경이 있습니다. 관리 탭에서 저장한 뒤 다른 포트폴리오를 불러오세요.")
         if st.button("선택 포트폴리오 불러오기", disabled=_portfolio_is_dirty(), width="stretch", icon=":material/folder_open:"):
+            if not begin_ui_action("sidebar_load_portfolio", payload={"portfolio_name": selected.portfolio_name}):
+                return
             try:
                 queue_portfolio_record_load(selected)
-                st.rerun()
+                request_app_rerun()
             except (PortfolioStoreError, ValueError) as exc:
+                finish_ui_action(success=False)
                 st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
     st.caption("새 포트폴리오 생성과 이름 변경은 관리 탭에서 처리합니다.")
 
@@ -1305,14 +1378,18 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
         if _portfolio_is_dirty():
             st.caption("저장하지 않은 변경 있음")
             if st.button("변경사항 되돌리기", width="stretch", icon=":material/undo:"):
+                if not begin_ui_action("sidebar_restore_last_saved", payload={"portfolio_name": _current_portfolio_name()}):
+                    return
                 _restore_last_saved_state()
-                st.rerun()
+                request_app_rerun()
         else:
             st.caption("저장됨")
         confirm_reset = st.checkbox("현재 입력 초기화 확인", key="confirm_reset_portfolio")
         if st.button("현재 입력 초기화", disabled=not confirm_reset, width="stretch", icon=":material/delete:"):
+            if not begin_ui_action("sidebar_reset_portfolio", payload={"portfolio_name": _current_portfolio_name()}):
+                return
             _reset_current_portfolio_state(_current_portfolio_name())
-            st.rerun()
+            request_app_rerun()
         with st.expander("현금 및 환율", expanded=True):
             st.number_input("원화 현금", min_value=0.0, step=100000.0, key="cash_krw")
             st.number_input("달러 현금", min_value=0.0, step=100.0, key="cash_usd")
@@ -1357,10 +1434,17 @@ def _render_header(config: AppSecurityConfig, owner_id, store, target_allocation
         st.session_state[PRICE_REFRESH_MODE_KEY] = "실패 종목만"
         _run_price_refresh(config, owner_id, history_store, mode="실패 종목만", refresh_fx=False, public_auth_enabled=public_auth_enabled)
     if actions["save"]:
-        _save_current_portfolio(owner_id, store, target_allocation_store, history_store, metrics)
+        if begin_ui_action("manual_portfolio_save", payload={"portfolio": _current_portfolio_name()}):
+            try:
+                _save_current_portfolio(owner_id, store, target_allocation_store, history_store, metrics)
+            except Exception as exc:
+                finish_ui_action(success=False)
+                LOGGER.exception("manual_portfolio_save_failed type=%s message=%s", type(exc).__name__, exc)
+                st.error(f"포트폴리오 저장 중 문제가 발생했습니다: {exc}")
 
 
 def _render_status_messages() -> None:
+    render_action_guard_notice()
     account_message = st.session_state.pop(ACCOUNT_STATUS_KEY, None)
     if account_message:
         st.info(account_message)

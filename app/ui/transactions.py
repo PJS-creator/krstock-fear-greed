@@ -33,6 +33,7 @@ from portfolio.transactions import (
 from .charts import plot_transaction_cashflow
 from .components import render_plotly_chart
 from .formatters import format_number, format_price, full_krw
+from .stability import begin_ui_action, finish_ui_action, request_app_rerun
 from .theme import DIMENSIONS
 
 TRANSACTION_PREVIEW_STATE_KEY = "transaction_preview_rows"
@@ -246,7 +247,7 @@ def _append_transactions(new_transactions: list[dict[str, object]]) -> None:
     st.session_state.cash_usd = float(cash_balances["USD"])
     st.session_state.pop(TRANSACTION_PREVIEW_STATE_KEY, None)
     _set_message("거래내역과 현금 원장을 반영했습니다. 전체 보유현황이 거래 기준으로 다시 계산되었습니다.")
-    st.rerun()
+    request_app_rerun()
 
 
 def _build_preview(rows: list[dict[str, object]], *, auto_market_hint: bool = False) -> None:
@@ -310,9 +311,12 @@ def _render_preview() -> None:
     )
     ok_rows = [row for row in preview_rows if row.get("status") == "ok"]
     if st.button("오류 없는 거래 반영", disabled=not ok_rows, type="primary"):
+        if not begin_ui_action("apply_transaction_preview", payload=ok_rows):
+            return
         try:
             _append_transactions(preview_rows_to_transactions(ok_rows))
         except ValueError as exc:
+            finish_ui_action(success=False)
             st.error(_format_transaction_error(exc))
 
 
@@ -421,6 +425,8 @@ def _render_legacy_holdings_migration() -> None:
     col1, col2 = st.columns([1, 2], vertical_alignment="bottom")
     opening_date = col1.date_input("시작 거래 시점", value=date.today(), key="opening_transaction_date")
     if col2.button("현재 보유현황을 시작 매입 거래로 전환"):
+        if not begin_ui_action("convert_opening_transactions", payload={"date": opening_date.isoformat(), "rows": list(st.session_state.get("holdings_rows", []))}):
+            return
         try:
             opening_transactions = _opening_transactions_from_holdings(
                 list(st.session_state.get("holdings_rows", [])),
@@ -428,8 +434,9 @@ def _render_legacy_holdings_migration() -> None:
             )
             _rebuild_holdings_from_transactions(opening_transactions)
             _set_message("기존 보유현황을 시작 매입 거래로 전환했습니다.")
-            st.rerun()
+            request_app_rerun()
         except ValueError as exc:
+            finish_ui_action(success=False)
             st.error(str(exc))
 
 
@@ -526,6 +533,8 @@ def _render_transaction_ledger() -> None:
             },
         )
         if st.button("거래내역 수정 적용"):
+            if not begin_ui_action("apply_transaction_editor", payload=edited.to_dict("records")):
+                return
             try:
                 edited_transactions = edited.to_dict("records")
                 next_ledger, cash_balances = _cash_ledger_for_all_transactions(edited_transactions)
@@ -534,8 +543,9 @@ def _render_transaction_ledger() -> None:
                 st.session_state.cash_krw = float(cash_balances["KRW"])
                 st.session_state.cash_usd = float(cash_balances["USD"])
                 _set_message("수정한 거래내역과 현금 원장을 반영했습니다.")
-                st.rerun()
+                request_app_rerun()
             except ValueError as exc:
+                finish_ui_action(success=False)
                 st.error(_format_transaction_error(exc))
 
 

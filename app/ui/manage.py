@@ -20,6 +20,7 @@ from portfolio.storage import (
 )
 from portfolio.transactions import TRANSACTION_COLUMNS, normalize_transaction_rows, rows_to_csv as transaction_rows_to_csv
 from .formatters import format_kst
+from .stability import begin_ui_action, finish_ui_action, request_app_rerun
 
 STORAGE_UNCONFIGURED_MESSAGE = "저장소가 설정되지 않아 CSV 방식만 사용할 수 있습니다"
 PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
@@ -139,6 +140,8 @@ def render_storage_tools(
         if not clean_name:
             st.error("포트폴리오 이름을 입력하세요.")
         else:
+            if not begin_ui_action("storage_save_portfolio", payload={"portfolio_name": clean_name}):
+                return
             try:
                 payload = serialize_portfolio_payload(
                     st.session_state.get("holdings_rows", []),
@@ -178,8 +181,9 @@ def render_storage_tools(
                 st.cache_data.clear()
                 _queue_portfolio_name_update(clean_name)
                 _set_storage_status(f"{clean_name} 포트폴리오를 저장했습니다.")
-                st.rerun()
+                request_app_rerun()
             except (PortfolioStoreError, ValueError) as exc:
+                finish_ui_action(success=False)
                 st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
 
     try:
@@ -197,10 +201,13 @@ def render_storage_tools(
     col1, col2 = st.columns(2)
     confirm_load = st.checkbox("현재 입력을 선택 포트폴리오로 교체 확인", key=f"load_{selected.portfolio_name}")
     if col1.button("선택 포트폴리오 불러오기", disabled=not confirm_load):
+        if not begin_ui_action("storage_load_portfolio", payload={"portfolio_name": selected.portfolio_name}):
+            return
         try:
             queue_portfolio_record_load(selected, target_allocation_store=target_allocation_store)
-            st.rerun()
+            request_app_rerun()
         except (PortfolioStoreError, ValueError) as exc:
+            finish_ui_action(success=False)
             st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
 
     with st.expander("포트폴리오 이름 변경", expanded=False):
@@ -211,6 +218,8 @@ def render_storage_tools(
             if not clean_name:
                 st.error("새 이름을 입력하세요.")
             else:
+                if not begin_ui_action("storage_rename_portfolio", payload={"from": selected.portfolio_name, "to": clean_name}):
+                    return
                 try:
                     store.save_portfolio(owner_id, clean_name, selected.payload_json)
                     if clean_name != selected.portfolio_name:
@@ -218,20 +227,25 @@ def render_storage_tools(
                     st.cache_data.clear()
                     _queue_portfolio_name_update(clean_name)
                     _set_storage_status(f"{selected.portfolio_name} → {clean_name} 이름을 변경했습니다.")
-                    st.rerun()
+                    request_app_rerun()
                 except PortfolioStoreError as exc:
+                    finish_ui_action(success=False)
                     st.error(f"포트폴리오 이름을 변경할 수 없습니다: {exc}")
 
     confirm = st.checkbox("선택한 포트폴리오를 삭제합니다", key=f"delete_{selected.portfolio_name}")
     if col2.button("선택 포트폴리오 삭제", disabled=not confirm):
+        if not begin_ui_action("storage_delete_portfolio", payload={"portfolio_name": selected.portfolio_name}):
+            return
         try:
             if store.delete_portfolio(owner_id, selected.portfolio_name):
                 st.cache_data.clear()
                 _set_storage_status(f"{selected.portfolio_name} 포트폴리오를 삭제했습니다.")
-                st.rerun()
+                request_app_rerun()
             else:
+                finish_ui_action(success=False)
                 st.error("선택한 포트폴리오를 찾을 수 없습니다.")
         except PortfolioStoreError as exc:
+            finish_ui_action(success=False)
             st.error(f"포트폴리오를 삭제할 수 없습니다: {exc}")
 
 
@@ -246,14 +260,21 @@ def render_manual_capture(
         st.info("Supabase 설정이 없으면 자산 이력 기록을 사용할 수 없습니다.")
         return
     if st.button("현재 상태 기록"):
+        if not begin_ui_action("manual_history_capture", payload={"portfolio_name": st.session_state.get("portfolio_name", "main")}):
+            return
         portfolio_name = st.session_state.get("portfolio_name", "main")
-        history_store.save_snapshot(
-            build_history_record(
-                owner_id=owner_id,
-                portfolio_name=portfolio_name,
-                event_type="manual_capture",
-                metrics=metrics,
+        try:
+            history_store.save_snapshot(
+                build_history_record(
+                    owner_id=owner_id,
+                    portfolio_name=portfolio_name,
+                    event_type="manual_capture",
+                    metrics=metrics,
+                )
             )
-        )
-        st.cache_data.clear()
-        st.success("현재 총자산 스냅샷을 기록했습니다.")
+            st.cache_data.clear()
+            st.success("현재 총자산 스냅샷을 기록했습니다.")
+        except Exception:
+            finish_ui_action(success=False)
+            raise
+        finish_ui_action(success=True)

@@ -53,6 +53,7 @@ from portfolio.symbols import (
 from .charts import plot_reconstructed_holdings_area, plot_reconstructed_total_value
 from .components import render_plotly_chart
 from .formatters import compact_krw, format_kst, format_number, format_price, full_krw, instrument_label, percentage, signed_krw, signed_percentage
+from .stability import begin_ui_action, finish_ui_action, request_app_rerun
 from .status import dirty_signature
 from .theme import DIMENSIONS
 
@@ -320,19 +321,23 @@ def _render_add_date_controls(holding_rows: list[dict[str, Any]]) -> None:
     add_col1, add_col2 = st.columns([1, 2])
     new_date = add_col1.date_input("추가할 기준일", value=date.today(), key="historical_new_snapshot_date")
     if add_col2.button("날짜 추가 - 직전 보유현황 복사", width="stretch"):
+        if not begin_ui_action("historical_add_snapshot_date", payload={"date": new_date.isoformat()}):
+            return
         copied = copy_previous_snapshot(holding_rows, new_date)
         if not copied:
+            finish_ui_action(success=False)
             st.warning("복사할 직전 기준일 보유현황이 없습니다.")
             return
         existing_dates = {str(row.get("as_of_date"))[:10] for row in holding_rows}
         if new_date.isoformat() in existing_dates:
+            finish_ui_action(success=False)
             st.warning("이미 같은 기준일이 있습니다.")
             return
         st.session_state[HOLDINGS_STATE_KEY] = holding_rows + copied
         st.session_state.pop(HOLDINGS_EDITOR_KEY, None)
         st.session_state.pop(SIMPLE_EDITOR_KEY, None)
         st.session_state[RESULT_STATE_KEY] = None
-        st.rerun()
+        request_app_rerun()
 
 
 def _render_upload_preview(label: str, columns: list[str], key: str) -> list[dict[str, str]] | None:
@@ -353,8 +358,10 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
         st.text_area("메모", key=NOTES_KEY, height=80)
     with control_col2:
         if st.button("샘플 스케줄 불러오기", width="stretch"):
+            if not begin_ui_action("historical_load_sample_schedule"):
+                return
             _replace_schedule_rows(list(SAMPLE_HOLDINGS), list(SAMPLE_CASH))
-            st.rerun()
+            request_app_rerun()
         st.download_button(
             "보유현황 CSV 템플릿",
             data=holding_template_csv().encode("utf-8-sig"),
@@ -385,21 +392,27 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
         load_col, delete_col = st.columns(2)
         confirm_load = st.checkbox("현재 입력을 선택 스케줄로 교체 확인", key=f"load_schedule_{selected.schedule_name}")
         if load_col.button("선택 스케줄 불러오기", width="stretch", disabled=not confirm_load):
+            if not begin_ui_action("historical_load_saved_schedule", payload={"schedule_name": selected.schedule_name}):
+                return
             try:
                 payload = deserialize_schedule_payload(selected.payload_json)
                 st.session_state[SCHEDULE_NAME_KEY] = selected.schedule_name
                 st.session_state[NOTES_KEY] = payload["notes"]
                 _replace_schedule_rows(payload["holdings_snapshots"], payload["cash_snapshots"])
-                st.rerun()
+                request_app_rerun()
             except (HistoricalScheduleStoreError, HistoricalHoldingsError) as exc:
+                finish_ui_action(success=False)
                 st.error(f"스케줄을 불러올 수 없습니다: {exc}")
         confirm_delete = st.checkbox("선택 스케줄 삭제 확인", key=f"delete_schedule_{selected.schedule_name}")
         if delete_col.button("선택 스케줄 삭제", width="stretch", disabled=not confirm_delete):
+            if not begin_ui_action("historical_delete_saved_schedule", payload={"schedule_name": selected.schedule_name}):
+                return
             try:
                 schedule_store.delete_schedule(owner_id, selected.schedule_name)
                 st.cache_data.clear()
-                st.rerun()
+                request_app_rerun()
             except HistoricalScheduleStoreError as exc:
+                finish_ui_action(success=False)
                 st.error(f"스케줄을 삭제할 수 없습니다: {exc}")
         with st.expander("과거 보유현황 목록 이름 변경", expanded=False):
             new_name = st.text_input("새 이름", value=selected.schedule_name, key=f"rename_schedule_{selected.schedule_name}")
@@ -409,28 +422,37 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
                 if not clean_name:
                     st.error("새 이름을 입력하세요.")
                 else:
+                    if not begin_ui_action("historical_rename_schedule", payload={"from": selected.schedule_name, "to": clean_name}):
+                        return
                     try:
                         schedule_store.save_schedule(owner_id, clean_name, selected.payload_json)
                         if clean_name != selected.schedule_name:
                             schedule_store.delete_schedule(owner_id, selected.schedule_name)
                         st.cache_data.clear()
                         st.session_state[SCHEDULE_NAME_KEY] = clean_name
-                        st.rerun()
+                        request_app_rerun()
                     except HistoricalScheduleStoreError as exc:
+                        finish_ui_action(success=False)
                         st.error(f"목록 이름을 변경할 수 없습니다: {exc}")
 
     if st.button("현재 스케줄 저장", width="stretch"):
+        schedule_name = str(st.session_state.get(SCHEDULE_NAME_KEY) or "main-historical")
+        if not begin_ui_action("historical_save_schedule", payload={"schedule_name": schedule_name}):
+            return
         try:
             payload = serialize_schedule_payload(
                 _rows_from_editor(st.session_state.get(HOLDINGS_STATE_KEY)),
                 _rows_from_editor(st.session_state.get(CASH_STATE_KEY)),
                 notes=st.session_state.get(NOTES_KEY, ""),
             )
-            schedule_store.save_schedule(owner_id, str(st.session_state.get(SCHEDULE_NAME_KEY) or "main-historical"), payload)
+            schedule_store.save_schedule(owner_id, schedule_name, payload)
             st.cache_data.clear()
             st.success("과거 보유현황 스케줄을 저장했습니다.")
         except (HistoricalScheduleStoreError, HistoricalHoldingsError) as exc:
+            finish_ui_action(success=False)
             st.error(f"스케줄을 저장할 수 없습니다: {exc}")
+        else:
+            finish_ui_action(success=True)
 
 
 def _render_current_portfolio_link_controls(
@@ -469,6 +491,8 @@ def _render_current_portfolio_link_controls(
             disabled=not current_holdings_rows or not confirm_import,
             width="stretch",
         ):
+            if not begin_ui_action("historical_import_current_portfolio", payload={"date": snapshot_date.isoformat()}):
+                return
             try:
                 snapshot_rows = current_holdings_to_historical_snapshot(current_holdings_rows, snapshot_date)
                 cash_snapshot = current_cash_to_historical_snapshot(
@@ -481,8 +505,9 @@ def _render_current_portfolio_link_controls(
                 st.session_state[CASH_STATE_KEY] = upsert_cash_snapshot(cash_rows, cash_snapshot)
                 _clear_schedule_edit_state()
                 st.session_state[LINK_MESSAGE_KEY] = f"{snapshot_date.isoformat()} 기준으로 현재 보유자산을 과거 스케줄에 반영했습니다."
-                st.rerun()
+                request_app_rerun()
             except (ValueError, HistoricalHoldingsError) as exc:
+                finish_ui_action(success=False)
                 st.error(f"현재 보유자산을 과거 스케줄에 반영할 수 없습니다: {exc}")
         if not current_holdings_rows:
             st.info("현재 보유자산이 비어 있어 추가할 수 없습니다.")
@@ -506,6 +531,8 @@ def _render_current_portfolio_link_controls(
                 )
             confirm_apply = st.checkbox("최신 과거 보유현황을 현재 포트폴리오로 적용 확인", key="confirm_historical_to_current")
             if st.button("최신 기준일을 현재 포트폴리오로 적용", disabled=not confirm_apply, width="stretch"):
+                if not begin_ui_action("historical_apply_to_current_portfolio", payload={"date": latest_snapshot_date.isoformat()}):
+                    return
                 pending_state: dict[str, Any] = {
                     "holdings_rows": latest_current_rows,
                     "price_update_statuses": [],
@@ -528,25 +555,28 @@ def _render_current_portfolio_link_controls(
                     f"{latest_snapshot_date.isoformat()} 기준 과거 보유현황을 현재 포트폴리오에 적용했습니다. "
                     "가격 새로고침 후 저장하면 실제 기록에도 반영됩니다."
                 )
-                st.rerun()
+                request_app_rerun()
 
 
 def _apply_simple_preview(preview_rows: list[dict[str, Any]], *, event_mode: bool = False) -> None:
     if any(row.get("status") != "ok" for row in preview_rows):
         st.error("후보 선택 또는 오류가 남아 있어 적용할 수 없습니다.")
         return
-    if event_mode:
-        event_rows = []
-        for row in preview_rows:
-            next_row = dict(row)
-            next_row["quantity_after"] = row.get("quantity_after")
-            event_rows.append(next_row)
-        snapshots = event_rows_to_snapshots(event_rows)
-    else:
-        snapshots = preview_rows_to_historical_snapshots(preview_rows)
+    if not begin_ui_action("historical_apply_preview", payload={"event_mode": event_mode, "rows": preview_rows}):
+        return
     try:
+        if event_mode:
+            event_rows = []
+            for row in preview_rows:
+                next_row = dict(row)
+                next_row["quantity_after"] = row.get("quantity_after")
+                event_rows.append(next_row)
+            snapshots = event_rows_to_snapshots(event_rows)
+        else:
+            snapshots = preview_rows_to_historical_snapshots(preview_rows)
         normalize_holding_snapshots(snapshots)
     except HistoricalHoldingsError as exc:
+        finish_ui_action(success=False)
         st.error(f"간편 입력을 적용할 수 없습니다: {exc}")
         return
     st.session_state[HOLDINGS_STATE_KEY] = snapshots
@@ -556,7 +586,7 @@ def _apply_simple_preview(preview_rows: list[dict[str, Any]], *, event_mode: boo
     st.session_state.pop(SIMPLE_PREVIEW_KEY, None)
     st.session_state.pop(EVENT_PREVIEW_KEY, None)
     st.session_state[RESULT_STATE_KEY] = None
-    st.rerun()
+    request_app_rerun()
 
 
 def _render_simple_snapshot_input() -> None:
@@ -658,13 +688,16 @@ def _render_editors(*, current_cash_krw: float, current_cash_usd: float, current
         )
         rows = _render_upload_preview("보유현황 CSV", HOLDINGS_COLUMNS, "historical_holdings_upload")
         if rows is not None and st.button("보유현황 CSV 적용"):
+            if not begin_ui_action("historical_apply_holdings_csv", payload=rows):
+                return
             try:
                 normalize_holding_snapshots(rows)
                 st.session_state[HOLDINGS_STATE_KEY] = rows
                 st.session_state.pop(HOLDINGS_EDITOR_KEY, None)
                 st.session_state[RESULT_STATE_KEY] = None
-                st.rerun()
+                request_app_rerun()
             except HistoricalHoldingsError as exc:
+                finish_ui_action(success=False)
                 st.error(f"보유현황 CSV 오류: {exc}")
         simple_upload = st.file_uploader("간편 CSV 업로드", type=["csv"], key="historical_simple_csv_upload")
         if simple_upload is not None and st.button("간편 CSV 미리보기"):
@@ -676,19 +709,24 @@ def _render_editors(*, current_cash_krw: float, current_cash_usd: float, current
     with cash_upload.expander("현금/환율 CSV 업로드", expanded=False):
         st.caption("현금/환율은 선택 입력입니다. 비워 두면 0원/0달러와 현재 또는 historical 환율 fallback을 사용합니다.")
         if st.button("현재 현금/환율을 첫 기준일 기본값으로 가져오기"):
+            if not begin_ui_action("historical_import_current_cash", payload={"cash_krw": current_cash_krw, "cash_usd": current_cash_usd, "usd_krw": current_usd_krw}):
+                return
             first_date = next((str(row.get("as_of_date"))[:10] for row in holding_rows if str(row.get("as_of_date", "")).strip()), date.today().isoformat())
             st.session_state[CASH_STATE_KEY] = [{"as_of_date": first_date, "cash_krw": current_cash_krw, "cash_usd": current_cash_usd, "usd_krw": current_usd_krw}]
             st.session_state.pop(CASH_EDITOR_KEY, None)
-            st.rerun()
+            request_app_rerun()
         rows = _render_upload_preview("현금/환율 CSV", CASH_COLUMNS, "historical_cash_upload")
         if rows is not None and st.button("현금/환율 CSV 적용"):
+            if not begin_ui_action("historical_apply_cash_csv", payload=rows):
+                return
             try:
                 normalize_cash_snapshots(rows)
                 st.session_state[CASH_STATE_KEY] = rows
                 st.session_state.pop(CASH_EDITOR_KEY, None)
                 st.session_state[RESULT_STATE_KEY] = None
-                st.rerun()
+                request_app_rerun()
             except HistoricalHoldingsError as exc:
+                finish_ui_action(success=False)
                 st.error(f"현금/환율 CSV 오류: {exc}")
 
     with st.expander("전체 컬럼 고급 편집", expanded=False):
@@ -916,7 +954,10 @@ def render_historical_reconstruction_tab(
         st.warning("보유 종료 확인이 필요한 기준일이 있습니다. 확인 후 재구성을 실행하세요.")
 
     if st.button("재구성 실행", type="primary", width="stretch", disabled=has_unconfirmed_removal):
+        if not begin_ui_action("historical_run_reconstruction", payload={"signature": signature, "forward_fill": use_forward_fill, "bypass_cache": bypass_cache}, cooldown_seconds=2.0):
+            return
         progress = st.progress(0, text="과거 종가 조회 준비 중")
+        success = False
 
         def update_progress(completed: int, total: int, symbol: str) -> None:
             progress.progress(int((completed / max(total, 1)) * 100), text=f"과거 종가 조회 중: {symbol} ({completed}/{total})")
@@ -937,10 +978,12 @@ def render_historical_reconstruction_tab(
             )
             st.session_state[RESULT_STATE_KEY] = result
             st.session_state[RESULT_SIGNATURE_KEY] = signature
+            success = True
         except (HistoricalHoldingsError, HistoricalPriceProviderError, HistoricalReconstructionError) as exc:
             st.error(f"재구성을 실행할 수 없습니다: {exc}")
         finally:
             progress.empty()
+            finish_ui_action(success=success)
 
     result = st.session_state.get(RESULT_STATE_KEY)
     if isinstance(result, ReconstructionResult):
