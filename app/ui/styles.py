@@ -271,7 +271,20 @@ __CSS_VARS__
         div[data-testid="stAlert"] {
             border-radius: 8px;
             border: 1px solid var(--app-border);
+            background: var(--app-panel) !important;
+            color: var(--app-text) !important;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        div[data-testid="stAlert"] *,
+        div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] *,
+        div[data-testid="stAlert"] div,
+        div[data-testid="stAlert"] p {
+            color: var(--app-text) !important;
+            opacity: 1 !important;
+        }
+        div[data-testid="stAlert"] svg {
+            color: var(--app-warning) !important;
+            fill: var(--app-warning) !important;
         }
         .app-empty-state {
             padding: 1rem;

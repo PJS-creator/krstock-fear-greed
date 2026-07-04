@@ -318,7 +318,29 @@ Decision for current stabilization:
 - 빈 포트폴리오에서 상단 가격·환율 갱신 버튼이 외부 가격/환율 조회를 시작하지 않도록 guard를 추가했다.
 - 가격·환율 갱신 중복 클릭 방지를 위한 `price_refresh_in_progress` session key와 spinner wrapper를 추가했다.
 - 라이트 모드 table/data_editor readability를 CSS token 기반으로 보강했다.
+- Streamlit native alert와 badge 배경을 앱 토큰 기반으로 보강해 라이트 모드 warning/status 텍스트 대비를 개선했다.
 - `tests/test_theme_tokens.py`, `tests/test_empty_states.py`, `tests/test_chart_sanitization.py`, `tests/test_safe_render.py`, `tests/test_session_state.py`, `tests/test_rebalancing_storage.py`와 Streamlit AppTest 회귀 검증을 추가/보강했다.
+
+## Local Browser QA Evidence
+
+2026-07-04 local run: `streamlit run app/portfolio_dashboard.py --server.port 8517 --server.fileWatcherType none`
+
+- Desktop 1440x900 light mode:
+  - Rendered title/status/tabs/empty state.
+  - No `Traceback`, `StreamlitAPIException`, `ModuleNotFoundError`, widget default/session warning, or blank screen.
+  - Initial automated contrast scan found low contrast in Streamlit native warning alert text and status badge; CSS/token fix was applied.
+- Desktop 1440x900 light mode after fix:
+  - No low-contrast candidates in the sampled visible text set, excluding browser/Streamlit chrome controls.
+  - No widget key warning or exception text.
+- Mobile 390x900 light mode:
+  - Rendered app shell and no-data empty state.
+  - Document-level horizontal overflow was `0`.
+  - Sidebar was hidden.
+  - No widget key warning or exception text.
+- Tablet 768x900 dark mode:
+  - Rendered app shell and no-data empty state.
+  - Document-level horizontal overflow was `0`.
+  - No widget key warning or exception text.
 
 ## 수정한 주요 파일 목록
 
