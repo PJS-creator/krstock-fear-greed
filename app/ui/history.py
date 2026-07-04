@@ -9,6 +9,7 @@ from .charts import plot_total_value_history
 from .components import render_plotly_chart
 from .historical_reconstruction import render_historical_reconstruction_tab
 from .performance import render_performance_analysis
+from .risk import render_risk_analysis
 
 PERIOD_OPTIONS: dict[str, HistoryPeriod] = {
     "1주": "1w",
@@ -43,7 +44,7 @@ def render_history_tab(
     current_total_value_krw: float | None = None,
     is_authenticated: bool = False,
 ) -> None:
-    actual_tab, performance_tab, reconstructed_tab = st.tabs(["실제 기록", "성과분석", "과거 보유현황 재구성"])
+    actual_tab, performance_tab, risk_tab, reconstructed_tab = st.tabs(["실제 기록", "성과분석", "리스크분석", "과거 보유현황 재구성"])
     with actual_tab:
         _render_actual_history(owner_id=owner_id, portfolio_name=portfolio_name, history_store=history_store)
     with performance_tab:
@@ -54,6 +55,15 @@ def render_history_tab(
             usd_krw=current_usd_krw,
             current_total_value_krw=current_total_value_krw,
         )
+    with risk_tab:
+        records = None
+        load_error = None
+        if history_store is not None and owner_id is not None:
+            try:
+                records = _list_history_cached(history_store, owner_id, portfolio_name, "all")
+            except PortfolioHistoryStoreError as exc:
+                load_error = str(exc)
+        render_risk_analysis(history_records=records, load_error=load_error)
     with reconstructed_tab:
         render_historical_reconstruction_tab(
             owner_id=owner_id,
