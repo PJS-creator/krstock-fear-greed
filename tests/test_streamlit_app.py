@@ -273,15 +273,39 @@ def test_public_cash_fx_refresh_button_falls_back_and_applies_rate(monkeypatch):
 
 def test_current_refresh_button_forces_all_quotes_and_fx_refresh():
     source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+    components_source = Path("app/ui/components.py").read_text(encoding="utf-8")
 
-    assert 'st.button("가격·환율 갱신"' in source
+    assert "def render_app_header(" in components_source
+    assert 'st.button("가격·환율 갱신"' in components_source
     assert 'mode: str = "전체 강제 재조회"' in source
     assert "refresh_fx: bool = True" in source
+    assert "조회할 보유종목 또는 달러 현금이 없습니다." in source
+    assert "PRICE_REFRESH_IN_PROGRESS_KEY" in source
     assert "cache = TTLFxCache() if force_refresh else None" in source
     assert "_fetch_fx_rate(public_auth_enabled=public_auth_enabled, force_refresh=True)" in source
-    assert "_refresh_prices(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)" in source
+    assert "_run_price_refresh(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)" in source
     assert 'mode="실패 종목만", refresh_fx=False' in source
     assert '"가격 새로고침 대상"' not in source
+
+
+def test_public_header_refresh_does_not_call_fx_api_without_assets(monkeypatch):
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("no external FX request expected for empty portfolio")
+
+    monkeypatch.setattr("portfolio.pricing.yahoo_finance.urlopen", fail_urlopen)
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo@example.com"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.run(timeout=20)
+
+    refresh_buttons = [button for button in at.button if getattr(button, "label", "") == "가격·환율 갱신"]
+    assert len(refresh_buttons) == 1
+    refresh_buttons[0].click().run(timeout=20)
+
+    assert not at.exception
+    assert "조회할 보유종목 또는 달러 현금이 없습니다." in _app_text(at)
 
 
 def test_public_app_hides_manual_storage_management_ui():

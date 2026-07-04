@@ -336,6 +336,18 @@ __CSS_VARS__
         .app-badge-warning { color: var(--app-warning); background: var(--token-warning-bg); border-color: var(--app-warning); }
         .app-badge-danger { color: var(--app-negative); background: var(--token-danger-bg); border-color: var(--app-negative); }
         .app-badge-info { color: var(--app-primary); background: var(--token-info-bg); border-color: var(--app-primary); }
+        .app-header-status {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem;
+            min-height: 2.4rem;
+        }
+        .app-header-save {
+            color: var(--token-text-muted);
+            font-size: 0.9rem;
+            font-weight: 740;
+        }
         .metric-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));

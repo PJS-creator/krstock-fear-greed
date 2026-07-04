@@ -55,6 +55,46 @@ def render_metric_card(
     )
 
 
+def render_app_header(
+    *,
+    title: str,
+    status_text: str,
+    save_status_text: str,
+    render_theme_selector: Callable[[], None] | None = None,
+    status_tone: str = "neutral",
+    refresh_disabled: bool = False,
+    retry_disabled: bool = False,
+    save_disabled: bool = True,
+    show_retry: bool = False,
+    show_save: bool = False,
+) -> dict[str, bool]:
+    if render_theme_selector is not None:
+        render_theme_selector()
+    tone = status_tone if status_tone in {"success", "warning", "danger", "info", "neutral"} else "neutral"
+    left, middle, right = st.columns([2.0, 2.5, 1.35], vertical_alignment="center")
+    with left:
+        st.title(title)
+    with middle:
+        st.markdown(
+            (
+                "<div class='app-header-status'>"
+                f"<span class='app-badge app-badge-{tone}'>{escape(status_text)}</span>"
+                f"<span class='app-header-save'>{escape(save_status_text)}</span>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+    with right:
+        refresh_clicked = st.button("가격·환율 갱신", type="primary", width="stretch", icon=":material/refresh:", key="app_header_refresh", disabled=refresh_disabled)
+        retry_clicked = False
+        if show_retry:
+            retry_clicked = st.button("실패 재시도", width="stretch", icon=":material/replay:", key="app_header_retry", disabled=retry_disabled)
+        save_clicked = False
+        if show_save:
+            save_clicked = st.button("포트폴리오 저장", disabled=save_disabled, width="stretch", icon=":material/save:", key="app_header_save")
+    return {"refresh": refresh_clicked, "retry": retry_clicked, "save": save_clicked}
+
+
 def render_empty_state(
     title: str,
     message: str,

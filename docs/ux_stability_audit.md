@@ -305,11 +305,14 @@ Decision for current stabilization:
 - `app/ui/theme.py`에 objective token alias와 `theme_mode` compatibility alias를 추가했다.
 - `app/ui/components.py`에 empty state, badge, info/warning/error box, `render_metric_card()`, `safe_render_section()`을 추가했다.
 - 공개/개인 주요 section renderer를 `safe_render_section()`으로 감싸 한 화면 오류가 전체 흰 화면으로 번지지 않게 했다.
+- `render_app_header()`로 상단 제목, 갱신 상태, 저장 상태, 갱신/재시도/저장 버튼 배치를 공통화했다.
 - `app/ui/state.py`에 `NO_DATA`, `SAMPLE_MODE`, `PARTIAL_DATA`, `READY`, `ERROR_STATE` 판단 helper를 추가했다.
 - 온보딩은 no-data에서만 크게 보이고, partial data에서는 다음 단계 안내로 축소했다.
 - 차트 공통 sanitization/all-zero guard를 추가하고 실제 기록, 성과분석, 리스크분석에 적용했다.
 - 리밸런싱은 총자산 0원/no-data에서 editor 대신 명확한 안내를 표시한다.
 - 리밸런싱 target allocation은 현재 `portfolio_snapshots.payload_json` source of truth를 유지하며 저장/로드 회귀 테스트를 추가했다.
+- 빈 포트폴리오에서 상단 가격·환율 갱신 버튼이 외부 가격/환율 조회를 시작하지 않도록 guard를 추가했다.
+- 가격·환율 갱신 중복 클릭 방지를 위한 `price_refresh_in_progress` session key와 spinner wrapper를 추가했다.
 - 라이트 모드 table/data_editor readability를 CSS token 기반으로 보강했다.
 - `tests/test_theme_tokens.py`, `tests/test_empty_states.py`, `tests/test_chart_sanitization.py`, `tests/test_safe_render.py`, `tests/test_session_state.py`, `tests/test_rebalancing_storage.py`와 Streamlit AppTest 회귀 검증을 추가/보강했다.
 
