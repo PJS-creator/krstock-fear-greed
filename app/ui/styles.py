@@ -279,7 +279,7 @@ __CSS_VARS__
         }
         .st-key-public_section_tabs div[role="radiogroup"] {
             display: grid !important;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             gap: 0;
             width: 100%;
             padding: 0;
@@ -428,14 +428,14 @@ __CSS_VARS__
                 margin: 0.7rem 0 0.95rem;
             }
             .st-key-public_section_tabs div[role="radiogroup"] {
-                grid-template-columns: repeat(4, minmax(0, 1fr));
+                grid-template-columns: repeat(5, minmax(0, 1fr));
                 gap: 0;
                 padding: 0;
             }
             .st-key-public_section_tabs div[role="radiogroup"] label {
                 min-height: 2.44rem;
                 padding: 0.34rem 0.04rem 0.54rem;
-                font-size: clamp(0.74rem, 3.05vw, 0.84rem);
+                font-size: clamp(0.66rem, 2.55vw, 0.78rem);
                 letter-spacing: 0;
             }
             .st-key-public_input_tabs {

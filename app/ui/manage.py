@@ -66,6 +66,7 @@ def queue_portfolio_record_load(record: PortfolioRecord) -> None:
         portfolio_name=record.portfolio_name,
         portfolio_transactions=payload.get("transactions", []),
         cash_ledger_entries=cash_ledger,
+        target_allocations=payload.get("target_allocations", []),
         holdings_rows=payload["holdings"],
         usd_krw=float(payload["usd_krw"]),
         cash_krw=cash_krw,
@@ -132,6 +133,7 @@ def render_storage_tools(
                     cash_usd=st.session_state.get("cash_usd", 0.0),
                     transactions=st.session_state.get("portfolio_transactions", []),
                     cash_ledger=st.session_state.get("cash_ledger_entries", []),
+                    target_allocations=st.session_state.get("target_allocations", []),
                     fx_metadata={
                         "rate_date": st.session_state.get("fx_rate_date"),
                         "as_of_timestamp": st.session_state.get("fx_as_of_timestamp"),

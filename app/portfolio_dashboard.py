@@ -49,6 +49,7 @@ from app.ui.manage import (
     render_storage_tools,
 )
 from app.ui.overview import render_overview
+from app.ui.rebalancing import render_rebalancing
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
 from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles
 from app.ui.theme import APP_THEME_KEY, DEFAULT_THEME_MODE, normalize_theme_mode
@@ -138,6 +139,7 @@ PUBLIC_SECTION_LABELS = {
     "details": "세부내역",
     "input": "사용자입력",
     "history": "자산추이",
+    "rebalancing": "리밸런싱",
 }
 PUBLIC_SECTION_LEGACY_MAP = {
     "투자 총괄 카드": "summary",
@@ -148,6 +150,8 @@ PUBLIC_SECTION_LEGACY_MAP = {
     "사용자 입력": "input",
     "사용자입력": "input",
     "자산추이": "history",
+    "리밸런싱": "rebalancing",
+    "리스크·리밸런싱": "rebalancing",
 }
 PUBLIC_HOLDINGS_VIEW_LABELS = {
     "holdings": "보유 현황",
@@ -241,6 +245,7 @@ def _current_portfolio_state() -> dict[str, object]:
         "portfolio_name": _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_KEY)),
         "portfolio_transactions": st.session_state.get("portfolio_transactions", []),
         "cash_ledger_entries": st.session_state.get("cash_ledger_entries", []),
+        "target_allocations": st.session_state.get("target_allocations", []),
         "holdings_rows": st.session_state.get("holdings_rows", []),
         "cash_krw": st.session_state.get("cash_krw", 0.0),
         "cash_usd": st.session_state.get("cash_usd", 0.0),
@@ -270,6 +275,7 @@ def _restore_last_saved_state() -> None:
         "portfolio_name": _clean_portfolio_name(state.get("portfolio_name")),
         "portfolio_transactions": list(state.get("portfolio_transactions") or []),
         "cash_ledger_entries": list(state.get("cash_ledger_entries") or []),
+        "target_allocations": list(state.get("target_allocations") or []),
         "holdings_rows": list(state.get("holdings_rows") or []),
         "cash_krw": float(state.get("cash_krw") or 0.0),
         "cash_usd": float(state.get("cash_usd") or 0.0),
@@ -289,6 +295,7 @@ def _reset_current_portfolio_state(portfolio_name: str = "main") -> None:
         "portfolio_name": clean_name,
         "portfolio_transactions": [],
         "cash_ledger_entries": [],
+        "target_allocations": [],
         "holdings_rows": [],
         "cash_krw": 0.0,
         "cash_usd": 0.0,
@@ -415,6 +422,7 @@ def _apply_pending_portfolio_state() -> None:
         "holdings_rows",
         "portfolio_transactions",
         "cash_ledger_entries",
+        "target_allocations",
         "cash_krw",
         "cash_usd",
         "usd_krw",
@@ -447,6 +455,7 @@ def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     st.session_state.setdefault(PORTFOLIO_NAME_INPUT_KEY, st.session_state[PORTFOLIO_NAME_KEY])
     st.session_state.setdefault("portfolio_transactions", [])
     st.session_state.setdefault("cash_ledger_entries", [])
+    st.session_state.setdefault("target_allocations", [])
     st.session_state.setdefault("holdings_rows", [])
     st.session_state.setdefault("cash_krw", 0.0)
     st.session_state.setdefault("cash_usd", 0.0)
@@ -634,6 +643,7 @@ def _current_portfolio_payload():
         cash_usd=st.session_state.cash_usd,
         transactions=st.session_state.get("portfolio_transactions", []),
         cash_ledger=st.session_state.get("cash_ledger_entries", []),
+        target_allocations=st.session_state.get("target_allocations", []),
         fx_metadata={
             "rate_date": st.session_state.get("fx_rate_date"),
             "as_of_timestamp": st.session_state.get("fx_as_of_timestamp"),
@@ -1371,6 +1381,18 @@ def _render_history_section(owner_id, history_store, historical_schedule_store, 
     )
 
 
+def _render_rebalancing_section(metrics) -> None:
+    render_rebalancing(
+        holdings=list(st.session_state.get("holdings_rows", [])),
+        target_allocations=list(st.session_state.get("target_allocations", [])),
+        cash_krw=float(st.session_state.get("cash_krw", 0.0)),
+        cash_usd=float(st.session_state.get("cash_usd", 0.0)),
+        usd_krw=float(st.session_state.get("usd_krw", 1380.0)),
+        total_asset_krw=metrics.total_value_krw,
+        on_save=lambda rows: st.session_state.update({"target_allocations": rows}),
+    )
+
+
 def _render_manage_section(owner_id, portfolio_store, history_store) -> None:
     render_csv_tools()
     render_storage_tools(
@@ -1384,7 +1406,7 @@ def _render_manage_section(owner_id, portfolio_store, history_store) -> None:
 
 
 def _render_private_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
-    summary_card_tab, overview_tab, holdings_tab, history_tab, manage_tab = st.tabs(["총괄현황", "세부내역", "사용자 입력", "자산추이", "저장 관리"])
+    summary_card_tab, overview_tab, holdings_tab, history_tab, rebalancing_tab, manage_tab = st.tabs(["총괄현황", "세부내역", "사용자 입력", "자산추이", "리밸런싱", "저장 관리"])
     with summary_card_tab:
         _render_summary_card_section(metrics)
     with overview_tab:
@@ -1393,6 +1415,8 @@ def _render_private_dashboard_sections(security_config, owner_id, portfolio_stor
         _render_holdings_section(security_config, public_auth_enabled=False)
     with history_tab:
         _render_history_section(owner_id, history_store, historical_schedule_store, metrics)
+    with rebalancing_tab:
+        _render_rebalancing_section(metrics)
     with manage_tab:
         _render_manage_section(owner_id, portfolio_store, history_store)
 
@@ -1414,8 +1438,10 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
         _render_overview_section(metrics)
     elif selected_section == "input":
         _render_public_holdings_section(security_config)
-    else:
+    elif selected_section == "history":
         _render_history_section(owner_id, history_store, historical_schedule_store, metrics)
+    else:
+        _render_rebalancing_section(metrics)
 
 
 st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
