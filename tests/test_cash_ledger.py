@@ -5,6 +5,7 @@ import pytest
 from portfolio.cash_ledger import (
     calculate_cash_balances,
     create_cash_ledger_entries_for_trade,
+    create_fx_conversion_entries,
     create_cash_movement_entry,
     validate_cash_ledger_entry,
 )
@@ -104,6 +105,28 @@ def test_withdrawal_decreases_cash_balance():
     ]
 
     assert calculate_cash_balances(ledger)["KRW"] == Decimal("750")
+
+
+def test_fx_conversion_creates_out_and_in_cash_ledger_entries():
+    ledger = [
+        create_cash_movement_entry(event_type="deposit", currency="USD", amount="1000", event_date="2026-04-13"),
+        create_cash_movement_entry(event_type="deposit", currency="KRW", amount="10000", event_date="2026-04-13"),
+    ]
+    ledger.extend(
+        create_fx_conversion_entries(
+            from_currency="USD",
+            to_currency="KRW",
+            from_amount="100",
+            fx_rate_to_krw="1400",
+            fee="1",
+            event_date="2026-04-14",
+        )
+    )
+
+    balances = calculate_cash_balances(ledger)
+
+    assert balances["USD"] == Decimal("899")
+    assert balances["KRW"] == Decimal("150000")
 
 
 def test_cash_ledger_sum_matches_current_cash_balance():

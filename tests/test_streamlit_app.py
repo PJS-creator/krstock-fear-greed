@@ -60,7 +60,7 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
     for label in ("다크", "라이트"):
         assert label in text
     assert at.session_state["app_theme_mode"] == "dark"
-    for label in ("현금 및 환율", "현금/환율 적용", "USD/KRW 환율 갱신", "자산 입력", "표준 거래 입력", "상세 옵션", "매입/매도 기준 자산 증감"):
+    for label in ("현금·입출금·환율", "입출금 입력", "환전 입력", "현금 원장", "USD/KRW 환율 갱신", "자산 입력", "표준 거래 입력", "상세 옵션", "매입/매도 기준 자산 증감"):
         assert label in text
     assert "가격·환율 갱신" in text
     metric_labels = _element_texts(at.metric)
