@@ -226,6 +226,67 @@ def create_cash_movement_entry(
     return validate_cash_ledger_entry(entry)
 
 
+def create_fx_conversion_entries(
+    *,
+    from_currency: str,
+    to_currency: str,
+    from_amount: object,
+    fx_rate_to_krw: object,
+    fee: object = 0,
+    event_date: object,
+    user_id: str | None = None,
+    portfolio_id: str | None = None,
+    memo: str | None = None,
+) -> list[dict[str, object]]:
+    source_currency = _clean_text(from_currency).upper()
+    target_currency = _clean_text(to_currency).upper()
+    if source_currency not in CASH_CURRENCIES or target_currency not in CASH_CURRENCIES:
+        raise ValueError("from_currency and to_currency must be KRW or USD")
+    if source_currency == target_currency:
+        raise ValueError("from_currency and to_currency must be different")
+
+    source_amount = _to_decimal("from_amount", from_amount)
+    if source_amount <= ZERO:
+        raise ValueError("from_amount must be positive")
+    fee_amount = _to_decimal("fee", fee)
+    if fee_amount < ZERO:
+        raise ValueError("fee must be non-negative")
+    rate = _to_decimal("fx_rate_to_krw", fx_rate_to_krw)
+    if rate <= ZERO:
+        raise ValueError("fx_rate_to_krw must be positive")
+
+    if source_currency == "USD" and target_currency == "KRW":
+        target_amount = source_amount * rate
+    elif source_currency == "KRW" and target_currency == "USD":
+        target_amount = source_amount / rate
+    else:
+        raise ValueError("Unsupported currency conversion")
+
+    clean_memo = memo or f"{source_currency}->{target_currency} 환전"
+    common = {
+        "event_date": event_date,
+        "user_id": user_id,
+        "portfolio_id": portfolio_id,
+        "fx_rate_to_krw": rate,
+    }
+    return [
+        create_cash_movement_entry(
+            event_type="fx_conversion_out",
+            currency=source_currency,
+            amount=-(source_amount + fee_amount),
+            memo=f"{clean_memo} 출금",
+            **common,
+        ),
+        create_cash_movement_entry(
+            event_type="fx_conversion_in",
+            currency=target_currency,
+            amount=target_amount,
+            memo=f"{clean_memo} 입금",
+            **common,
+        ),
+    ]
+
+
 def create_opening_balance_entries(
     cash_balances: Mapping[str, object],
     *,
