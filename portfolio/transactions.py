@@ -159,7 +159,7 @@ def normalize_transaction_row(row: Mapping[str, Any]) -> dict[str, object]:
         display_name = display_name or str(resolution.display_name or ticker)
 
     currency = _normalize_currency(currency, market)
-    return {
+    normalized = {
         "transaction_type": normalize_transaction_type(row.get("transaction_type") or row.get("side")),
         "ticker": ticker,
         "symbol": ticker,
@@ -174,6 +174,9 @@ def normalize_transaction_row(row: Mapping[str, Any]) -> dict[str, object]:
         "occurred_at": normalize_occurred_at(row.get("occurred_at") or row.get("date") or row.get("timestamp")),
         "note": clean_text(row.get("note")),
     }
+    if clean_text(row.get("external_id")):
+        normalized["external_id"] = clean_text(row.get("external_id"))
+    return normalized
 
 
 def normalize_trade_input(row: Mapping[str, Any]) -> dict[str, object]:

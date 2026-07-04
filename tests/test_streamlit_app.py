@@ -93,6 +93,7 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert ".st-key-public_section_tabs" in source
     assert ".st-key-public_input_tabs" in source
     assert "grid-template-columns: repeat(5, minmax(0, 1fr));" in source
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in source
     assert "border-bottom: 1px solid var(--app-border);" in source
     assert "label:has(input:checked)::after" in source
 
@@ -168,6 +169,20 @@ def test_public_holdings_section_defers_transaction_editor_by_default():
     assert at.session_state["public_dashboard_section"] == "input"
 
 
+def test_public_onboarding_renders_for_empty_authenticated_portfolio():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.run(timeout=20)
+
+    assert not at.exception
+    text = _app_text(at)
+    for label in ("처음 시작하기", "샘플 포트폴리오로 둘러보기", "현재 보유종목만 빠르게 입력", "거래/현금 CSV 업로드"):
+        assert label in text
+
+
 def test_public_holdings_transaction_input_renders_only_when_selected():
     at = AppTest.from_file("app/public_portfolio_dashboard.py")
     at.session_state["is_authenticated"] = True
@@ -182,6 +197,25 @@ def test_public_holdings_transaction_input_renders_only_when_selected():
     text = _app_text(at)
     assert "표준 거래 입력" in text
     assert "고급 입력 · 빠른 입력" in text
+
+
+def test_public_csv_portability_tools_render_when_selected():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["public_dashboard_section"] = "보유자산"
+    at.session_state["public_holdings_view"] = "CSV"
+    at.run(timeout=20)
+
+    assert not at.exception
+    text = _app_text(at)
+    for label in ("CSV 가져오기/내보내기", "거래 CSV", "현금 원장 CSV", "내보내기"):
+        assert label in text
+    source = Path("app/ui/data_portability.py").read_text(encoding="utf-8")
+    for label in ("거래 CSV 템플릿 다운로드", "현금 원장 CSV 템플릿 다운로드", "전체 데이터 JSON 내보내기"):
+        assert label in source
 
 
 def test_public_cash_fx_refresh_button_falls_back_and_applies_rate(monkeypatch):
