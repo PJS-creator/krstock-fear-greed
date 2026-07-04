@@ -37,10 +37,12 @@ def _stop_if_unsupported_python_runtime() -> None:
 _stop_if_unsupported_python_runtime()
 
 from app.ui.components import render_price_update_log
+from app.ui.data_portability import render_data_portability_tools
 from app.ui.formatters import format_kst, format_number, format_price, format_relative_time, full_krw
 from app.ui.holdings import render_holdings_table
 from app.ui.history import render_history_tab
 from app.ui.investment_summary_card import render_investment_summary_card
+from app.ui.onboarding import SAMPLE_PORTFOLIO_ACTIVE_KEY, render_onboarding
 from app.ui.manage import (
     list_portfolios_cached,
     queue_portfolio_record_load,
@@ -157,6 +159,7 @@ PUBLIC_HOLDINGS_VIEW_LABELS = {
     "holdings": "보유 현황",
     "cash_fx": "현금·입출금·환율",
     "transactions": "거래 입력",
+    "csv": "CSV",
 }
 PUBLIC_HOLDINGS_VIEW_LEGACY_MAP = {
     "현황": "holdings",
@@ -165,6 +168,8 @@ PUBLIC_HOLDINGS_VIEW_LEGACY_MAP = {
     "현금·환율": "cash_fx",
     "현금·입출금·환율": "cash_fx",
     "거래 입력": "transactions",
+    "CSV": "csv",
+    "가져오기/내보내기": "csv",
 }
 CASH_MOVEMENT_EVENT_BY_LABEL = {
     "입금": "deposit",
@@ -689,6 +694,9 @@ def _auto_save_public_portfolio(owner_id, store, history_store, metrics) -> None
         return
     st.session_state[PORTFOLIO_NAME_KEY] = PUBLIC_PORTFOLIO_NAME
     st.session_state[PORTFOLIO_NAME_INPUT_KEY] = PUBLIC_PORTFOLIO_NAME
+    if st.session_state.get(SAMPLE_PORTFOLIO_ACTIVE_KEY):
+        st.session_state[PUBLIC_SAVE_STATUS_KEY] = "샘플 모드 - 저장 안 됨"
+        return
     if owner_id is None or store is None:
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 실패: Supabase 저장소 설정이 필요합니다."
         return
@@ -1356,12 +1364,14 @@ def _render_public_holdings_section(config: AppSecurityConfig) -> None:
         render_holdings_table(_current_metrics())
     elif selected_view == "cash_fx":
         _render_cash_fx_tools(config, public_auth_enabled=True)
-    else:
+    elif selected_view == "transactions":
         render_transaction_editor()
         render_transaction_cashflow(
             list(st.session_state.get("portfolio_transactions", [])),
             usd_krw=float(st.session_state.usd_krw),
         )
+    else:
+        render_data_portability_tools(portfolio_snapshot=_current_portfolio_payload())
 
 
 def _render_history_section(owner_id, history_store, historical_schedule_store, metrics) -> None:
@@ -1395,6 +1405,7 @@ def _render_rebalancing_section(metrics) -> None:
 
 def _render_manage_section(owner_id, portfolio_store, history_store) -> None:
     render_csv_tools()
+    render_data_portability_tools(portfolio_snapshot=_current_portfolio_payload())
     render_storage_tools(
         owner_id=owner_id,
         store=portfolio_store,
@@ -1474,6 +1485,7 @@ _render_header(security_config, owner_id, portfolio_store, history_store, metric
 _render_status_messages()
 
 if public_auth_enabled:
+    render_onboarding(portfolio_snapshot=_current_portfolio_payload())
     _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)
 else:
     _render_private_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)

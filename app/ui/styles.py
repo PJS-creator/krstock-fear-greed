@@ -328,7 +328,7 @@ __CSS_VARS__
         }
         .st-key-public_input_tabs div[role="radiogroup"] {
             display: grid !important;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 0;
             width: 100%;
             padding: 0;
@@ -442,7 +442,7 @@ __CSS_VARS__
                 margin: 0 0 0.85rem;
             }
             .st-key-public_input_tabs div[role="radiogroup"] {
-                grid-template-columns: repeat(3, minmax(0, 1fr));
+                grid-template-columns: repeat(4, minmax(0, 1fr));
             }
             .st-key-public_input_tabs div[role="radiogroup"] label {
                 min-height: 2.16rem;

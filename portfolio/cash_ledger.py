@@ -111,7 +111,7 @@ def validate_cash_ledger_entry(entry: Mapping[str, Any]) -> dict[str, object]:
         "event_type": event_type,
         "amount": amount,
     }
-    for key in ("id", "user_id", "portfolio_id", "linked_transaction_id", "memo", "created_at", "updated_at"):
+    for key in ("id", "user_id", "portfolio_id", "linked_transaction_id", "external_id", "memo", "created_at", "updated_at"):
         if key in entry and entry.get(key) is not None:
             normalized[key] = entry.get(key)
     fx_rate = _optional_decimal("fx_rate_to_krw", entry.get("fx_rate_to_krw"))
