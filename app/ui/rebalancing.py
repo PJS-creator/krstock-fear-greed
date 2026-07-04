@@ -15,6 +15,7 @@ from portfolio.rebalancing import (
 
 from .components import render_empty_state
 from .formatters import format_number, full_krw, percentage, signed_krw
+from .stability import begin_ui_action, finish_ui_action, request_app_rerun
 from .theme import DIMENSIONS
 
 
@@ -179,6 +180,8 @@ def render_rebalancing(
 
     action_col1, action_col2 = st.columns([1, 2])
     if action_col1.button("현재 보유 기준 행 생성", icon=":material/refresh:"):
+        if not begin_ui_action("rebalance_defaults", payload={"holdings": holdings, "cash_krw": cash_krw, "cash_usd": cash_usd, "usd_krw": usd_krw}):
+            return
         defaults = default_target_allocations_from_portfolio(
             holdings,
             cash_krw=cash_krw,
@@ -186,8 +189,12 @@ def render_rebalancing(
             usd_krw=usd_krw,
             total_asset_krw=total_asset_krw,
         )
-        on_save(defaults)
-        st.rerun()
+        try:
+            on_save(defaults)
+        except Exception:
+            finish_ui_action(success=False)
+            raise
+        request_app_rerun()
     action_col2.caption("보유 종목, KRW 현금, USD 현금 행을 자동으로 만들고 현재 비중을 기본 목표 비중으로 채웁니다.")
 
     edited = st.data_editor(
@@ -226,9 +233,14 @@ def render_rebalancing(
 
     target_sum_ok = clean_rows and total_pct > 0 and abs(total_pct - 100.0) <= 0.1
     if st.button("목표 비중 저장", type="primary", disabled=not target_sum_ok):
-        on_save(clean_rows)
-        st.success("목표 비중을 저장했습니다. 공개 앱에서는 다음 자동 저장 시 계정 포트폴리오에 반영됩니다.")
-        st.rerun()
+        if begin_ui_action("rebalance_save_targets", payload=clean_rows):
+            try:
+                on_save(clean_rows)
+                st.success("목표 비중을 저장했습니다. 공개 앱에서는 다음 자동 저장 시 계정 포트폴리오에 반영됩니다.")
+            except Exception:
+                finish_ui_action(success=False)
+                raise
+            request_app_rerun()
 
     st.subheader("계산 옵션")
     option_cols = st.columns([1.3, 1])

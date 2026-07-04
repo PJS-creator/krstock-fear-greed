@@ -53,6 +53,7 @@ from portfolio.symbols import (
 from .charts import plot_reconstructed_holdings_area, plot_reconstructed_total_value
 from .components import render_plotly_chart
 from .formatters import compact_krw, format_kst, format_number, format_price, full_krw, instrument_label, percentage, signed_krw, signed_percentage
+from .stability import request_app_rerun
 from .status import dirty_signature
 from .theme import DIMENSIONS
 
@@ -332,7 +333,7 @@ def _render_add_date_controls(holding_rows: list[dict[str, Any]]) -> None:
         st.session_state.pop(HOLDINGS_EDITOR_KEY, None)
         st.session_state.pop(SIMPLE_EDITOR_KEY, None)
         st.session_state[RESULT_STATE_KEY] = None
-        st.rerun()
+        request_app_rerun()
 
 
 def _render_upload_preview(label: str, columns: list[str], key: str) -> list[dict[str, str]] | None:
@@ -354,7 +355,7 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
     with control_col2:
         if st.button("샘플 스케줄 불러오기", width="stretch"):
             _replace_schedule_rows(list(SAMPLE_HOLDINGS), list(SAMPLE_CASH))
-            st.rerun()
+            request_app_rerun()
         st.download_button(
             "보유현황 CSV 템플릿",
             data=holding_template_csv().encode("utf-8-sig"),
@@ -390,7 +391,7 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
                 st.session_state[SCHEDULE_NAME_KEY] = selected.schedule_name
                 st.session_state[NOTES_KEY] = payload["notes"]
                 _replace_schedule_rows(payload["holdings_snapshots"], payload["cash_snapshots"])
-                st.rerun()
+                request_app_rerun()
             except (HistoricalScheduleStoreError, HistoricalHoldingsError) as exc:
                 st.error(f"스케줄을 불러올 수 없습니다: {exc}")
         confirm_delete = st.checkbox("선택 스케줄 삭제 확인", key=f"delete_schedule_{selected.schedule_name}")
@@ -398,7 +399,7 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
             try:
                 schedule_store.delete_schedule(owner_id, selected.schedule_name)
                 st.cache_data.clear()
-                st.rerun()
+                request_app_rerun()
             except HistoricalScheduleStoreError as exc:
                 st.error(f"스케줄을 삭제할 수 없습니다: {exc}")
         with st.expander("과거 보유현황 목록 이름 변경", expanded=False):
@@ -415,7 +416,7 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
                             schedule_store.delete_schedule(owner_id, selected.schedule_name)
                         st.cache_data.clear()
                         st.session_state[SCHEDULE_NAME_KEY] = clean_name
-                        st.rerun()
+                        request_app_rerun()
                     except HistoricalScheduleStoreError as exc:
                         st.error(f"목록 이름을 변경할 수 없습니다: {exc}")
 
@@ -481,7 +482,7 @@ def _render_current_portfolio_link_controls(
                 st.session_state[CASH_STATE_KEY] = upsert_cash_snapshot(cash_rows, cash_snapshot)
                 _clear_schedule_edit_state()
                 st.session_state[LINK_MESSAGE_KEY] = f"{snapshot_date.isoformat()} 기준으로 현재 보유자산을 과거 스케줄에 반영했습니다."
-                st.rerun()
+                request_app_rerun()
             except (ValueError, HistoricalHoldingsError) as exc:
                 st.error(f"현재 보유자산을 과거 스케줄에 반영할 수 없습니다: {exc}")
         if not current_holdings_rows:
@@ -528,7 +529,7 @@ def _render_current_portfolio_link_controls(
                     f"{latest_snapshot_date.isoformat()} 기준 과거 보유현황을 현재 포트폴리오에 적용했습니다. "
                     "가격 새로고침 후 저장하면 실제 기록에도 반영됩니다."
                 )
-                st.rerun()
+                request_app_rerun()
 
 
 def _apply_simple_preview(preview_rows: list[dict[str, Any]], *, event_mode: bool = False) -> None:
@@ -556,7 +557,7 @@ def _apply_simple_preview(preview_rows: list[dict[str, Any]], *, event_mode: boo
     st.session_state.pop(SIMPLE_PREVIEW_KEY, None)
     st.session_state.pop(EVENT_PREVIEW_KEY, None)
     st.session_state[RESULT_STATE_KEY] = None
-    st.rerun()
+    request_app_rerun()
 
 
 def _render_simple_snapshot_input() -> None:
@@ -663,7 +664,7 @@ def _render_editors(*, current_cash_krw: float, current_cash_usd: float, current
                 st.session_state[HOLDINGS_STATE_KEY] = rows
                 st.session_state.pop(HOLDINGS_EDITOR_KEY, None)
                 st.session_state[RESULT_STATE_KEY] = None
-                st.rerun()
+                request_app_rerun()
             except HistoricalHoldingsError as exc:
                 st.error(f"보유현황 CSV 오류: {exc}")
         simple_upload = st.file_uploader("간편 CSV 업로드", type=["csv"], key="historical_simple_csv_upload")
@@ -679,7 +680,7 @@ def _render_editors(*, current_cash_krw: float, current_cash_usd: float, current
             first_date = next((str(row.get("as_of_date"))[:10] for row in holding_rows if str(row.get("as_of_date", "")).strip()), date.today().isoformat())
             st.session_state[CASH_STATE_KEY] = [{"as_of_date": first_date, "cash_krw": current_cash_krw, "cash_usd": current_cash_usd, "usd_krw": current_usd_krw}]
             st.session_state.pop(CASH_EDITOR_KEY, None)
-            st.rerun()
+            request_app_rerun()
         rows = _render_upload_preview("현금/환율 CSV", CASH_COLUMNS, "historical_cash_upload")
         if rows is not None and st.button("현금/환율 CSV 적용"):
             try:
@@ -687,7 +688,7 @@ def _render_editors(*, current_cash_krw: float, current_cash_usd: float, current
                 st.session_state[CASH_STATE_KEY] = rows
                 st.session_state.pop(CASH_EDITOR_KEY, None)
                 st.session_state[RESULT_STATE_KEY] = None
-                st.rerun()
+                request_app_rerun()
             except HistoricalHoldingsError as exc:
                 st.error(f"현금/환율 CSV 오류: {exc}")
 

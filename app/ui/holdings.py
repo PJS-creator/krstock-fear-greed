@@ -17,6 +17,7 @@ from portfolio.symbols import (
 )
 
 from .formatters import format_kst, format_number, format_price, full_krw, instrument_label, percentage, signed_krw, signed_percentage
+from .stability import begin_ui_action, finish_ui_action, request_app_rerun
 from .status import ISSUE_STATUSES, quote_status_label
 from .theme import DIMENSIONS
 
@@ -109,7 +110,7 @@ def _apply_quick_records(records: list[dict[str, object]], existing_rows: list[d
     st.session_state.holdings_rows = merge_quick_rows_with_existing(records, existing_rows, duplicate_policy=duplicate_policy)
     st.session_state.pop(QUICK_PREVIEW_STATE_KEY, None)
     st.session_state.holdings_message = "입력값을 적용했습니다. 가격 새로고침 버튼을 눌러 최근 제공 가격을 갱신하세요."
-    st.rerun()
+    request_app_rerun()
 
 
 def _build_preview(rows: list[dict[str, object]]) -> None:
@@ -187,6 +188,8 @@ def render_holdings_editor() -> None:
         )
         ok_rows = [row for row in preview_rows if row.get("status") == "ok"]
         if st.button("오류 없는 행 적용", disabled=not ok_rows):
+            if not begin_ui_action("apply_holdings_preview", payload=ok_rows):
+                return
             try:
                 _apply_quick_records(
                     preview_rows_to_holdings(ok_rows),
@@ -194,6 +197,7 @@ def render_holdings_editor() -> None:
                     duplicate_policy="add" if duplicate_policy == "기존 수량에 합산" else "replace",
                 )
             except ValueError as exc:
+                finish_ui_action(success=False)
                 st.error(f"입력값을 적용할 수 없습니다: {exc}")
 
     with st.expander("다중 붙여넣기", expanded=False):
@@ -244,10 +248,13 @@ def render_holdings_editor() -> None:
             },
         )
         if st.button("고급 설정 적용"):
+            if not begin_ui_action("apply_advanced_holdings", payload=advanced.to_dict("records")):
+                return
             try:
                 st.session_state.holdings_rows = normalize_holding_rows(advanced.to_dict("records"))
-                st.rerun()
+                request_app_rerun()
             except ValueError as exc:
+                finish_ui_action(success=False)
                 st.error(f"고급 설정을 적용할 수 없습니다: {exc}")
 
 

@@ -317,6 +317,9 @@ Decision for current stabilization:
 - 리밸런싱 target allocation은 `target_allocations` 테이블 우선, snapshot payload fallback 방식으로 저장/로드되며 회귀 테스트를 추가했다.
 - 빈 포트폴리오에서 상단 가격·환율 갱신 버튼이 외부 가격/환율 조회를 시작하지 않도록 guard를 추가했다.
 - 가격·환율 갱신 중복 클릭 방지를 위한 `price_refresh_in_progress` session key와 spinner wrapper를 추가했다.
+- `app/ui/stability.py`에 상태 변경 버튼 공통 action guard를 추가해 동일 작업 중복 실행, 다른 버튼의 초단기 연속 실행, 오래 남은 작업 잠금을 방어한다.
+- 모든 직접 `st.rerun()` 호출을 `request_app_rerun()`으로 중앙화해 리런 직전 작업 플래그를 정리한다.
+- 상단 가격·환율 갱신과 자동 가격 갱신은 safe section 바깥에서 실행되므로 broad exception guard를 추가해 외부 API 실패가 전체 빈 화면으로 번지지 않게 했다.
 - 라이트 모드 table/data_editor readability를 CSS token 기반으로 보강했다.
 - Streamlit native alert와 badge 배경을 앱 토큰 기반으로 보강해 라이트 모드 warning/status 텍스트 대비를 개선했다.
 - `tests/test_theme_tokens.py`, `tests/test_empty_states.py`, `tests/test_chart_sanitization.py`, `tests/test_safe_render.py`, `tests/test_session_state.py`, `tests/test_rebalancing_storage.py`와 Streamlit AppTest 회귀 검증을 추가/보강했다.
@@ -341,6 +344,10 @@ Decision for current stabilization:
   - Rendered app shell and no-data empty state.
   - Document-level horizontal overflow was `0`.
   - No widget key warning or exception text.
+- 2026-07-04 rapid-action QA on local private entrypoint `app/portfolio_dashboard.py`:
+  - Repeated `가격·환율 갱신` clicks on an empty portfolio kept the app shell visible and showed the duplicate-action guard notice.
+  - Fast tab switching between `사용자 입력` and `세부내역` kept title, tabs, and empty-state content visible.
+  - No `Traceback`, `StreamlitAPIException`, `ModuleNotFoundError`, `TypeError`, `SyntaxError`, or blank screen was observed.
 
 ## 수정한 주요 파일 목록
 
@@ -348,6 +355,7 @@ Decision for current stabilization:
 - `app/ui/theme.py`
 - `app/ui/styles.py`
 - `app/ui/components.py`
+- `app/ui/stability.py`
 - `app/ui/state.py`
 - `app/ui/charts.py`
 - `app/ui/onboarding.py`
@@ -366,6 +374,7 @@ Decision for current stabilization:
 - `tests/test_safe_render.py`
 - `tests/test_session_state.py`
 - `tests/test_rebalancing_storage.py`
+- `tests/test_action_stability.py`
 - `tests/test_streamlit_app.py`
 
 ## 배포 전 꼭 봐야 할 화면
@@ -378,6 +387,7 @@ Decision for current stabilization:
 - 국내 주식 1개 매수 후 총괄현황/사용자입력/성과분석
 - 미국 주식 1개 매수 후 USD/KRW 환산과 가격 상태
 - 가격·환율 갱신 성공, 일부 실패, 마지막 정상값 사용 상태
+- 가격·환율 갱신 중 외부 API 예외 발생 시 app shell 유지와 작업 플래그 해제
 - 총괄현황 라이트/다크
 - 세부내역 라이트/다크
 - 사용자입력 하위 탭 라이트/다크
@@ -387,6 +397,7 @@ Decision for current stabilization:
 - 리밸런싱 no-data, 현금만 있음, 보유종목 있음, 저장 후 새로고침
 - 모바일 390px, tablet 768px, desktop 1440px
 - theme toggle 후 active tab/input 유지와 widget key warning 없음
+- 여러 상태 변경 버튼을 빠르게 연속 클릭해도 중복 반영, stuck loading, blank screen이 발생하지 않음
 - 의도적 section 오류 또는 mock 실패 시 app shell 유지
 
 ## 남은 리스크
