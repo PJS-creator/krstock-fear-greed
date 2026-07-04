@@ -1354,7 +1354,7 @@ def _render_public_holdings_section(config: AppSecurityConfig) -> None:
         )
 
 
-def _render_history_section(owner_id, history_store, historical_schedule_store) -> None:
+def _render_history_section(owner_id, history_store, historical_schedule_store, metrics) -> None:
     render_history_tab(
         owner_id=owner_id,
         portfolio_name=_current_portfolio_name(),
@@ -1364,6 +1364,9 @@ def _render_history_section(owner_id, history_store, historical_schedule_store) 
         current_cash_krw=float(st.session_state.cash_krw),
         current_cash_usd=float(st.session_state.cash_usd),
         current_usd_krw=float(st.session_state.usd_krw),
+        current_transactions=list(st.session_state.get("portfolio_transactions", [])),
+        current_cash_ledger=list(st.session_state.get("cash_ledger_entries", [])),
+        current_total_value_krw=metrics.total_value_krw,
         is_authenticated=_is_authenticated(),
     )
 
@@ -1389,7 +1392,7 @@ def _render_private_dashboard_sections(security_config, owner_id, portfolio_stor
     with holdings_tab:
         _render_holdings_section(security_config, public_auth_enabled=False)
     with history_tab:
-        _render_history_section(owner_id, history_store, historical_schedule_store)
+        _render_history_section(owner_id, history_store, historical_schedule_store, metrics)
     with manage_tab:
         _render_manage_section(owner_id, portfolio_store, history_store)
 
@@ -1412,7 +1415,7 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
     elif selected_section == "input":
         _render_public_holdings_section(security_config)
     else:
-        _render_history_section(owner_id, history_store, historical_schedule_store)
+        _render_history_section(owner_id, history_store, historical_schedule_store, metrics)
 
 
 st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")

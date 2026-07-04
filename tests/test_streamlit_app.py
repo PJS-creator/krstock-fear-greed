@@ -55,7 +55,7 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
 
     assert not at.exception
     text = _app_text(at)
-    for label in ("총괄현황", "세부내역", "사용자 입력", "자산추이", "저장 관리"):
+    for label in ("총괄현황", "세부내역", "사용자 입력", "자산추이", "성과분석", "저장 관리"):
         assert label in text
     for label in ("다크", "라이트"):
         assert label in text

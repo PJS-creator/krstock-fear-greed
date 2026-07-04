@@ -8,6 +8,7 @@ from portfolio.history import HistoryPeriod, PortfolioHistoryRecord, PortfolioHi
 from .charts import plot_total_value_history
 from .components import render_plotly_chart
 from .historical_reconstruction import render_historical_reconstruction_tab
+from .performance import render_performance_analysis
 
 PERIOD_OPTIONS: dict[str, HistoryPeriod] = {
     "1주": "1w",
@@ -37,11 +38,22 @@ def render_history_tab(
     current_cash_krw: float = 0.0,
     current_cash_usd: float = 0.0,
     current_usd_krw: float = 1380.0,
+    current_transactions: list[dict[str, object]] | None = None,
+    current_cash_ledger: list[dict[str, object]] | None = None,
+    current_total_value_krw: float | None = None,
     is_authenticated: bool = False,
 ) -> None:
-    actual_tab, reconstructed_tab = st.tabs(["실제 기록", "과거 보유현황 재구성"])
+    actual_tab, performance_tab, reconstructed_tab = st.tabs(["실제 기록", "성과분석", "과거 보유현황 재구성"])
     with actual_tab:
         _render_actual_history(owner_id=owner_id, portfolio_name=portfolio_name, history_store=history_store)
+    with performance_tab:
+        render_performance_analysis(
+            transactions=list(current_transactions or []),
+            cash_ledger=list(current_cash_ledger or []),
+            holdings=list(current_holdings_rows or []),
+            usd_krw=current_usd_krw,
+            current_total_value_krw=current_total_value_krw,
+        )
     with reconstructed_tab:
         render_historical_reconstruction_tab(
             owner_id=owner_id,
