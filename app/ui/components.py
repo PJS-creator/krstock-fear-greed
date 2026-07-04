@@ -31,6 +31,30 @@ def render_badge(label: str, *, tone: str = "neutral") -> None:
     st.markdown(f"<span class='app-badge app-badge-{tone}'>{escape(label)}</span>", unsafe_allow_html=True)
 
 
+def render_metric_card(
+    title: str,
+    value: object,
+    *,
+    delta: object | None = None,
+    status: str = "neutral",
+    help_text: str | None = None,
+) -> None:
+    status = status if status in {"success", "warning", "danger", "info", "neutral"} else "neutral"
+    delta_html = f"<div class='app-metric-delta'>{escape(str(delta))}</div>" if delta not in (None, "") else ""
+    help_html = f"<div class='app-metric-help'>{escape(help_text)}</div>" if help_text else ""
+    st.markdown(
+        (
+            f"<div class='app-metric-card app-metric-{status}'>"
+            f"<div class='app-metric-title'>{escape(title)}</div>"
+            f"<div class='app-metric-value'>{escape(str(value))}</div>"
+            f"{delta_html}"
+            f"{help_html}"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
 def render_empty_state(
     title: str,
     message: str,

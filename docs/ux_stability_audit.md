@@ -303,14 +303,62 @@ Decision for current stabilization:
 ## 이번 PR 구현 요약
 
 - `app/ui/theme.py`에 objective token alias와 `theme_mode` compatibility alias를 추가했다.
-- `app/ui/components.py`에 empty state, badge, info/warning/error box, `safe_render_section()`을 추가했다.
+- `app/ui/components.py`에 empty state, badge, info/warning/error box, `render_metric_card()`, `safe_render_section()`을 추가했다.
 - 공개/개인 주요 section renderer를 `safe_render_section()`으로 감싸 한 화면 오류가 전체 흰 화면으로 번지지 않게 했다.
 - `app/ui/state.py`에 `NO_DATA`, `SAMPLE_MODE`, `PARTIAL_DATA`, `READY`, `ERROR_STATE` 판단 helper를 추가했다.
 - 온보딩은 no-data에서만 크게 보이고, partial data에서는 다음 단계 안내로 축소했다.
 - 차트 공통 sanitization/all-zero guard를 추가하고 실제 기록, 성과분석, 리스크분석에 적용했다.
 - 리밸런싱은 총자산 0원/no-data에서 editor 대신 명확한 안내를 표시한다.
+- 리밸런싱 target allocation은 현재 `portfolio_snapshots.payload_json` source of truth를 유지하며 저장/로드 회귀 테스트를 추가했다.
 - 라이트 모드 table/data_editor readability를 CSS token 기반으로 보강했다.
-- `tests/test_theme_tokens.py`, `tests/test_empty_states.py`, `tests/test_chart_sanitization.py`, `tests/test_safe_render.py`와 Streamlit AppTest 회귀 검증을 추가/보강했다.
+- `tests/test_theme_tokens.py`, `tests/test_empty_states.py`, `tests/test_chart_sanitization.py`, `tests/test_safe_render.py`, `tests/test_session_state.py`, `tests/test_rebalancing_storage.py`와 Streamlit AppTest 회귀 검증을 추가/보강했다.
+
+## 수정한 주요 파일 목록
+
+- `app/portfolio_dashboard.py`
+- `app/ui/theme.py`
+- `app/ui/styles.py`
+- `app/ui/components.py`
+- `app/ui/state.py`
+- `app/ui/charts.py`
+- `app/ui/onboarding.py`
+- `app/ui/overview.py`
+- `app/ui/history.py`
+- `app/ui/performance.py`
+- `app/ui/risk.py`
+- `app/ui/rebalancing.py`
+- `app/ui/investment_summary_card.py`
+- `docs/app_user_guide.md`
+- `docs/manual_test_checklist.md`
+- `docs/security_checklist.md`
+- `tests/test_theme_tokens.py`
+- `tests/test_empty_states.py`
+- `tests/test_chart_sanitization.py`
+- `tests/test_safe_render.py`
+- `tests/test_session_state.py`
+- `tests/test_rebalancing_storage.py`
+- `tests/test_streamlit_app.py`
+
+## 배포 전 꼭 봐야 할 화면
+
+- 신규 계정 `NO_DATA` 첫 화면과 온보딩 CTA
+- 샘플 포트폴리오 로딩 후 총괄현황/세부내역/자산추이
+- 샘플 데이터 삭제 후 빈 상태 복귀
+- KRW 입금만 있는 `PARTIAL_DATA`
+- USD 입금만 있는 `PARTIAL_DATA`
+- 국내 주식 1개 매수 후 총괄현황/사용자입력/성과분석
+- 미국 주식 1개 매수 후 USD/KRW 환산과 가격 상태
+- 가격·환율 갱신 성공, 일부 실패, 마지막 정상값 사용 상태
+- 총괄현황 라이트/다크
+- 세부내역 라이트/다크
+- 사용자입력 하위 탭 라이트/다크
+- 자산추이 no-data/all-zero/sample data
+- 성과분석 데이터 부족과 데이터 있음
+- 리스크분석 데이터 부족과 데이터 있음
+- 리밸런싱 no-data, 현금만 있음, 보유종목 있음, 저장 후 새로고침
+- 모바일 390px, tablet 768px, desktop 1440px
+- theme toggle 후 active tab/input 유지와 widget key warning 없음
+- 의도적 section 오류 또는 mock 실패 시 app shell 유지
 
 ## 남은 리스크
 

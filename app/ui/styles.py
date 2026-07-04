@@ -336,6 +336,52 @@ __CSS_VARS__
         .app-badge-warning { color: var(--app-warning); background: var(--token-warning-bg); border-color: var(--app-warning); }
         .app-badge-danger { color: var(--app-negative); background: var(--token-danger-bg); border-color: var(--app-negative); }
         .app-badge-info { color: var(--app-primary); background: var(--token-info-bg); border-color: var(--app-primary); }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 0.75rem;
+        }
+        .app-metric-card {
+            min-height: 128px;
+            padding: 1rem;
+            border: 1px solid var(--token-border);
+            border-left: 4px solid var(--token-border-strong);
+            border-radius: 8px;
+            background: var(--token-surface);
+            box-shadow: var(--app-shadow);
+            color: var(--token-text);
+        }
+        .app-metric-success { border-left-color: var(--token-success); }
+        .app-metric-warning { border-left-color: var(--token-warning); }
+        .app-metric-danger { border-left-color: var(--token-danger); }
+        .app-metric-info { border-left-color: var(--token-primary); }
+        .app-metric-title {
+            color: var(--token-text-muted);
+            font-size: 0.9rem;
+            font-weight: 760;
+            line-height: 1.25;
+        }
+        .app-metric-value {
+            color: var(--token-text);
+            font-size: 1.42rem;
+            font-weight: 880;
+            line-height: 1.18;
+            margin-top: 0.45rem;
+            overflow-wrap: anywhere;
+            font-variant-numeric: tabular-nums;
+        }
+        .app-metric-delta {
+            color: var(--token-text-subtle);
+            font-size: 0.9rem;
+            font-weight: 760;
+            margin-top: 0.4rem;
+        }
+        .app-metric-help {
+            color: var(--token-text-muted);
+            font-size: 0.8rem;
+            line-height: 1.35;
+            margin-top: 0.55rem;
+        }
         .app-theme-toggle-label {
             color: var(--app-muted);
             font-size: 0.82rem;

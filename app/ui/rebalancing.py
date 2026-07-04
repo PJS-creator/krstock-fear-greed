@@ -126,6 +126,16 @@ def _result_frame(plan: RebalancePlan) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def rebalancing_empty_result_message(*, has_targets: bool, total_asset_krw: float, total_target_pct: float) -> tuple[str, str] | None:
+    if not has_targets:
+        return "목표 비중이 없습니다.", "목표 비중을 입력하면 현재 포트폴리오와의 차이를 계산합니다."
+    if total_asset_krw <= 0:
+        return "총자산이 0원이라 계산할 수 없습니다.", "현금 입금 또는 보유종목 입력 후 리밸런싱 결과를 확인할 수 있습니다."
+    if total_target_pct <= 0:
+        return "목표 비중을 입력하세요.", "합계가 100%가 되도록 목표 비중을 입력하면 계산 결과가 표시됩니다."
+    return None
+
+
 def _render_plan_summary(plan: RebalancePlan) -> None:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("총자산", full_krw(plan.total_asset_krw), border=True)
@@ -226,17 +236,9 @@ def render_rebalancing(
     additional_deposit = option_cols[1].number_input("추가 입금 예정액", min_value=0.0, step=100_000.0, value=0.0, help="매도 없이 신규 입금 모드와 현금 우선 사용 모드에서 KRW 기준으로 반영합니다.")
     mode = MODE_BY_LABEL[str(selected_mode_label)]
 
-    if not clean_rows:
-        render_empty_state("목표 비중이 없습니다.", "목표 비중을 입력하면 현재 포트폴리오와의 차이를 계산합니다.")
-        return
-    if total_asset_krw <= 0:
-        render_empty_state(
-            "총자산이 0원이라 계산할 수 없습니다.",
-            "현금 입금 또는 보유종목 입력 후 리밸런싱 결과를 확인할 수 있습니다.",
-        )
-        return
-    if total_pct <= 0:
-        render_empty_state("목표 비중을 입력하세요.", "합계가 100%가 되도록 목표 비중을 입력하면 계산 결과가 표시됩니다.")
+    empty_result = rebalancing_empty_result_message(has_targets=bool(clean_rows), total_asset_krw=total_asset_krw, total_target_pct=total_pct)
+    if empty_result is not None:
+        render_empty_state(*empty_result)
         return
     try:
         plan = calculate_rebalancing_plan(

@@ -7,7 +7,7 @@ import streamlit as st
 from portfolio.performance import PerformanceAnalysis, calculate_performance_metrics
 
 from .charts import apply_chart_layout, is_all_zero_series
-from .components import render_empty_state, render_plotly_chart
+from .components import render_empty_state, render_metric_card, render_plotly_chart
 from .formatters import format_number, format_price, full_krw, instrument_label, percentage, signed_krw, signed_percentage
 from .theme import DIMENSIONS, SEMANTIC_COLORS
 
@@ -17,29 +17,28 @@ def _analysis_available(transactions: list[dict[str, object]], cash_ledger: list
 
 
 def _render_metric_cards(analysis: PerformanceAnalysis) -> None:
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric(
-        "총손익",
-        signed_krw(analysis.total_profit_krw),
-        delta=signed_percentage(analysis.simple_return),
-        help="실현손익 + 미실현손익 + 배당/이자 - 수수료/세금입니다.",
-        border=True,
-    )
-    col2.metric("실현손익", signed_krw(analysis.realized_pnl_krw), help="매도 거래에서 이동평균단가 기준으로 확정된 손익입니다.", border=True)
-    col3.metric("미실현손익", signed_krw(analysis.unrealized_pnl_krw), help="현재 보유 수량의 평가손익입니다.", border=True)
-    col4.metric("배당/이자", signed_krw(analysis.dividend_interest_krw), help="현금 원장에 입력된 배당과 이자 수익입니다.", border=True)
+    def tone(value: float) -> str:
+        if value > 0:
+            return "success"
+        if value < 0:
+            return "danger"
+        return "neutral"
 
-    col5, col6, col7, col8 = st.columns(4)
-    col5.metric("수수료/세금", full_krw(analysis.fees_taxes_krw), help="사용자가 거래 또는 원장에 입력한 수수료와 세금 합계입니다.", border=True)
-    col6.metric("환율효과", signed_krw(analysis.fx_effect_krw), help="USD 종목 손익 중 환율 변화로 설명되는 금액입니다.", border=True)
-    col7.metric("순입금액", signed_krw(analysis.net_deposit_krw), help="입금, 출금, 시작 잔고, 수동 조정의 KRW 환산 합계입니다.", border=True)
-    col8.metric(
-        "입출금 제외 성과",
-        signed_krw(analysis.flow_adjusted_asset_change_krw),
-        delta=signed_percentage(analysis.twr_base_return),
-        help="현재 총자산에서 순입금액을 뺀 값입니다. TWR 계산을 위한 기초 참고값입니다.",
-        border=True,
-    )
+    cards = [
+        ("총손익", signed_krw(analysis.total_profit_krw), signed_percentage(analysis.simple_return), tone(analysis.total_profit_krw), "실현손익 + 미실현손익 + 배당/이자 - 수수료/세금입니다."),
+        ("실현손익", signed_krw(analysis.realized_pnl_krw), None, tone(analysis.realized_pnl_krw), "매도 거래에서 이동평균단가 기준으로 확정된 손익입니다."),
+        ("미실현손익", signed_krw(analysis.unrealized_pnl_krw), None, tone(analysis.unrealized_pnl_krw), "현재 보유 수량의 평가손익입니다."),
+        ("배당/이자", signed_krw(analysis.dividend_interest_krw), None, "info", "현금 원장에 입력된 배당과 이자 수익입니다."),
+        ("수수료/세금", full_krw(analysis.fees_taxes_krw), None, "warning" if analysis.fees_taxes_krw else "neutral", "사용자가 거래 또는 원장에 입력한 수수료와 세금 합계입니다."),
+        ("환율효과", signed_krw(analysis.fx_effect_krw), None, tone(analysis.fx_effect_krw), "USD 종목 손익 중 환율 변화로 설명되는 금액입니다."),
+        ("순입금액", signed_krw(analysis.net_deposit_krw), None, "info", "입금, 출금, 시작 잔고, 수동 조정의 KRW 환산 합계입니다."),
+        ("입출금 제외 성과", signed_krw(analysis.flow_adjusted_asset_change_krw), signed_percentage(analysis.twr_base_return), tone(analysis.flow_adjusted_asset_change_krw), "현재 총자산에서 순입금액을 뺀 값입니다. TWR 계산을 위한 기초 참고값입니다."),
+    ]
+    for row_start in range(0, len(cards), 4):
+        columns = st.columns(4)
+        for column, (title, value, delta, status, help_text) in zip(columns, cards[row_start : row_start + 4]):
+            with column:
+                render_metric_card(title, value, delta=delta, status=status, help_text=help_text)
 
 
 def _plot_asset_vs_deposit(analysis: PerformanceAnalysis) -> go.Figure | None:
