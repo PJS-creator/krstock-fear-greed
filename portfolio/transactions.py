@@ -31,9 +31,13 @@ TRANSACTION_COLUMNS = [
     "display_name",
     "unit_price",
     "quantity",
+    "fee",
+    "tax",
     "occurred_at",
     "note",
 ]
+MARKET_AUTO_LABELS = {"", "auto", "자동", "자동감지"}
+CURRENCY_AUTO_LABELS = {"", "auto", "자동", "시장 기준 자동"}
 
 
 def normalize_transaction_type(value: object) -> str:
@@ -61,8 +65,31 @@ def parse_positive_float(field_name: str, value: object) -> float:
     return number
 
 
+def _optional_non_negative_float(field_name: str, value: object | None) -> float:
+    if clean_text(value) == "":
+        return 0.0
+    return parse_non_negative_float(field_name, value)
+
+
+def _first_present(*values: object | None) -> object | None:
+    for value in values:
+        if clean_text(value) != "":
+            return value
+    return None
+
+
 def _normalize_currency(value: object | None, market: str) -> str:
     currency = clean_text(value).upper() or ("KRW" if market == "KR" else "USD")
+    if currency not in SUPPORTED_CURRENCIES:
+        raise ValueError(f"Unsupported currency: {currency}")
+    return currency
+
+
+def _normalize_currency_hint(value: object | None) -> str:
+    text = clean_text(value)
+    if text.lower() in CURRENCY_AUTO_LABELS:
+        return ""
+    currency = text.upper()
     if currency not in SUPPORTED_CURRENCIES:
         raise ValueError(f"Unsupported currency: {currency}")
     return currency
@@ -79,6 +106,20 @@ def _normalize_market(value: object | None, ticker: str) -> str:
     if market not in {"KR", "US"}:
         raise ValueError(f"Unsupported market: {market}")
     return market
+
+
+def _normalize_market_hint(value: object | None) -> str:
+    market = clean_text(value)
+    if market.lower() in MARKET_AUTO_LABELS:
+        return ""
+    normalized = market.upper()
+    if normalized in {"KRX", "KOSPI", "KOSDAQ"}:
+        normalized = "KR"
+    if normalized in {"USA"}:
+        normalized = "US"
+    if normalized not in {"KR", "US"}:
+        raise ValueError(f"Unsupported market: {normalized}")
+    return normalized
 
 
 def normalize_occurred_at(value: object) -> str:
@@ -126,11 +167,102 @@ def normalize_transaction_row(row: Mapping[str, Any]) -> dict[str, object]:
         "currency": currency,
         "display_name": display_name,
         "name": display_name,
-        "unit_price": parse_positive_float("unit_price", row.get("unit_price") or row.get("avg_price") or row.get("price")),
+        "unit_price": parse_positive_float("unit_price", _first_present(row.get("unit_price"), row.get("avg_price"), row.get("price"))),
         "quantity": parse_positive_float("quantity", row.get("quantity")),
+        "fee": _optional_non_negative_float("fee", _first_present(row.get("fee"), row.get("fee_amount"))),
+        "tax": _optional_non_negative_float("tax", _first_present(row.get("tax"), row.get("tax_amount"))),
         "occurred_at": normalize_occurred_at(row.get("occurred_at") or row.get("date") or row.get("timestamp")),
         "note": clean_text(row.get("note")),
     }
+
+
+def normalize_trade_input(row: Mapping[str, Any]) -> dict[str, object]:
+    """Normalize the standard Streamlit trade form into the internal transaction shape.
+
+    The app keeps the legacy `unit_price` field for storage/calculation compatibility,
+    while the UI labels this value as 체결단가.
+    """
+
+    ticker_or_name = clean_text(
+        row.get("ticker_or_name")
+        or row.get("ticker")
+        or row.get("symbol")
+        or row.get("selected_ticker")
+        or row.get("selected_holding")
+    )
+    if not ticker_or_name:
+        raise ValueError("종목명 또는 티커를 입력하세요.")
+
+    market_hint = _normalize_market_hint(row.get("market"))
+    currency_hint = _normalize_currency_hint(row.get("currency"))
+    transaction: dict[str, object] = {
+        "transaction_type": normalize_transaction_type(row.get("transaction_type") or row.get("trade_type") or row.get("side")),
+        "ticker_or_name": ticker_or_name,
+        "unit_price": parse_positive_float("unit_price", _first_present(row.get("unit_price"), row.get("execution_price"), row.get("price"))),
+        "quantity": parse_positive_float("quantity", row.get("quantity")),
+        "fee": _optional_non_negative_float("fee", _first_present(row.get("fee"), row.get("fee_amount"))),
+        "tax": _optional_non_negative_float("tax", _first_present(row.get("tax"), row.get("tax_amount"))),
+        "occurred_at": normalize_occurred_at(row.get("occurred_at") or row.get("trade_date") or row.get("date")),
+        "note": clean_text(row.get("note")),
+    }
+    if market_hint:
+        transaction["market"] = market_hint
+        if market_hint == "KR" and re.fullmatch(r"(KR:)?\d{6}(\.(KS|KQ))?", ticker_or_name.upper()):
+            transaction["ticker"] = ticker_or_name
+            transaction.pop("ticker_or_name", None)
+        elif market_hint == "US" and re.fullmatch(r"[A-Za-z][A-Za-z0-9.\-]*", ticker_or_name):
+            transaction["ticker"] = ticker_or_name
+            transaction.pop("ticker_or_name", None)
+    if currency_hint:
+        transaction["currency"] = currency_hint
+    elif market_hint:
+        transaction["currency"] = "KRW" if market_hint == "KR" else "USD"
+    if row.get("display_name"):
+        transaction["display_name"] = clean_text(row.get("display_name"))
+    return transaction
+
+
+def validate_trade_input(
+    row: Mapping[str, Any],
+    *,
+    existing_holdings: Iterable[Mapping[str, Any]] = (),
+    korea_listing_records: Iterable[Mapping[str, str]] | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    try:
+        transaction = normalize_trade_input(row)
+    except ValueError as exc:
+        return [str(exc)]
+
+    try:
+        normalized = normalize_transaction_row(transaction)
+    except ValueError as exc:
+        preview = build_transaction_preview([transaction], korea_listing_records=korea_listing_records)
+        if not preview.rows:
+            return [str(exc)]
+        first_row = preview.rows[0]
+        if first_row.get("status") == "candidate_required":
+            return errors
+        if first_row.get("status") == "error":
+            return [str(first_row.get("message") or exc)]
+        try:
+            normalized = preview_rows_to_transactions(preview.rows)[0]
+        except (IndexError, ValueError) as preview_exc:
+            return [str(preview_exc)]
+
+    if normalized["transaction_type"] != "sell":
+        return errors
+
+    market = str(normalized["market"])
+    ticker = str(normalized["ticker"])
+    available_quantity = 0.0
+    for holding in normalize_holding_rows(existing_holdings):
+        if str(holding["market"]) == market and str(holding["ticker"]) == ticker:
+            available_quantity += float(holding["quantity"])
+    requested_quantity = float(normalized["quantity"])
+    if requested_quantity - available_quantity > 1e-9:
+        errors.append(f"현재 보유 수량 {available_quantity:g}주를 초과해 매도할 수 없습니다.")
+    return errors
 
 
 def normalize_transaction_rows(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, object]]:
@@ -153,7 +285,7 @@ def parse_transaction_lines(text: str) -> list[dict[str, str]]:
             continue
         parts = [part.strip() for part in re.split(r"[,\t ]+", line) if part.strip()]
         if len(parts) < 5:
-            rows.append({"row_number": str(line_number), "error": "매입/매도, 주식명, 평단가, 수량, 시점을 입력하세요."})
+            rows.append({"row_number": str(line_number), "error": "매입/매도, 주식명, 체결단가, 수량, 시점을 입력하세요."})
             continue
         if len(parts) >= 6 and re.fullmatch(r"\d{4}[-/]\d{2}[-/]\d{2}", parts[-2]) and re.fullmatch(r"\d{2}:\d{2}(:\d{2})?", parts[-1]):
             occurred_at = f"{parts[-2].replace('/', '-')}T{parts[-1]}"
@@ -215,9 +347,13 @@ def build_transaction_preview(
         raw_input = row.get("ticker_or_name") or row.get("ticker") or row.get("symbol")
         try:
             transaction_type = normalize_transaction_type(row.get("transaction_type") or row.get("side"))
-            unit_price = parse_positive_float("unit_price", row.get("unit_price") or row.get("avg_price") or row.get("price"))
+            unit_price = parse_positive_float("unit_price", _first_present(row.get("unit_price"), row.get("avg_price"), row.get("price")))
             quantity = parse_positive_float("quantity", row.get("quantity"))
+            fee = _optional_non_negative_float("fee", _first_present(row.get("fee"), row.get("fee_amount")))
+            tax = _optional_non_negative_float("tax", _first_present(row.get("tax"), row.get("tax_amount")))
             occurred_at = normalize_occurred_at(row.get("occurred_at") or row.get("date") or row.get("timestamp"))
+            market_hint = _normalize_market_hint(row.get("market"))
+            currency_hint = _normalize_currency_hint(row.get("currency"))
         except ValueError as exc:
             errors.append(f"{row_number}행: {exc}")
             preview_rows.append({"row_number": row_number, "status": "error", "message": str(exc), "raw_input": clean_text(raw_input)})
@@ -226,8 +362,12 @@ def build_transaction_preview(
 
         resolution = resolve_symbol(raw_input, korea_listing_records)
         status = "ok" if resolution.is_resolved else ("candidate_required" if resolution.status == "ambiguous" else "error")
+        message = resolution.message
+        if market_hint and resolution.market and resolution.market != market_hint:
+            status = "error"
+            message = f"선택한 시장({market_hint})과 인식된 시장({resolution.market})이 다릅니다."
         if status == "error":
-            errors.append(f"{row_number}행: {resolution.message}")
+            errors.append(f"{row_number}행: {message}")
         preview_rows.append(
             {
                 "row_number": row_number,
@@ -237,12 +377,15 @@ def build_transaction_preview(
                 "ticker": resolution.ticker,
                 "display_name": resolution.display_name,
                 "market": resolution.market,
-                "currency": resolution.currency,
+                "currency": currency_hint or resolution.currency,
                 "unit_price": unit_price,
                 "quantity": quantity,
+                "fee": fee,
+                "tax": tax,
                 "occurred_at": occurred_at,
                 "status": status,
-                "message": resolution.message,
+                "message": message,
+                "note": clean_text(row.get("note")),
                 "candidates": [candidate.__dict__ for candidate in resolution.candidates],
             }
         )
@@ -274,6 +417,8 @@ def preview_rows_to_transactions(rows: Iterable[Mapping[str, Any]]) -> list[dict
                     "display_name": row.get("display_name"),
                     "unit_price": row.get("unit_price"),
                     "quantity": row.get("quantity"),
+                    "fee": row.get("fee"),
+                    "tax": row.get("tax"),
                     "occurred_at": row.get("occurred_at"),
                     "note": row.get("note"),
                 }
