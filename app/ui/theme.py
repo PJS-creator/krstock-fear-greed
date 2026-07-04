@@ -48,7 +48,34 @@ STATUS_COLORS = {
 
 
 APP_THEME_KEY = "app_theme_mode"
+THEME_MODE_ALIAS_KEY = "theme_mode"
 DEFAULT_THEME_MODE = "dark"
+REQUIRED_THEME_TOKEN_KEYS = {
+    "bg",
+    "bg_subtle",
+    "surface",
+    "surface_alt",
+    "text",
+    "text_muted",
+    "text_subtle",
+    "border",
+    "border_strong",
+    "primary",
+    "primary_text",
+    "success",
+    "success_bg",
+    "danger",
+    "danger_bg",
+    "warning",
+    "warning_bg",
+    "info",
+    "info_bg",
+    "table_header_bg",
+    "table_row_bg",
+    "table_row_alt_bg",
+    "chart_grid",
+    "chart_axis",
+}
 
 
 @dataclass(frozen=True)
@@ -95,8 +122,38 @@ class AppTheme:
     down_border: str
     neutral_badge_bg: str
 
-    def css_variables(self) -> dict[str, str]:
+    def tokens(self) -> dict[str, str]:
+        """Return stable semantic tokens used by app components and tests."""
+
         return {
+            "bg": self.background,
+            "bg_subtle": self.background_accent,
+            "surface": self.panel,
+            "surface_alt": self.panel_strong,
+            "text": self.text,
+            "text_muted": self.muted,
+            "text_subtle": self.neutral,
+            "border": self.border,
+            "border_strong": self.border_strong,
+            "primary": self.primary,
+            "primary_text": "#FFFFFF",
+            "success": self.positive,
+            "success_bg": "rgba(209, 250, 229, 0.95)" if self.mode == "light" else "rgba(52, 211, 153, 0.16)",
+            "danger": self.negative,
+            "danger_bg": "rgba(254, 226, 226, 0.95)" if self.mode == "light" else "rgba(248, 113, 113, 0.14)",
+            "warning": self.warning,
+            "warning_bg": "rgba(245, 158, 11, 0.15)" if self.mode == "dark" else "rgba(254, 243, 199, 0.96)",
+            "info": self.primary,
+            "info_bg": self.primary_soft,
+            "table_header_bg": self.table_header,
+            "table_row_bg": self.panel,
+            "table_row_alt_bg": self.surface_alt,
+            "chart_grid": self.chart_grid,
+            "chart_axis": self.text,
+        }
+
+    def css_variables(self) -> dict[str, str]:
+        variables = {
             "app-bg": self.background,
             "app-bg-accent": self.background_accent,
             "app-surface": self.surface,
@@ -138,6 +195,8 @@ class AppTheme:
             "summary-down-border": self.down_border,
             "summary-neutral-badge-bg": self.neutral_badge_bg,
         }
+        variables.update({f"token-{name.replace('_', '-')}": value for name, value in self.tokens().items()})
+        return variables
 
 
 APP_THEMES = {
@@ -237,6 +296,10 @@ def normalize_theme_mode(value: object | None) -> str:
 
 def get_app_theme(mode: object | None = None) -> AppTheme:
     return APP_THEMES[normalize_theme_mode(mode)]
+
+
+def theme_tokens(mode: object | None = None) -> dict[str, str]:
+    return get_app_theme(mode).tokens()
 
 
 def get_active_theme() -> AppTheme:

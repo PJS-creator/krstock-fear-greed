@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from html import escape
+import math
 from typing import Iterable
 
+import pandas as pd
 import plotly.graph_objects as go
+import streamlit as st
 
 from portfolio.chart_data import currency_exposure_frame
 from portfolio.historical_holdings import ReconstructionResult, build_ticker_value_series
@@ -28,6 +31,95 @@ from .formatters import (
 from .theme import CURRENCY_COLORS, DIMENSIONS, SEMANTIC_COLORS, deterministic_color, get_active_theme, signed_color
 
 
+def sanitize_chart_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame()
+    clean = df.copy()
+    clean = clean.replace([math.inf, -math.inf], pd.NA)
+    return clean.dropna(how="all")
+
+
+def is_all_zero_series(series: Iterable[object]) -> bool:
+    values: list[float] = []
+    for value in series:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            values.append(number)
+    return bool(values) and all(abs(value) < 1e-12 for value in values)
+
+
+def has_chart_data(df_or_series: object, required_columns: list[str] | None = None) -> bool:
+    if df_or_series is None:
+        return False
+    if isinstance(df_or_series, pd.DataFrame):
+        frame = sanitize_chart_df(df_or_series)
+        if frame.empty:
+            return False
+        if required_columns and any(column not in frame.columns for column in required_columns):
+            return False
+        numeric = frame[required_columns] if required_columns else frame.select_dtypes(include="number")
+        if numeric.empty:
+            return True
+        values = [value for value in numeric.to_numpy().ravel() if pd.notna(value)]
+        return bool(values) and not is_all_zero_series(values)
+    if isinstance(df_or_series, pd.Series):
+        clean = pd.to_numeric(df_or_series.replace([math.inf, -math.inf], pd.NA), errors="coerce").dropna()
+        return not clean.empty and not is_all_zero_series(clean)
+    try:
+        values = list(df_or_series)  # type: ignore[arg-type]
+    except TypeError:
+        return False
+    return bool(values) and not is_all_zero_series(values)
+
+
+def format_krw_axis(value: object) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if abs(number) >= 100_000_000:
+        return f"{number / 100_000_000:.1f}억"
+    if abs(number) >= 10_000:
+        return f"{number / 10_000:.0f}만"
+    return f"{number:,.0f}원"
+
+
+def format_pct_axis(value: object) -> str:
+    try:
+        return f"{float(value):.1f}%"
+    except (TypeError, ValueError):
+        return ""
+
+
+def apply_plotly_theme(fig: go.Figure, theme_tokens: dict[str, str] | None = None) -> go.Figure:
+    theme = get_active_theme()
+    tokens = theme_tokens or theme.tokens()
+    fig.update_layout(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=APP_FONT_FAMILY, color=tokens["text"]),
+        hoverlabel=dict(
+            align="left",
+            bgcolor=theme.chart_hover_bg,
+            bordercolor=theme.chart_hover_border,
+            font=dict(family=APP_FONT_FAMILY, size=13, color="#FFFFFF"),
+        ),
+    )
+    fig.update_xaxes(gridcolor=tokens["chart_grid"], zerolinecolor=theme.chart_zero, tickfont=dict(color=tokens["chart_axis"]), automargin=True)
+    fig.update_yaxes(gridcolor=tokens["chart_grid"], zerolinecolor=theme.chart_zero, tickfont=dict(color=tokens["chart_axis"]), automargin=True)
+    return fig
+
+
+def render_empty_chart_state(title: str, message: str, cta_label: str | None = None, cta_key: str | None = None) -> bool:
+    from .components import render_empty_state
+
+    clicked, _ = render_empty_state(title, message, primary_label=cta_label, primary_key=cta_key)
+    return clicked
+
+
 def apply_chart_layout(
     fig: go.Figure,
     *,
@@ -36,6 +128,7 @@ def apply_chart_layout(
     showlegend: bool = True,
 ) -> go.Figure:
     theme = get_active_theme()
+    apply_plotly_theme(fig, theme.tokens())
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -337,6 +430,8 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
     total_values = [float(row["total_value_krw"]) for row in rows]
     position_values = [float(row["total_position_value_krw"]) for row in rows]
     cash_values = [float(row["cash_total_krw"]) for row in rows]
+    if is_all_zero_series(total_values + position_values + cash_values):
+        return None
     customdata = [
         [
             row["captured_at_label"],
@@ -398,6 +493,8 @@ def plot_transaction_cashflow(transactions: list[dict[str, object]], *, usd_krw:
     x_values = [row["date"] for row in rows]
     net_values = [float(row["net_delta_krw"]) for row in rows]
     cumulative_values = [float(row["cumulative_net_invested_krw"]) for row in rows]
+    if is_all_zero_series(net_values + cumulative_values):
+        return None
     customdata = [
         [
             full_krw(float(row["buy_amount_krw"])),
@@ -453,6 +550,8 @@ def plot_reconstructed_total_value(result: ReconstructionResult, *, include_cash
         return None
     x_values = [row.date for row in result.daily_rows]
     y_values = [row.total_value_krw if include_cash else row.position_value_krw for row in result.daily_rows]
+    if len(y_values) < 2 or is_all_zero_series(y_values):
+        return None
     customdata = [
         [
             row.date.isoformat(),
@@ -502,6 +601,8 @@ def plot_reconstructed_holdings_area(result: ReconstructionResult, *, top_n: int
     dates = sorted({row["date"] for row in rows})
     tickers = sorted({str(row["ticker"]) for row in rows}, key=lambda ticker: (ticker == "기타", ticker))
     value_by_key = {(str(row["date"]), str(row["ticker"])): float(row["market_value_krw"]) for row in rows}
+    if is_all_zero_series(value_by_key.values()):
+        return None
     display_names = {str(row["ticker"]): str(row["display_name"]) for row in rows}
     detail_by_key = {
         (str(row["date"]), str(row["ticker"])): [

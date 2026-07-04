@@ -36,7 +36,7 @@ def _stop_if_unsupported_python_runtime() -> None:
 
 _stop_if_unsupported_python_runtime()
 
-from app.ui.components import render_price_update_log
+from app.ui.components import render_price_update_log, safe_render_section
 from app.ui.data_portability import render_data_portability_tools
 from app.ui.formatters import format_kst, format_number, format_price, format_relative_time, full_krw
 from app.ui.holdings import render_holdings_table
@@ -54,7 +54,7 @@ from app.ui.overview import render_overview
 from app.ui.rebalancing import render_rebalancing
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
 from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles
-from app.ui.theme import APP_THEME_KEY, DEFAULT_THEME_MODE, normalize_theme_mode
+from app.ui.theme import APP_THEME_KEY, DEFAULT_THEME_MODE, THEME_MODE_ALIAS_KEY, normalize_theme_mode
 from app.ui.transactions import render_transaction_cashflow, render_transaction_editor
 from portfolio.auth import (
     AccountConfig,
@@ -207,8 +207,9 @@ def _initialize_theme_state() -> None:
         mode = THEME_MODE_BY_LABEL[str(selected_label)]
     else:
         st.session_state.pop(APP_THEME_CHOICE_KEY, None)
-        mode = normalize_theme_mode(st.session_state.get(APP_THEME_KEY, DEFAULT_THEME_MODE))
+        mode = normalize_theme_mode(st.session_state.get(APP_THEME_KEY, st.session_state.get(THEME_MODE_ALIAS_KEY, DEFAULT_THEME_MODE)))
     st.session_state[APP_THEME_KEY] = mode
+    st.session_state[THEME_MODE_ALIAS_KEY] = mode
 
 
 def _current_theme_mode() -> str:
@@ -234,7 +235,9 @@ def _render_theme_selector() -> None:
             **radio_kwargs,
         )
     if selected_label in THEME_MODE_BY_LABEL:
-        st.session_state[APP_THEME_KEY] = THEME_MODE_BY_LABEL[str(selected_label)]
+        mode = THEME_MODE_BY_LABEL[str(selected_label)]
+        st.session_state[APP_THEME_KEY] = mode
+        st.session_state[THEME_MODE_ALIAS_KEY] = mode
 
 
 def _clean_portfolio_name(value: object) -> str:
@@ -1419,17 +1422,17 @@ def _render_manage_section(owner_id, portfolio_store, history_store) -> None:
 def _render_private_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
     summary_card_tab, overview_tab, holdings_tab, history_tab, rebalancing_tab, manage_tab = st.tabs(["총괄현황", "세부내역", "사용자 입력", "자산추이", "리밸런싱", "저장 관리"])
     with summary_card_tab:
-        _render_summary_card_section(metrics)
+        safe_render_section("총괄현황", lambda: _render_summary_card_section(metrics))
     with overview_tab:
-        _render_overview_section(metrics)
+        safe_render_section("세부내역", lambda: _render_overview_section(metrics))
     with holdings_tab:
-        _render_holdings_section(security_config, public_auth_enabled=False)
+        safe_render_section("사용자 입력", lambda: _render_holdings_section(security_config, public_auth_enabled=False))
     with history_tab:
-        _render_history_section(owner_id, history_store, historical_schedule_store, metrics)
+        safe_render_section("자산추이", lambda: _render_history_section(owner_id, history_store, historical_schedule_store, metrics))
     with rebalancing_tab:
-        _render_rebalancing_section(metrics)
+        safe_render_section("리밸런싱", lambda: _render_rebalancing_section(metrics))
     with manage_tab:
-        _render_manage_section(owner_id, portfolio_store, history_store)
+        safe_render_section("저장 관리", lambda: _render_manage_section(owner_id, portfolio_store, history_store))
 
 
 def _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics) -> None:
@@ -1444,15 +1447,15 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
             label_visibility="collapsed",
         )
     if selected_section == "summary":
-        _render_summary_card_section(metrics)
+        safe_render_section("총괄현황", lambda: _render_summary_card_section(metrics))
     elif selected_section == "details":
-        _render_overview_section(metrics)
+        safe_render_section("세부내역", lambda: _render_overview_section(metrics))
     elif selected_section == "input":
-        _render_public_holdings_section(security_config)
+        safe_render_section("사용자입력", lambda: _render_public_holdings_section(security_config))
     elif selected_section == "history":
-        _render_history_section(owner_id, history_store, historical_schedule_store, metrics)
+        safe_render_section("자산추이", lambda: _render_history_section(owner_id, history_store, historical_schedule_store, metrics))
     else:
-        _render_rebalancing_section(metrics)
+        safe_render_section("리밸런싱", lambda: _render_rebalancing_section(metrics))
 
 
 st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
@@ -1485,7 +1488,7 @@ _render_header(security_config, owner_id, portfolio_store, history_store, metric
 _render_status_messages()
 
 if public_auth_enabled:
-    render_onboarding(portfolio_snapshot=_current_portfolio_payload())
+    safe_render_section("온보딩", lambda: render_onboarding(portfolio_snapshot=_current_portfolio_payload()))
     _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)
 else:
     _render_private_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)

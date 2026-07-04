@@ -1123,7 +1123,6 @@ def render_investment_summary_card(
         </div>
     </div>
     """
-    if metrics.holdings_count == 0 and metrics.cash_total_krw <= 0:
-        st.info("사용자 입력에서 보유 종목과 현금을 입력하면 총괄현황이 표시됩니다.")
-        return
     st.markdown(html, unsafe_allow_html=True)
+    if metrics.holdings_count == 0 and metrics.cash_total_krw <= 0:
+        st.info("사용자 입력에서 보유 종목과 현금을 입력하면 총괄현황이 실제 데이터로 채워집니다.")

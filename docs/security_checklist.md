@@ -18,6 +18,7 @@
 - [ ] 공개 앱의 포트폴리오 이름은 `main`으로 고정한다.
 - [ ] 공개 앱에서는 service role client를 생성하거나 사용자 요청 처리에 사용하지 않는다.
 - [ ] `Manage app`은 Streamlit Cloud 운영 권한 메뉴이므로 일반 사용자에게 Streamlit workspace 권한을 부여하지 않는다.
+- [ ] 주요 화면 렌더링 오류는 사용자 데이터나 secret 값을 노출하지 않고 일반 오류 안내와 로그용 오류 ID만 표시한다.
 
 ## RLS 정책 확인
 
@@ -28,6 +29,8 @@
 - [ ] `historical_holding_schedules`: RLS enabled, `owner_id = auth.uid()::text`
 - [ ] `cash_ledger`: RLS enabled, `user_id = auth.uid()`
 - [ ] `target_allocations`: RLS enabled, `user_id = auth.uid()`
+
+현재 앱의 목표 비중 source of truth는 `portfolio_snapshots.payload_json.target_allocations`이다. `target_allocations` 테이블 migration은 additive future storage로 유지하며, 별도 테이블로 전환할 때는 read/write 경로와 RLS 테스트를 함께 추가한다.
 
 공용 시장 데이터 캐시는 사용자 민감정보를 저장하지 않아야 한다.
 

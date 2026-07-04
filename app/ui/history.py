@@ -6,7 +6,7 @@ from portfolio.historical_holdings import HistoricalScheduleStore
 from portfolio.history import HistoryPeriod, PortfolioHistoryRecord, PortfolioHistoryStore, PortfolioHistoryStoreError
 
 from .charts import plot_total_value_history
-from .components import render_plotly_chart
+from .components import render_empty_state, render_plotly_chart
 from .historical_reconstruction import render_historical_reconstruction_tab
 from .performance import render_performance_analysis
 from .risk import render_risk_analysis
@@ -96,6 +96,9 @@ def _render_actual_history(
         return
     fig = plot_total_value_history(records, period=period)
     if fig is None:
-        st.info("자산 기록이 2개 이상 쌓이면 추이가 표시됩니다. 저장 또는 현재 상태 기록을 사용해 스냅샷을 남길 수 있습니다.")
+        render_empty_state(
+            "아직 기록된 자산 변화가 없습니다.",
+            "자산 기록이 2개 이상 쌓이고 값이 0원이 아니면 총자산 추이가 표시됩니다.",
+        )
         return
     render_plotly_chart(fig, key=f"history_chart_{period}")

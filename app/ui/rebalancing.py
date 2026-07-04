@@ -13,6 +13,7 @@ from portfolio.rebalancing import (
     target_weight_sum,
 )
 
+from .components import render_empty_state
 from .formatters import format_number, full_krw, percentage, signed_krw
 from .theme import DIMENSIONS
 
@@ -145,6 +146,13 @@ def render_rebalancing(
 ) -> None:
     st.subheader("리밸런싱")
     st.caption("투자 조언이 아니라 사용자가 입력한 목표 비중 대비 필요한 조정량을 계산합니다.")
+    has_assets = bool(holdings) or cash_krw > 0 or cash_usd > 0
+    if not has_assets and not target_allocations:
+        render_empty_state(
+            "리밸런싱할 자산 데이터가 없습니다.",
+            "보유종목을 입력하거나 KRW/USD 입금을 기록하면 목표 비중을 만들 수 있습니다.",
+        )
+        return
 
     initial_rows = _initial_target_rows(
         holdings=holdings,
@@ -199,12 +207,15 @@ def render_rebalancing(
         total_pct = 0.0
 
     if clean_rows:
-        if abs(total_pct - 100.0) <= 0.1:
+        if total_pct <= 0:
+            st.info("아직 목표 비중을 입력하지 않았습니다. 각 자산의 목표 비중을 입력하면 저장과 계산이 가능합니다.")
+        elif abs(total_pct - 100.0) <= 0.1:
             st.success(f"목표 비중 합계 {total_pct:.2f}%")
         else:
             st.warning(f"목표 비중 합계가 {total_pct:.2f}%입니다. 99.9~100.1% 범위를 벗어나면 저장하지 않습니다.")
 
-    if st.button("목표 비중 저장", type="primary", disabled=not clean_rows or abs(total_pct - 100.0) > 0.1):
+    target_sum_ok = clean_rows and total_pct > 0 and abs(total_pct - 100.0) <= 0.1
+    if st.button("목표 비중 저장", type="primary", disabled=not target_sum_ok):
         on_save(clean_rows)
         st.success("목표 비중을 저장했습니다. 공개 앱에서는 다음 자동 저장 시 계정 포트폴리오에 반영됩니다.")
         st.rerun()
@@ -216,7 +227,16 @@ def render_rebalancing(
     mode = MODE_BY_LABEL[str(selected_mode_label)]
 
     if not clean_rows:
-        st.info("목표 비중을 입력하면 계산 결과가 표시됩니다.")
+        render_empty_state("목표 비중이 없습니다.", "목표 비중을 입력하면 현재 포트폴리오와의 차이를 계산합니다.")
+        return
+    if total_asset_krw <= 0:
+        render_empty_state(
+            "총자산이 0원이라 계산할 수 없습니다.",
+            "현금 입금 또는 보유종목 입력 후 리밸런싱 결과를 확인할 수 있습니다.",
+        )
+        return
+    if total_pct <= 0:
+        render_empty_state("목표 비중을 입력하세요.", "합계가 100%가 되도록 목표 비중을 입력하면 계산 결과가 표시됩니다.")
         return
     try:
         plan = calculate_rebalancing_plan(

@@ -63,9 +63,8 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
     for label in ("현금·입출금·환율", "입출금 입력", "환전 입력", "현금 원장", "USD/KRW 환율 갱신", "자산 입력", "표준 거래 입력", "상세 옵션", "매입/매도 기준 자산 증감"):
         assert label in text
     assert "가격·환율 갱신" in text
-    metric_labels = _element_texts(at.metric)
-    for label in ("총자산", "오늘 변동", "총현금", "USD 노출도"):
-        assert label in metric_labels
+    for label in ("총자산", "오늘 손익", "현금", "환율"):
+        assert label in text
     assert RAW_ISO_RE.search(text) is None
 
 
@@ -76,6 +75,7 @@ def test_dashboard_theme_toggle_accepts_light_mode():
 
     assert not at.exception
     assert at.session_state["app_theme_mode"] == "light"
+    assert at.session_state["theme_mode"] == "light"
     assert "라이트" in _app_text(at)
 
 
@@ -87,7 +87,11 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert 'div[data-baseweb="select"] *' in source
     assert 'div[data-testid="stMetricLabel"] *' in source
     assert 'div[data-testid="stMetricValue"] *' in source
+    assert 'div[data-testid="stDataEditor"] [role="columnheader"]' in source
     assert 'div[role="radiogroup"] label > div:first-child' in source
+    assert ".app-empty-state" in source
+    assert ".app-box" in source
+    assert ".app-badge" in source
     assert "justify-content: center !important;" in source
     assert ".st-key-app_theme_topbar" in source
     assert ".st-key-public_section_tabs" in source
@@ -140,9 +144,14 @@ def test_price_log_detail_expander_is_rendered_collapsed_by_default():
 
 
 def test_sample_portfolio_load_does_not_mutate_widget_keys_after_render():
-    at = AppTest.from_file("app/portfolio_dashboard.py").run(timeout=20)
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.run(timeout=20)
 
-    sample_buttons = [button for button in at.button if getattr(button, "label", "") == "샘플 불러오기"]
+    sample_buttons = [button for button in at.button if getattr(button, "label", "") == "샘플 포트폴리오로 둘러보기"]
     assert sample_buttons
     sample_buttons[0].click().run(timeout=20)
 

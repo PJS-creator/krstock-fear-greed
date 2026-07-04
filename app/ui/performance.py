@@ -6,7 +6,8 @@ import streamlit as st
 
 from portfolio.performance import PerformanceAnalysis, calculate_performance_metrics
 
-from .components import render_plotly_chart
+from .charts import apply_chart_layout, is_all_zero_series
+from .components import render_empty_state, render_plotly_chart
 from .formatters import format_number, format_price, full_krw, instrument_label, percentage, signed_krw, signed_percentage
 from .theme import DIMENSIONS, SEMANTIC_COLORS
 
@@ -50,19 +51,26 @@ def _plot_asset_vs_deposit(analysis: PerformanceAnalysis) -> go.Figure | None:
         analysis.net_deposit_krw,
         analysis.flow_adjusted_asset_change_krw or 0.0,
     ]
+    if is_all_zero_series(values):
+        return None
     colors = [SEMANTIC_COLORS["primary"], SEMANTIC_COLORS["neutral"], SEMANTIC_COLORS["positive"] if values[2] >= 0 else SEMANTIC_COLORS["negative"]]
     fig = go.Figure(go.Bar(x=labels, y=values, marker_color=colors, text=[full_krw(value) for value in values], textposition="outside"))
-    fig.update_layout(
-        title="총자산 · 순입금액 · 투자성과",
-        yaxis_title="KRW",
-        height=DIMENSIONS.compact_height,
-        margin=dict(l=10, r=10, t=50, b=20),
-    )
+    fig.update_layout(yaxis_title="KRW", margin=dict(l=18, r=18, t=28, b=24))
     fig.update_yaxes(tickformat=",.0f", zeroline=True)
-    return fig
+    return apply_chart_layout(fig, height=DIMENSIONS.compact_height, hovermode="closest", showlegend=False)
 
 
-def _plot_pnl_waterfall(analysis: PerformanceAnalysis) -> go.Figure:
+def _plot_pnl_waterfall(analysis: PerformanceAnalysis) -> go.Figure | None:
+    if is_all_zero_series(
+        [
+            analysis.realized_pnl_krw,
+            analysis.unrealized_pnl_krw,
+            analysis.dividend_interest_krw,
+            analysis.fees_taxes_krw,
+            analysis.total_profit_krw,
+        ]
+    ):
+        return None
     fig = go.Figure(
         go.Waterfall(
             x=["실현손익", "미실현손익", "배당/이자", "수수료/세금", "총손익"],
@@ -85,15 +93,9 @@ def _plot_pnl_waterfall(analysis: PerformanceAnalysis) -> go.Figure:
             connector={"line": {"color": SEMANTIC_COLORS["neutral"]}},
         )
     )
-    fig.update_layout(
-        title="손익 분해",
-        yaxis_title="KRW",
-        height=DIMENSIONS.default_height,
-        margin=dict(l=10, r=10, t=50, b=20),
-        showlegend=False,
-    )
+    fig.update_layout(yaxis_title="KRW", margin=dict(l=18, r=18, t=28, b=24), showlegend=False)
     fig.update_yaxes(tickformat=",.0f", zeroline=True)
-    return fig
+    return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="closest", showlegend=False)
 
 
 def _monthly_frame(analysis: PerformanceAnalysis) -> pd.DataFrame:
@@ -146,7 +148,10 @@ def render_performance_analysis(
     st.subheader("성과분석")
     st.caption("투자 조언이나 매수/매도 추천이 아닌 사용자가 입력한 거래·현금 원장 기반 성과 집계입니다.")
     if not _analysis_available(transactions, cash_ledger, holdings):
-        st.info("거래, 현금 원장, 보유 종목이 쌓이면 성과분석이 표시됩니다.")
+        render_empty_state(
+            "성과분석을 계산할 데이터가 없습니다.",
+            "거래 또는 현금 원장을 입력하면 실현손익, 미실현손익, 배당/이자, 수수료/세금을 분리해 볼 수 있습니다.",
+        )
         return
     try:
         analysis = calculate_performance_metrics(
@@ -171,8 +176,13 @@ def render_performance_analysis(
     with chart_col1:
         if asset_fig is not None:
             render_plotly_chart(asset_fig, key="performance_asset_vs_deposit")
+        else:
+            render_empty_state("자산 변화 차트 데이터가 부족합니다.", "총자산 또는 순입금액이 쌓이면 차트가 표시됩니다.")
     with chart_col2:
-        render_plotly_chart(waterfall_fig, key="performance_pnl_waterfall")
+        if waterfall_fig is not None:
+            render_plotly_chart(waterfall_fig, key="performance_pnl_waterfall")
+        else:
+            render_empty_state("손익 분해 차트 데이터가 부족합니다.", "손익, 배당, 수수료 또는 세금 기록이 생기면 차트가 표시됩니다.")
 
     st.subheader("종목별 성과")
     symbol_frame = _symbol_frame(analysis)

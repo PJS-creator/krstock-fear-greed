@@ -18,7 +18,8 @@ from portfolio.risk_metrics import (
     value_series_from_reconstruction_result,
 )
 
-from .components import render_plotly_chart
+from .charts import apply_chart_layout, is_all_zero_series
+from .components import render_empty_state, render_plotly_chart
 from .formatters import format_number, full_krw, percentage
 from .theme import DIMENSIONS, SEMANTIC_COLORS
 
@@ -134,6 +135,8 @@ def _apply_krw_fx(benchmark: list[ValuePoint], fx_rates: list[ValuePoint]) -> li
 def _plot_total_value(series: list[ValuePoint]) -> go.Figure | None:
     if len(series) < 2:
         return None
+    if is_all_zero_series(point.value for point in series):
+        return None
     fig = go.Figure(
         go.Scatter(
             x=[point.date for point in series],
@@ -144,9 +147,9 @@ def _plot_total_value(series: list[ValuePoint]) -> go.Figure | None:
             hovertemplate="%{x}<br>총자산 ₩%{y:,.0f}<extra></extra>",
         )
     )
-    fig.update_layout(title="포트폴리오 총자산 추이", height=DIMENSIONS.default_height, margin=dict(l=10, r=10, t=50, b=20))
+    fig.update_layout(yaxis_title="KRW", xaxis_title="", margin=dict(l=18, r=18, t=28, b=24))
     fig.update_yaxes(tickformat=",.0f")
-    return fig
+    return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
 
 
 def _plot_drawdown(result: MDDResult) -> go.Figure | None:
@@ -163,9 +166,9 @@ def _plot_drawdown(result: MDDResult) -> go.Figure | None:
             hovertemplate="%{x}<br>고점 대비 %{y:.2f}%<extra></extra>",
         )
     )
-    fig.update_layout(title="Drawdown Curve", height=DIMENSIONS.default_height, margin=dict(l=10, r=10, t=50, b=20))
+    fig.update_layout(yaxis_title="고점 대비", xaxis_title="", margin=dict(l=18, r=18, t=28, b=24))
     fig.update_yaxes(ticksuffix="%", zeroline=True)
-    return fig
+    return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
 
 
 def _plot_return_scatter(portfolio_returns: dict[date, float], benchmark_returns: dict[date, float]) -> go.Figure | None:
@@ -183,15 +186,13 @@ def _plot_return_scatter(portfolio_returns: dict[date, float], benchmark_returns
         )
     )
     fig.update_layout(
-        title="포트폴리오 수익률 vs 벤치마크 수익률",
         xaxis_title="벤치마크 일간 수익률",
         yaxis_title="포트폴리오 일간 수익률",
-        height=DIMENSIONS.default_height,
-        margin=dict(l=10, r=10, t=50, b=20),
+        margin=dict(l=18, r=18, t=28, b=24),
     )
     fig.update_xaxes(ticksuffix="%", zeroline=True)
     fig.update_yaxes(ticksuffix="%", zeroline=True)
-    return fig
+    return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="closest")
 
 
 def _render_mdd_cards(result: MDDResult) -> None:
@@ -220,7 +221,10 @@ def render_risk_analysis(*, history_records: list[object] | None, load_error: st
     actual_values = value_series_from_history_records(history_records or [])
     reconstructed_values = value_series_from_reconstruction_result(st.session_state.get(RECONSTRUCTION_RESULT_STATE_KEY))
     if not actual_values and not reconstructed_values:
-        st.info("저장된 자산 기록이 2개 이상 쌓이면 MDD를 계산할 수 있습니다. Beta는 최소 20개 이상의 일간 수익률 관측치가 필요합니다.")
+        render_empty_state(
+            "리스크를 계산할 자산 기록이 부족합니다.",
+            "MDD는 최소 2개 이상의 자산 기록, Beta는 최소 20개 이상의 일간 수익률 관측치가 필요합니다.",
+        )
         return
 
     period_label = st.selectbox("분석 기간", options=list(RISK_PERIOD_DAYS.keys()), index=3, key="risk_period")
@@ -231,7 +235,10 @@ def render_risk_analysis(*, history_records: list[object] | None, load_error: st
         minimum_points=2,
     )
     if len(values) < 2:
-        st.info("선택한 기간의 총자산 기록이 2개 미만이라 MDD를 계산할 수 없습니다. 실제 기록을 더 저장하거나 과거 보유현황 재구성을 먼저 실행하세요.")
+        render_empty_state(
+            "선택한 기간의 기록이 부족합니다.",
+            "실제 기록을 더 저장하거나 과거 보유현황 재구성을 먼저 실행하면 MDD를 계산할 수 있습니다.",
+        )
         return
 
     try:
