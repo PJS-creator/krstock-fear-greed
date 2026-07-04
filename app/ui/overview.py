@@ -10,7 +10,7 @@ from .components import (
     render_contribution_summary,
     render_cost_basis_note,
     render_diagnostics,
-    render_empty_portfolio,
+    render_empty_state,
     render_kpi_cards,
     render_plotly_chart,
     render_single_currency_exposure,
@@ -18,12 +18,15 @@ from .components import (
 
 
 def render_overview(metrics: PortfolioMetrics, *, history_records: list[PortfolioHistoryRecord] | None = None) -> None:
+    if metrics.holdings_count == 0 and metrics.total_value_krw <= 0:
+        render_empty_state(
+            "분석할 자산이 없습니다.",
+            "입금 또는 보유종목을 입력하면 총자산, 자산 비중, 통화 노출, 진단이 표시됩니다.",
+        )
+        return
+
     render_kpi_cards(metrics, history_records=history_records)
     render_cost_basis_note(metrics)
-
-    if metrics.holdings_count == 0 and metrics.total_value_krw <= 0:
-        render_empty_portfolio()
-        return
 
     st.subheader("자산 비중")
     st.caption("현금을 포함한 총자산 기준입니다. 통화 노출은 KRW 환산 금액입니다.")

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import logging
+import os
+from collections.abc import Callable
+from html import escape
+from uuid import uuid4
+
 import pandas as pd
 import streamlit as st
 
@@ -13,10 +19,148 @@ from .status import aggregate_price_statuses, build_price_log_rows, present_diag
 from .theme import DIMENSIONS, chart_config
 
 PENDING_PORTFOLIO_STATE_KEY = "pending_portfolio_state"
+LOGGER = logging.getLogger(__name__)
 
 
 def render_plotly_chart(fig, *, key: str) -> None:
     st.plotly_chart(fig, use_container_width=True, theme=None, config=chart_config(), key=key)
+
+
+def render_badge(label: str, *, tone: str = "neutral") -> None:
+    tone = tone if tone in {"success", "warning", "danger", "info", "neutral"} else "neutral"
+    st.markdown(f"<span class='app-badge app-badge-{tone}'>{escape(label)}</span>", unsafe_allow_html=True)
+
+
+def render_metric_card(
+    title: str,
+    value: object,
+    *,
+    delta: object | None = None,
+    status: str = "neutral",
+    help_text: str | None = None,
+) -> None:
+    status = status if status in {"success", "warning", "danger", "info", "neutral"} else "neutral"
+    delta_html = f"<div class='app-metric-delta'>{escape(str(delta))}</div>" if delta not in (None, "") else ""
+    help_html = f"<div class='app-metric-help'>{escape(help_text)}</div>" if help_text else ""
+    st.markdown(
+        (
+            f"<div class='app-metric-card app-metric-{status}'>"
+            f"<div class='app-metric-title'>{escape(title)}</div>"
+            f"<div class='app-metric-value'>{escape(str(value))}</div>"
+            f"{delta_html}"
+            f"{help_html}"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+
+
+def render_app_header(
+    *,
+    title: str,
+    status_text: str,
+    save_status_text: str,
+    render_theme_selector: Callable[[], None] | None = None,
+    status_tone: str = "neutral",
+    refresh_disabled: bool = False,
+    retry_disabled: bool = False,
+    save_disabled: bool = True,
+    show_retry: bool = False,
+    show_save: bool = False,
+) -> dict[str, bool]:
+    if render_theme_selector is not None:
+        render_theme_selector()
+    tone = status_tone if status_tone in {"success", "warning", "danger", "info", "neutral"} else "neutral"
+    left, middle, right = st.columns([2.0, 2.5, 1.35], vertical_alignment="center")
+    with left:
+        st.title(title)
+    with middle:
+        st.markdown(
+            (
+                "<div class='app-header-status'>"
+                f"<span class='app-badge app-badge-{tone}'>{escape(status_text)}</span>"
+                f"<span class='app-header-save'>{escape(save_status_text)}</span>"
+                "</div>"
+            ),
+            unsafe_allow_html=True,
+        )
+    with right:
+        refresh_clicked = st.button("가격·환율 갱신", type="primary", width="stretch", icon=":material/refresh:", key="app_header_refresh", disabled=refresh_disabled)
+        retry_clicked = False
+        if show_retry:
+            retry_clicked = st.button("실패 재시도", width="stretch", icon=":material/replay:", key="app_header_retry", disabled=retry_disabled)
+        save_clicked = False
+        if show_save:
+            save_clicked = st.button("포트폴리오 저장", disabled=save_disabled, width="stretch", icon=":material/save:", key="app_header_save")
+    return {"refresh": refresh_clicked, "retry": retry_clicked, "save": save_clicked}
+
+
+def render_empty_state(
+    title: str,
+    message: str,
+    *,
+    primary_label: str | None = None,
+    primary_key: str | None = None,
+    secondary_label: str | None = None,
+    secondary_key: str | None = None,
+) -> tuple[bool, bool]:
+    st.markdown(
+        (
+            "<div class='app-empty-state'>"
+            f"<div class='app-empty-title'>{escape(title)}</div>"
+            f"<div class='app-empty-message'>{escape(message)}</div>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+    primary_clicked = False
+    secondary_clicked = False
+    if primary_label or secondary_label:
+        cols = st.columns(2 if primary_label and secondary_label else 1)
+        if primary_label:
+            primary_clicked = cols[0].button(primary_label, type="primary", key=primary_key, use_container_width=True)
+        if secondary_label:
+            target = cols[1] if primary_label else cols[0]
+            secondary_clicked = target.button(secondary_label, key=secondary_key, use_container_width=True)
+    return primary_clicked, secondary_clicked
+
+
+def render_info_box(title: str, message: str) -> None:
+    st.markdown(
+        f"<div class='app-box app-box-info'><strong>{escape(title)}</strong><span>{escape(message)}</span></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_warning_box(title: str, message: str) -> None:
+    st.markdown(
+        f"<div class='app-box app-box-warning'><strong>{escape(title)}</strong><span>{escape(message)}</span></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_error_box(title: str, message: str) -> None:
+    st.markdown(
+        f"<div class='app-box app-box-danger'><strong>{escape(title)}</strong><span>{escape(message)}</span></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def safe_render_section(name: str, render_fn: Callable[[], None], *, show_debug: bool | None = None) -> bool:
+    try:
+        render_fn()
+        return True
+    except Exception as exc:
+        error_id = uuid4().hex[:10]
+        LOGGER.exception("ui_section_error id=%s section=%s type=%s message=%s", error_id, name, type(exc).__name__, exc)
+        render_error_box(
+            "이 영역을 불러오는 중 문제가 발생했습니다.",
+            f"{name} 화면을 다시 열거나 새로고침해 주세요. 오류 ID: {error_id}",
+        )
+        debug_enabled = show_debug if show_debug is not None else os.environ.get("DEBUG_UI", "").strip().lower() in {"1", "true", "yes"}
+        if debug_enabled:
+            st.exception(exc)
+        return False
 
 
 def render_empty_portfolio() -> None:

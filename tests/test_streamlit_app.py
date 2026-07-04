@@ -63,9 +63,7 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
     for label in ("현금·입출금·환율", "입출금 입력", "환전 입력", "현금 원장", "USD/KRW 환율 갱신", "자산 입력", "표준 거래 입력", "상세 옵션", "매입/매도 기준 자산 증감"):
         assert label in text
     assert "가격·환율 갱신" in text
-    metric_labels = _element_texts(at.metric)
-    for label in ("총자산", "오늘 변동", "총현금", "USD 노출도"):
-        assert label in metric_labels
+    assert "아직 포트폴리오 데이터가 없습니다." in text
     assert RAW_ISO_RE.search(text) is None
 
 
@@ -76,6 +74,7 @@ def test_dashboard_theme_toggle_accepts_light_mode():
 
     assert not at.exception
     assert at.session_state["app_theme_mode"] == "light"
+    assert at.session_state["theme_mode"] == "light"
     assert "라이트" in _app_text(at)
 
 
@@ -87,7 +86,13 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert 'div[data-baseweb="select"] *' in source
     assert 'div[data-testid="stMetricLabel"] *' in source
     assert 'div[data-testid="stMetricValue"] *' in source
+    assert 'div[data-testid="stDataEditor"] [role="columnheader"]' in source
     assert 'div[role="radiogroup"] label > div:first-child' in source
+    assert ".app-empty-state" in source
+    assert ".app-box" in source
+    assert ".app-badge" in source
+    assert ".metric-grid" in source
+    assert ".app-metric-card" in source
     assert "justify-content: center !important;" in source
     assert ".st-key-app_theme_topbar" in source
     assert ".st-key-public_section_tabs" in source
@@ -103,6 +108,15 @@ def test_theme_selector_does_not_set_widget_key_default_from_session_state():
 
     assert "st.session_state[APP_THEME_CHOICE_KEY] =" not in source
     assert 'radio_kwargs["index"] = None' in source
+
+
+def test_shared_metric_card_component_exists():
+    source = Path("app/ui/components.py").read_text(encoding="utf-8")
+    performance_source = Path("app/ui/performance.py").read_text(encoding="utf-8")
+
+    assert "def render_metric_card(" in source
+    assert "app-metric-card" in source
+    assert "render_metric_card(" in performance_source
 
 
 def test_price_log_detail_expander_is_rendered_collapsed_by_default():
@@ -140,9 +154,14 @@ def test_price_log_detail_expander_is_rendered_collapsed_by_default():
 
 
 def test_sample_portfolio_load_does_not_mutate_widget_keys_after_render():
-    at = AppTest.from_file("app/portfolio_dashboard.py").run(timeout=20)
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.run(timeout=20)
 
-    sample_buttons = [button for button in at.button if getattr(button, "label", "") == "샘플 불러오기"]
+    sample_buttons = [button for button in at.button if getattr(button, "label", "") == "샘플 포트폴리오로 둘러보기"]
     assert sample_buttons
     sample_buttons[0].click().run(timeout=20)
 
@@ -254,15 +273,39 @@ def test_public_cash_fx_refresh_button_falls_back_and_applies_rate(monkeypatch):
 
 def test_current_refresh_button_forces_all_quotes_and_fx_refresh():
     source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+    components_source = Path("app/ui/components.py").read_text(encoding="utf-8")
 
-    assert 'st.button("가격·환율 갱신"' in source
+    assert "def render_app_header(" in components_source
+    assert 'st.button("가격·환율 갱신"' in components_source
     assert 'mode: str = "전체 강제 재조회"' in source
     assert "refresh_fx: bool = True" in source
+    assert "조회할 보유종목 또는 달러 현금이 없습니다." in source
+    assert "PRICE_REFRESH_IN_PROGRESS_KEY" in source
     assert "cache = TTLFxCache() if force_refresh else None" in source
     assert "_fetch_fx_rate(public_auth_enabled=public_auth_enabled, force_refresh=True)" in source
-    assert "_refresh_prices(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)" in source
+    assert "_run_price_refresh(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)" in source
     assert 'mode="실패 종목만", refresh_fx=False' in source
     assert '"가격 새로고침 대상"' not in source
+
+
+def test_public_header_refresh_does_not_call_fx_api_without_assets(monkeypatch):
+    def fail_urlopen(*args, **kwargs):
+        raise AssertionError("no external FX request expected for empty portfolio")
+
+    monkeypatch.setattr("portfolio.pricing.yahoo_finance.urlopen", fail_urlopen)
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo@example.com"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.run(timeout=20)
+
+    refresh_buttons = [button for button in at.button if getattr(button, "label", "") == "가격·환율 갱신"]
+    assert len(refresh_buttons) == 1
+    refresh_buttons[0].click().run(timeout=20)
+
+    assert not at.exception
+    assert "조회할 보유종목 또는 달러 현금이 없습니다." in _app_text(at)
 
 
 def test_public_app_hides_manual_storage_management_ui():

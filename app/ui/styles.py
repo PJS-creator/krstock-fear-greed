@@ -95,6 +95,29 @@ __CSS_VARS__
             background: var(--app-panel);
             overflow: hidden;
         }
+        div[data-testid="stDataFrame"] *,
+        div[data-testid="stDataEditor"] *,
+        div[data-testid="stDataFrame"] [role="gridcell"],
+        div[data-testid="stDataEditor"] [role="gridcell"],
+        div[data-testid="stDataFrame"] [role="columnheader"],
+        div[data-testid="stDataEditor"] [role="columnheader"] {
+            color: var(--app-text) !important;
+            border-color: var(--app-border) !important;
+        }
+        div[data-testid="stDataFrame"] [role="columnheader"],
+        div[data-testid="stDataEditor"] [role="columnheader"] {
+            background: var(--app-table-header) !important;
+            color: var(--app-heading) !important;
+            font-weight: 780 !important;
+        }
+        div[data-testid="stDataFrame"] [role="row"],
+        div[data-testid="stDataEditor"] [role="row"] {
+            background: var(--app-panel) !important;
+        }
+        div[data-testid="stDataFrame"] [role="row"]:hover,
+        div[data-testid="stDataEditor"] [role="row"]:hover {
+            background: var(--app-table-hover) !important;
+        }
         div[data-testid="stWidgetLabel"],
         div[data-testid="stWidgetLabel"] *,
         div[data-testid="stForm"] label,
@@ -248,7 +271,141 @@ __CSS_VARS__
         div[data-testid="stAlert"] {
             border-radius: 8px;
             border: 1px solid var(--app-border);
+            background: var(--app-panel) !important;
+            color: var(--app-text) !important;
             box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        div[data-testid="stAlert"] *,
+        div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] *,
+        div[data-testid="stAlert"] div,
+        div[data-testid="stAlert"] p {
+            color: var(--app-text) !important;
+            opacity: 1 !important;
+        }
+        div[data-testid="stAlert"] svg {
+            color: var(--app-warning) !important;
+            fill: var(--app-warning) !important;
+        }
+        .app-empty-state {
+            padding: 1rem;
+            margin: 0.55rem 0 0.85rem;
+            border: 1px dashed var(--app-border-strong);
+            border-radius: 8px;
+            background: var(--app-panel);
+            color: var(--app-text);
+        }
+        .app-empty-title {
+            color: var(--app-heading);
+            font-weight: 850;
+            font-size: 1.06rem;
+            margin-bottom: 0.25rem;
+        }
+        .app-empty-message {
+            color: var(--app-muted);
+            line-height: 1.55;
+        }
+        .app-box {
+            display: grid;
+            gap: 0.18rem;
+            padding: 0.82rem 0.95rem;
+            margin: 0.5rem 0 0.75rem;
+            border: 1px solid var(--app-border);
+            border-radius: 8px;
+            color: var(--app-text);
+        }
+        .app-box strong {
+            color: var(--app-heading);
+        }
+        .app-box span {
+            color: var(--app-text);
+        }
+        .app-box-info {
+            background: var(--token-info-bg);
+            border-color: var(--app-primary);
+        }
+        .app-box-warning {
+            background: var(--token-warning-bg);
+            border-color: var(--app-warning);
+        }
+        .app-box-danger {
+            background: var(--token-danger-bg);
+            border-color: var(--app-negative);
+        }
+        .app-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 1.5rem;
+            padding: 0.2rem 0.55rem;
+            border: 1px solid var(--app-border);
+            border-radius: 999px;
+            color: var(--app-text);
+            background: var(--app-panel-strong);
+            font-size: 0.84rem;
+            font-weight: 800;
+            line-height: 1.2;
+        }
+        .app-badge-success { color: var(--app-positive); background: var(--token-success-bg); border-color: var(--app-positive); }
+        .app-badge-warning { color: var(--app-warning); background: var(--token-warning-bg); border-color: var(--app-warning); }
+        .app-badge-danger { color: var(--app-negative); background: var(--token-danger-bg); border-color: var(--app-negative); }
+        .app-badge-info { color: var(--app-primary); background: var(--token-info-bg); border-color: var(--app-primary); }
+        .app-header-status {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem;
+            min-height: 2.4rem;
+        }
+        .app-header-save {
+            color: var(--token-text-muted);
+            font-size: 0.9rem;
+            font-weight: 740;
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+            gap: 0.75rem;
+        }
+        .app-metric-card {
+            min-height: 128px;
+            padding: 1rem;
+            border: 1px solid var(--token-border);
+            border-left: 4px solid var(--token-border-strong);
+            border-radius: 8px;
+            background: var(--token-surface);
+            box-shadow: var(--app-shadow);
+            color: var(--token-text);
+        }
+        .app-metric-success { border-left-color: var(--token-success); }
+        .app-metric-warning { border-left-color: var(--token-warning); }
+        .app-metric-danger { border-left-color: var(--token-danger); }
+        .app-metric-info { border-left-color: var(--token-primary); }
+        .app-metric-title {
+            color: var(--token-text-muted);
+            font-size: 0.9rem;
+            font-weight: 760;
+            line-height: 1.25;
+        }
+        .app-metric-value {
+            color: var(--token-text);
+            font-size: 1.42rem;
+            font-weight: 880;
+            line-height: 1.18;
+            margin-top: 0.45rem;
+            overflow-wrap: anywhere;
+            font-variant-numeric: tabular-nums;
+        }
+        .app-metric-delta {
+            color: var(--token-text-subtle);
+            font-size: 0.9rem;
+            font-weight: 760;
+            margin-top: 0.4rem;
+        }
+        .app-metric-help {
+            color: var(--token-text-muted);
+            font-size: 0.8rem;
+            line-height: 1.35;
+            margin-top: 0.55rem;
         }
         .app-theme-toggle-label {
             color: var(--app-muted);

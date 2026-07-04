@@ -10,6 +10,7 @@ import streamlit as st
 from portfolio.holdings import PortfolioMetrics
 from portfolio.transactions import normalize_transaction_rows
 
+from .components import render_empty_state
 from .formatters import KST, format_kst, format_number, format_price, instrument_label, percentage, signed_krw, signed_percentage
 from .theme import SEMANTIC_COLORS, deterministic_color
 
@@ -1028,6 +1029,12 @@ def render_investment_summary_card(
     transactions: list[dict[str, Any]] | None = None,
 ) -> None:
     _render_styles()
+    if metrics.holdings_count == 0 and metrics.cash_total_krw <= 0:
+        render_empty_state(
+            "아직 포트폴리오 데이터가 없습니다.",
+            "먼저 입금 또는 보유종목을 입력하면 총괄현황, 자산 비중, 보유 종목 요약이 표시됩니다.",
+        )
+        return
     allocation_rows = _allocation_rows(metrics)
     as_of_date = _as_of_date(last_refresh)
     stock_pct = metrics.total_position_value_krw / metrics.total_value_krw if metrics.total_value_krw else 0.0
@@ -1123,7 +1130,4 @@ def render_investment_summary_card(
         </div>
     </div>
     """
-    if metrics.holdings_count == 0 and metrics.cash_total_krw <= 0:
-        st.info("사용자 입력에서 보유 종목과 현금을 입력하면 총괄현황이 표시됩니다.")
-        return
     st.markdown(html, unsafe_allow_html=True)

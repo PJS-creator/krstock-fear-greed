@@ -14,10 +14,17 @@ def _ensure_project_root_on_path() -> None:
 
 
 _ensure_project_root_on_path()
-os.environ["PORTFOLIO_PUBLIC_AUTH"] = "1"
 
 DASHBOARD_MODULE = "app.portfolio_dashboard"
-if DASHBOARD_MODULE in sys.modules:
-    importlib.reload(sys.modules[DASHBOARD_MODULE])
-else:
-    importlib.import_module(DASHBOARD_MODULE)
+_previous_public_auth = os.environ.get("PORTFOLIO_PUBLIC_AUTH")
+os.environ["PORTFOLIO_PUBLIC_AUTH"] = "1"
+try:
+    if DASHBOARD_MODULE in sys.modules:
+        importlib.reload(sys.modules[DASHBOARD_MODULE])
+    else:
+        importlib.import_module(DASHBOARD_MODULE)
+finally:
+    if _previous_public_auth is None:
+        os.environ.pop("PORTFOLIO_PUBLIC_AUTH", None)
+    else:
+        os.environ["PORTFOLIO_PUBLIC_AUTH"] = _previous_public_auth

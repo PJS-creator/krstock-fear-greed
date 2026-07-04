@@ -12,7 +12,10 @@ from portfolio.storage import (
     PortfolioRecord,
     PortfolioStore,
     PortfolioStoreError,
+    TargetAllocationStore,
     deserialize_portfolio_payload_v2,
+    load_target_allocations_prefer_table,
+    save_target_allocations_if_available,
     serialize_portfolio_payload,
 )
 from portfolio.transactions import TRANSACTION_COLUMNS, normalize_transaction_rows, rows_to_csv as transaction_rows_to_csv
@@ -50,11 +53,21 @@ def list_portfolios_cached(_store: PortfolioStore, owner_id: str) -> list[Portfo
     return _store.list_portfolios(owner_id)
 
 
-def queue_portfolio_record_load(record: PortfolioRecord) -> None:
+def queue_portfolio_record_load(
+    record: PortfolioRecord,
+    *,
+    target_allocation_store: TargetAllocationStore | None = None,
+) -> None:
     payload = deserialize_portfolio_payload_v2(record.payload_json)
     cash = payload["cash_balances"]
     cash_ledger = list(payload.get("cash_ledger", []))
     fx_metadata = payload.get("fx_metadata") if isinstance(payload.get("fx_metadata"), dict) else {}
+    target_allocations = load_target_allocations_prefer_table(
+        target_allocation_store,
+        record.owner_id,
+        record.portfolio_name,
+        payload.get("target_allocations", []),
+    )
     if cash_ledger:
         ledger_balances = calculate_cash_balances(cash_ledger)
         cash_krw = float(ledger_balances["KRW"])
@@ -66,7 +79,7 @@ def queue_portfolio_record_load(record: PortfolioRecord) -> None:
         portfolio_name=record.portfolio_name,
         portfolio_transactions=payload.get("transactions", []),
         cash_ledger_entries=cash_ledger,
-        target_allocations=payload.get("target_allocations", []),
+        target_allocations=target_allocations,
         holdings_rows=payload["holdings"],
         usd_krw=float(payload["usd_krw"]),
         cash_krw=cash_krw,
@@ -107,6 +120,7 @@ def render_storage_tools(
     store: PortfolioStore | None,
     history_store: PortfolioHistoryStore | None,
     metrics: PortfolioMetrics,
+    target_allocation_store: TargetAllocationStore | None = None,
     on_capture: Callable[[str], None] | None = None,
 ) -> None:
     st.subheader("포트폴리오 저장/불러오기")
@@ -144,6 +158,12 @@ def render_storage_tools(
                     },
                 )
                 store.save_portfolio(owner_id, clean_name, payload)
+                save_target_allocations_if_available(
+                    target_allocation_store,
+                    owner_id,
+                    clean_name,
+                    st.session_state.get("target_allocations", []),
+                )
                 if history_store is not None:
                     history_store.save_snapshot(
                         build_history_record(
@@ -178,7 +198,7 @@ def render_storage_tools(
     confirm_load = st.checkbox("현재 입력을 선택 포트폴리오로 교체 확인", key=f"load_{selected.portfolio_name}")
     if col1.button("선택 포트폴리오 불러오기", disabled=not confirm_load):
         try:
-            queue_portfolio_record_load(selected)
+            queue_portfolio_record_load(selected, target_allocation_store=target_allocation_store)
             st.rerun()
         except (PortfolioStoreError, ValueError) as exc:
             st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
