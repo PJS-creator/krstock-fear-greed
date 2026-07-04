@@ -266,45 +266,47 @@ def _format_transaction_error(exc: Exception) -> str:
 
 def _render_standard_transaction_form() -> None:
     st.subheader("표준 거래 입력")
-    st.caption("거래일은 달력에서 선택하고, 체결단가와 수량을 확인한 뒤 미리보기로 검증합니다.")
+    st.caption("PC에서는 핵심 거래 정보를 한 줄로 입력하고, 수수료·세금·메모는 상세 옵션에서 입력합니다.")
     holding_options, holdings_by_label = _holding_options(list(st.session_state.get("holdings_rows", [])))
-    holding_choice = st.selectbox(
-        "기존 보유 종목",
-        holding_options,
-        key="standard_transaction_existing_holding",
-        help="매도할 때 기존 보유 종목을 선택하면 티커와 시장을 자동으로 사용합니다.",
-    )
-    selected_holding = holdings_by_label.get(holding_choice)
 
-    default_market = str(selected_holding.get("market")) if selected_holding else "자동감지"
+    default_market = "자동감지"
     market_options = ["자동감지", "KR", "US"]
     currency_options = [AUTO_CURRENCY_OPTION, "KRW", "USD"]
-    default_currency = _default_currency_option(default_market, selected_holding)
+    default_currency = _default_currency_option(default_market, None)
 
     with st.form("standard_transaction_form", clear_on_submit=False):
-        transaction_type = st.selectbox("거래 구분", ["매입", "매도"], help="매입은 보유 수량을 늘리고, 매도는 보유 수량을 줄입니다.")
-        market = st.selectbox("시장", market_options, index=market_options.index(default_market), help="자동감지가 실패하면 KR 또는 US를 직접 선택하세요.")
-        ticker_or_name = st.text_input(
-            "종목명 또는 티커",
-            value=str(selected_holding.get("ticker") or "") if selected_holding else "",
-            placeholder="예: 삼성전자, 005930, GOOGL",
-            disabled=selected_holding is not None,
+        core_cols = st.columns([0.85, 0.85, 2.1, 1.05, 1.0, 1.1, 1.05], gap="small", vertical_alignment="bottom")
+        transaction_type = core_cols[0].selectbox("구분", ["매입", "매도"], help="매입은 보유 수량을 늘리고, 매도는 보유 수량을 줄입니다.")
+        market = core_cols[1].selectbox("시장", market_options, index=market_options.index(default_market), help="자동감지가 실패하면 KR 또는 US를 직접 선택하세요.")
+        ticker_or_name = core_cols[2].text_input(
+            "종목",
+            placeholder="삼성전자, 005930, GOOGL",
             help="국내 종목은 종목명 또는 6자리 코드, 미국 종목은 ticker를 입력하세요.",
         )
-        unit_price = st.number_input("체결단가", min_value=0.0, step=0.01, format="%.2f", help="해당 거래가 실제 체결된 1주당 가격입니다.")
-        quantity = st.number_input("수량", min_value=0.0, step=0.0001, format="%.4f", help="매입 또는 매도한 주식 수량입니다.")
-        currency = st.selectbox(
-            "거래통화",
-            currency_options,
-            index=currency_options.index(default_currency) if default_currency in currency_options else 0,
-            help="시장 기준 자동을 선택하면 KR은 KRW, US는 USD로 처리합니다.",
-        )
-        fee = st.number_input("수수료", min_value=0.0, step=0.01, format="%.2f", help="거래 수수료가 없으면 0으로 둡니다.")
-        tax = st.number_input("세금", min_value=0.0, step=0.01, format="%.2f", help="거래세 등 세금이 없으면 0으로 둡니다.")
-        occurred_at = st.date_input("거래일", value=date.today(), help="문자열을 입력하지 않고 달력에서 선택합니다.")
-        note = st.text_area("메모", height=72, placeholder="선택 입력", help="계좌명, 거래 사유 등 필요한 내용을 남길 수 있습니다.")
-        submitted = st.form_submit_button("거래 미리보기", type="primary")
+        unit_price = core_cols[3].number_input("체결단가", min_value=0.0, step=0.01, format="%.2f", help="실제 체결된 1주당 가격입니다.")
+        quantity = core_cols[4].number_input("수량", min_value=0.0, step=0.0001, format="%.4f", help="매입 또는 매도한 주식 수량입니다.")
+        occurred_at = core_cols[5].date_input("거래일", value=date.today(), help="문자열 대신 달력에서 선택합니다.")
+        submitted = core_cols[6].form_submit_button("미리보기", type="primary", use_container_width=True)
+
+        with st.expander("상세 옵션", expanded=False):
+            detail_cols = st.columns([1.6, 1.0, 1.0, 1.0], gap="small")
+            holding_choice = detail_cols[0].selectbox(
+                "기존 보유 종목",
+                holding_options,
+                key="standard_transaction_existing_holding",
+                help="매도할 때 선택하면 입력한 종목 대신 보유 종목의 티커와 시장을 사용합니다.",
+            )
+            currency = detail_cols[1].selectbox(
+                "거래통화",
+                currency_options,
+                index=currency_options.index(default_currency) if default_currency in currency_options else 0,
+                help="시장 기준 자동을 선택하면 KR은 KRW, US는 USD로 처리합니다.",
+            )
+            fee = detail_cols[2].number_input("수수료", min_value=0.0, step=0.01, format="%.2f", help="없으면 0으로 둡니다.")
+            tax = detail_cols[3].number_input("세금", min_value=0.0, step=0.01, format="%.2f", help="없으면 0으로 둡니다.")
+            note = st.text_input("메모", placeholder="선택 입력", help="계좌명, 거래 사유 등 필요한 내용을 남길 수 있습니다.")
     if submitted:
+        selected_holding = holdings_by_label.get(holding_choice)
         raw_row: dict[str, object] = {
             "transaction_type": transaction_type,
             "market": str(selected_holding.get("market")) if selected_holding else market,
