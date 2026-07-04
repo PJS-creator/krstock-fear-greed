@@ -20,6 +20,7 @@ from portfolio.rebalancing import serialize_target_allocations
 from portfolio.symbols import load_korea_listing_records
 from portfolio.transactions import normalize_transaction_rows, rows_to_csv as transaction_rows_to_csv, transactions_to_holdings
 
+from .stability import begin_ui_action, finish_ui_action, request_app_rerun
 from .theme import DIMENSIONS
 
 TRANSACTION_IMPORT_PREVIEW_KEY = "transaction_import_preview_valid_rows"
@@ -73,7 +74,7 @@ def _apply_transaction_import(rows: list[dict[str, object]]) -> None:
     _update_cash_balances_from_ledger()
     st.session_state.pop(TRANSACTION_IMPORT_PREVIEW_KEY, None)
     st.toast("거래 CSV를 반영했습니다.")
-    st.rerun()
+    request_app_rerun()
 
 
 def _apply_cash_import(rows: list[dict[str, object]]) -> None:
@@ -81,7 +82,7 @@ def _apply_cash_import(rows: list[dict[str, object]]) -> None:
     _update_cash_balances_from_ledger()
     st.session_state.pop(CASH_IMPORT_PREVIEW_KEY, None)
     st.toast("현금 원장 CSV를 반영했습니다.")
-    st.rerun()
+    request_app_rerun()
 
 
 def _render_transaction_import() -> None:
@@ -127,7 +128,12 @@ def _render_transaction_import() -> None:
         st.warning("오류 또는 중복 행은 저장하지 않습니다.")
         st.dataframe(_issues_frame(issues), hide_index=True, width="stretch")
     if rows and st.button("저장 가능한 거래만 가져오기", disabled=not valid_rows):
-        _apply_transaction_import(valid_rows)
+        if begin_ui_action("import_transactions_csv", payload=valid_rows):
+            try:
+                _apply_transaction_import(valid_rows)
+            except Exception:
+                finish_ui_action(success=False)
+                raise
 
 
 def _render_cash_import() -> None:
@@ -179,7 +185,12 @@ def _render_cash_import() -> None:
         st.warning("오류 또는 중복 행은 저장하지 않습니다.")
         st.dataframe(_issues_frame(issues), hide_index=True, width="stretch")
     if rows and st.button("저장 가능한 원장만 가져오기", disabled=not valid_rows):
-        _apply_cash_import(valid_rows)
+        if begin_ui_action("import_cash_ledger_csv", payload=valid_rows):
+            try:
+                _apply_cash_import(valid_rows)
+            except Exception:
+                finish_ui_action(success=False)
+                raise
 
 
 def _render_exports(portfolio_snapshot: dict[str, object]) -> None:

@@ -308,6 +308,41 @@ def test_public_header_refresh_does_not_call_fx_api_without_assets(monkeypatch):
     assert "조회할 보유종목 또는 달러 현금이 없습니다." in _app_text(at)
 
 
+def test_public_header_refresh_failure_keeps_app_shell(monkeypatch):
+    def fail_refresh(*args, **kwargs):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr("portfolio.pricing.refresh_holding_quotes", fail_refresh)
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo@example.com"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["holdings_rows"] = [
+        {
+            "market": "US",
+            "ticker": "QURE",
+            "display_name": "QURE",
+            "currency": "USD",
+            "quantity": 1,
+            "avg_price": 10,
+            "current_price": None,
+            "quote_status": "missing",
+        }
+    ]
+    at.run(timeout=20)
+
+    refresh_buttons = [button for button in at.button if getattr(button, "label", "") == "가격·환율 갱신"]
+    assert len(refresh_buttons) == 1
+    refresh_buttons[0].click().run(timeout=20)
+
+    assert not at.exception
+    text = _app_text(at)
+    assert "포트폴리오" in text
+    assert "가격·환율 갱신 실패" in text
+    assert at.session_state["price_refresh_in_progress"] is False
+
+
 def test_public_app_hides_manual_storage_management_ui():
     at = AppTest.from_file("app/public_portfolio_dashboard.py")
     at.session_state["is_authenticated"] = True

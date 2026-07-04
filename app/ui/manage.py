@@ -20,6 +20,7 @@ from portfolio.storage import (
 )
 from portfolio.transactions import TRANSACTION_COLUMNS, normalize_transaction_rows, rows_to_csv as transaction_rows_to_csv
 from .formatters import format_kst
+from .stability import request_app_rerun
 
 STORAGE_UNCONFIGURED_MESSAGE = "저장소가 설정되지 않아 CSV 방식만 사용할 수 있습니다"
 PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
@@ -178,7 +179,7 @@ def render_storage_tools(
                 st.cache_data.clear()
                 _queue_portfolio_name_update(clean_name)
                 _set_storage_status(f"{clean_name} 포트폴리오를 저장했습니다.")
-                st.rerun()
+                request_app_rerun()
             except (PortfolioStoreError, ValueError) as exc:
                 st.error(f"포트폴리오를 저장할 수 없습니다: {exc}")
 
@@ -199,7 +200,7 @@ def render_storage_tools(
     if col1.button("선택 포트폴리오 불러오기", disabled=not confirm_load):
         try:
             queue_portfolio_record_load(selected, target_allocation_store=target_allocation_store)
-            st.rerun()
+            request_app_rerun()
         except (PortfolioStoreError, ValueError) as exc:
             st.error(f"포트폴리오를 불러올 수 없습니다: {exc}")
 
@@ -218,7 +219,7 @@ def render_storage_tools(
                     st.cache_data.clear()
                     _queue_portfolio_name_update(clean_name)
                     _set_storage_status(f"{selected.portfolio_name} → {clean_name} 이름을 변경했습니다.")
-                    st.rerun()
+                    request_app_rerun()
                 except PortfolioStoreError as exc:
                     st.error(f"포트폴리오 이름을 변경할 수 없습니다: {exc}")
 
@@ -228,7 +229,7 @@ def render_storage_tools(
             if store.delete_portfolio(owner_id, selected.portfolio_name):
                 st.cache_data.clear()
                 _set_storage_status(f"{selected.portfolio_name} 포트폴리오를 삭제했습니다.")
-                st.rerun()
+                request_app_rerun()
             else:
                 st.error("선택한 포트폴리오를 찾을 수 없습니다.")
         except PortfolioStoreError as exc:

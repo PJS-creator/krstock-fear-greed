@@ -9,6 +9,7 @@ import streamlit as st
 from .state import AppDataState, get_app_data_state
 from .data_portability import render_data_portability_tools
 from .holdings import render_holdings_editor
+from .stability import begin_ui_action, request_app_rerun
 
 SAMPLE_PORTFOLIO_ACTIVE_KEY = "sample_portfolio_active"
 ONBOARDING_MODE_KEY = "onboarding_mode"
@@ -166,8 +167,9 @@ def render_onboarding(*, portfolio_snapshot: dict[str, object]) -> None:
     if sample_active:
         st.info("샘플 포트폴리오로 둘러보는 중입니다. 이 데이터는 실제 투자 기록이 아니며 자동 저장하지 않습니다.")
         if st.button("샘플 데이터 삭제", type="secondary", key="delete_sample_portfolio"):
-            clear_sample_portfolio()
-            st.rerun()
+            if begin_ui_action("delete_sample_portfolio"):
+                clear_sample_portfolio()
+                request_app_rerun()
         return
 
     if state == AppDataState.READY:
@@ -180,14 +182,14 @@ def render_onboarding(*, portfolio_snapshot: dict[str, object]) -> None:
         if action_col1.button("현금·환율 입력", key="partial_go_cash", use_container_width=True):
             st.session_state["public_dashboard_section"] = "input"
             st.session_state["public_holdings_view"] = "cash_fx"
-            st.rerun()
+            request_app_rerun()
         if action_col2.button("거래 입력", key="partial_go_transactions", use_container_width=True):
             st.session_state["public_dashboard_section"] = "input"
             st.session_state["public_holdings_view"] = "transactions"
-            st.rerun()
+            request_app_rerun()
         if action_col3.button("나중에 하기", key="partial_dismiss_onboarding", use_container_width=True):
             st.session_state[ONBOARDING_DISMISSED_KEY] = True
-            st.rerun()
+            request_app_rerun()
         return
 
     if _has_user_portfolio_data():
@@ -199,22 +201,23 @@ def render_onboarding(*, portfolio_snapshot: dict[str, object]) -> None:
     st.caption("처음 로그인한 사용자가 바로 포트폴리오를 만들 수 있도록 가장 쉬운 시작 방식을 선택하세요.")
     col1, col2, col3, col4 = st.columns(4)
     if col1.button("샘플 포트폴리오로 둘러보기", use_container_width=True):
-        _apply_sample_portfolio()
-        st.rerun()
+        if begin_ui_action("load_sample_portfolio"):
+            _apply_sample_portfolio()
+            request_app_rerun()
     if col2.button("현재 보유종목만 빠르게 입력", use_container_width=True):
         st.session_state[ONBOARDING_MODE_KEY] = "holdings"
-        st.rerun()
+        request_app_rerun()
     if col3.button("거래/현금 CSV 업로드", use_container_width=True):
         st.session_state[ONBOARDING_MODE_KEY] = "csv"
-        st.rerun()
+        request_app_rerun()
     if col4.button("KRW/USD 입금부터 시작", use_container_width=True):
         st.session_state["public_dashboard_section"] = "input"
         st.session_state["public_holdings_view"] = "cash_fx"
         st.session_state[ONBOARDING_MODE_KEY] = ""
-        st.rerun()
+        request_app_rerun()
     if st.button("나중에 하기", key="dismiss_onboarding", type="secondary"):
         st.session_state[ONBOARDING_DISMISSED_KEY] = True
-        st.rerun()
+        request_app_rerun()
 
     mode = st.session_state.get(ONBOARDING_MODE_KEY)
     if mode == "holdings":
