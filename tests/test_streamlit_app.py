@@ -82,6 +82,9 @@ def test_dashboard_theme_toggle_accepts_light_mode():
 def test_theme_css_keeps_metric_and_radio_text_readable():
     source = Path("app/ui/styles.py").read_text(encoding="utf-8")
 
+    assert 'div[data-testid="stWidgetLabel"]' in source
+    assert 'div[data-testid="stForm"] label' in source
+    assert 'div[data-baseweb="select"] *' in source
     assert 'div[data-testid="stMetricLabel"] *' in source
     assert 'div[data-testid="stMetricValue"] *' in source
     assert 'div[role="radiogroup"] label > div:first-child' in source
@@ -92,6 +95,13 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in source
     assert "border-bottom: 1px solid var(--app-border);" in source
     assert "label:has(input:checked)::after" in source
+
+
+def test_theme_selector_does_not_set_widget_key_default_from_session_state():
+    source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+
+    assert "st.session_state[APP_THEME_CHOICE_KEY] =" not in source
+    assert 'radio_kwargs["index"] = None' in source
 
 
 def test_price_log_detail_expander_is_rendered_collapsed_by_default():

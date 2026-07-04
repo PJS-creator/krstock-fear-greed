@@ -95,6 +95,20 @@ __CSS_VARS__
             background: var(--app-panel);
             overflow: hidden;
         }
+        div[data-testid="stWidgetLabel"],
+        div[data-testid="stWidgetLabel"] *,
+        div[data-testid="stForm"] label,
+        div[data-testid="stForm"] label *,
+        div[data-testid="stTextInput"] label,
+        div[data-testid="stNumberInput"] label,
+        div[data-testid="stDateInput"] label,
+        div[data-testid="stSelectbox"] label,
+        div[data-testid="stTextArea"] label,
+        div[data-baseweb="form-control"] label,
+        div[data-baseweb="form-control"] label * {
+            color: var(--app-text) !important;
+            opacity: 1 !important;
+        }
         div[data-testid="stExpander"] details {
             background: var(--summary-panel-bg);
             border: 1px solid var(--app-border);
@@ -126,6 +140,19 @@ __CSS_VARS__
         div[data-baseweb="textarea"],
         div[data-baseweb="select"] {
             color: var(--app-text);
+        }
+        div[data-baseweb="select"] *,
+        div[data-baseweb="popover"] li,
+        div[data-baseweb="popover"] li * {
+            color: var(--app-text) !important;
+        }
+        div[data-baseweb="popover"] {
+            background: var(--app-panel) !important;
+        }
+        input::placeholder,
+        textarea::placeholder {
+            color: var(--app-muted) !important;
+            opacity: 1 !important;
         }
         div[data-testid="stButton"] button {
             border-radius: 8px;
