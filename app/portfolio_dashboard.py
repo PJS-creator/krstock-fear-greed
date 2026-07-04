@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import os
 from pathlib import Path
 import sys
@@ -63,6 +64,12 @@ from portfolio.auth import (
 from portfolio.history import build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
+from portfolio.cash_ledger import (
+    calculate_cash_balances,
+    create_balance_adjustment_entries,
+    create_cash_movement_entry,
+    serialize_cash_ledger_rows,
+)
 from portfolio.pricing import (
     TTLFxCache,
     TTLQuoteCache,
@@ -149,6 +156,12 @@ PUBLIC_HOLDINGS_VIEW_LEGACY_MAP = {
     "현금·환율": "cash_fx",
     "거래 입력": "transactions",
 }
+CASH_MOVEMENT_EVENT_BY_LABEL = {
+    "입금": "deposit",
+    "출금": "withdrawal",
+    "배당": "dividend",
+    "이자": "interest",
+}
 
 
 def _normalize_radio_state(key: str, labels: dict[str, str], legacy_map: dict[str, str], default: str) -> None:
@@ -206,6 +219,7 @@ def _current_portfolio_state() -> dict[str, object]:
     return {
         "portfolio_name": _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_KEY)),
         "portfolio_transactions": st.session_state.get("portfolio_transactions", []),
+        "cash_ledger_entries": st.session_state.get("cash_ledger_entries", []),
         "holdings_rows": st.session_state.get("holdings_rows", []),
         "cash_krw": st.session_state.get("cash_krw", 0.0),
         "cash_usd": st.session_state.get("cash_usd", 0.0),
@@ -229,6 +243,7 @@ def _restore_last_saved_state() -> None:
     st.session_state[PENDING_PORTFOLIO_STATE_KEY] = {
         "portfolio_name": _clean_portfolio_name(state.get("portfolio_name")),
         "portfolio_transactions": list(state.get("portfolio_transactions") or []),
+        "cash_ledger_entries": list(state.get("cash_ledger_entries") or []),
         "holdings_rows": list(state.get("holdings_rows") or []),
         "cash_krw": float(state.get("cash_krw") or 0.0),
         "cash_usd": float(state.get("cash_usd") or 0.0),
@@ -242,6 +257,7 @@ def _reset_current_portfolio_state(portfolio_name: str = "main") -> None:
     st.session_state[PENDING_PORTFOLIO_STATE_KEY] = {
         "portfolio_name": clean_name,
         "portfolio_transactions": [],
+        "cash_ledger_entries": [],
         "holdings_rows": [],
         "cash_krw": 0.0,
         "cash_usd": 0.0,
@@ -362,6 +378,7 @@ def _apply_pending_portfolio_state() -> None:
     for key in (
         "holdings_rows",
         "portfolio_transactions",
+        "cash_ledger_entries",
         "cash_krw",
         "cash_usd",
         "usd_krw",
@@ -388,6 +405,7 @@ def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     _apply_pending_portfolio_state()
     st.session_state.setdefault(PORTFOLIO_NAME_INPUT_KEY, st.session_state[PORTFOLIO_NAME_KEY])
     st.session_state.setdefault("portfolio_transactions", [])
+    st.session_state.setdefault("cash_ledger_entries", [])
     st.session_state.setdefault("holdings_rows", [])
     st.session_state.setdefault("cash_krw", 0.0)
     st.session_state.setdefault("cash_usd", 0.0)
@@ -548,6 +566,7 @@ def _current_portfolio_payload():
         cash_krw=st.session_state.cash_krw,
         cash_usd=st.session_state.cash_usd,
         transactions=st.session_state.get("portfolio_transactions", []),
+        cash_ledger=st.session_state.get("cash_ledger_entries", []),
     )
 
 
@@ -745,9 +764,22 @@ def _sync_inline_cash_fx_inputs() -> None:
 def _queue_inline_cash_fx_update() -> None:
     current_rate = float(st.session_state.get("usd_krw") or 1380.0)
     new_rate = float(st.session_state.get(INLINE_USD_KRW_KEY) or current_rate)
+    current_ledger = list(st.session_state.get("cash_ledger_entries") or [])
+    adjustment_entries = create_balance_adjustment_entries(
+        {
+            "KRW": float(st.session_state.get(INLINE_CASH_KRW_KEY) or 0.0),
+            "USD": float(st.session_state.get(INLINE_CASH_USD_KEY) or 0.0),
+        },
+        current_ledger,
+        event_date=date.today(),
+        portfolio_id=_current_portfolio_name(),
+    )
+    next_ledger = serialize_cash_ledger_rows(current_ledger + adjustment_entries)
+    cash_balances = calculate_cash_balances(next_ledger)
     pending_state = {
-        "cash_krw": float(st.session_state.get(INLINE_CASH_KRW_KEY) or 0.0),
-        "cash_usd": float(st.session_state.get(INLINE_CASH_USD_KEY) or 0.0),
+        "cash_ledger_entries": next_ledger,
+        "cash_krw": float(cash_balances["KRW"]),
+        "cash_usd": float(cash_balances["USD"]),
         "usd_krw": new_rate,
     }
     if abs(new_rate - current_rate) > 1e-9:
@@ -755,6 +787,56 @@ def _queue_inline_cash_fx_update() -> None:
         pending_state["fx_fetched_at"] = None
     st.session_state[PENDING_PORTFOLIO_STATE_KEY] = pending_state
     st.rerun()
+
+
+def _queue_cash_ledger_rows(rows: list[dict[str, object]]) -> None:
+    next_ledger = serialize_cash_ledger_rows(list(st.session_state.get("cash_ledger_entries") or []) + rows)
+    cash_balances = calculate_cash_balances(next_ledger)
+    negative_balances = [currency for currency, amount in cash_balances.items() if amount < 0]
+    if negative_balances:
+        currencies = ", ".join(negative_balances)
+        raise ValueError(f"{currencies} 현금 잔고가 부족합니다.")
+    st.session_state[PENDING_PORTFOLIO_STATE_KEY] = {
+        "cash_ledger_entries": next_ledger,
+        "cash_krw": float(cash_balances["KRW"]),
+        "cash_usd": float(cash_balances["USD"]),
+    }
+    st.rerun()
+
+
+def _render_cash_movement_form() -> None:
+    st.divider()
+    st.caption("입출금 기록")
+    with st.form("cash_movement_form"):
+        col1, col2, col3, col4 = st.columns([1.0, 1.0, 1.3, 1.2])
+        event_label = col1.selectbox("구분", list(CASH_MOVEMENT_EVENT_BY_LABEL.keys()), help="현금 증가/감소 원인을 선택합니다.")
+        currency = col2.selectbox("통화", ["KRW", "USD"], help="원화 현금 또는 달러 현금입니다.")
+        amount = col3.number_input("금액", min_value=0.0, step=1.0, format="%.2f", help="출금은 양수로 입력하면 원장에서 자동으로 음수 처리합니다.")
+        event_date = col4.date_input("일자", value=date.today(), help="현금이 실제로 들어오거나 나간 날짜입니다.")
+        memo = st.text_input("메모", placeholder="선택 입력")
+        submitted = st.form_submit_button("원장 추가", type="primary")
+    if not submitted:
+        return
+    if amount <= 0:
+        st.error("금액은 0보다 커야 합니다.")
+        return
+    event_type = CASH_MOVEMENT_EVENT_BY_LABEL[event_label]
+    signed_amount = -amount if event_type == "withdrawal" else amount
+    try:
+        _queue_cash_ledger_rows(
+            [
+                create_cash_movement_entry(
+                    event_type=event_type,
+                    currency=currency,
+                    amount=signed_amount,
+                    event_date=event_date,
+                    portfolio_id=_current_portfolio_name(),
+                    memo=memo or None,
+                )
+            ]
+        )
+    except ValueError as exc:
+        st.error(f"현금 원장을 반영할 수 없습니다: {exc}")
 
 
 def _render_cash_fx_tools(config: AppSecurityConfig, *, public_auth_enabled: bool = False) -> None:
@@ -773,6 +855,7 @@ def _render_cash_fx_tools(config: AppSecurityConfig, *, public_auth_enabled: boo
         st.caption(st.session_state.fx_status_message)
         if st.session_state.fx_fetched_at:
             st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
+        _render_cash_movement_form()
 
 
 def _load_portfolio_record_now(record) -> None:
