@@ -60,7 +60,7 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
     for label in ("다크", "라이트"):
         assert label in text
     assert at.session_state["app_theme_mode"] == "dark"
-    for label in ("현금 및 환율", "현금/환율 적용", "USD/KRW 환율 갱신", "자산 입력", "거래 1건 입력", "매입/매도 기준 자산 증감"):
+    for label in ("현금 및 환율", "현금/환율 적용", "USD/KRW 환율 갱신", "자산 입력", "표준 거래 입력", "매입/매도 기준 자산 증감"):
         assert label in text
     assert "가격·환율 갱신" in text
     metric_labels = _element_texts(at.metric)
@@ -153,8 +153,8 @@ def test_public_holdings_section_defers_transaction_editor_by_default():
     assert not at.exception
     text = _app_text(at)
     assert "보유 종목을 입력하면 표가 표시됩니다." in text
-    assert "거래 1건 입력" not in text
-    assert "여러 개 빠른 입력" not in text
+    assert "표준 거래 입력" not in text
+    assert "고급 입력 · 빠른 입력" not in text
     assert at.session_state["public_dashboard_section"] == "input"
 
 
@@ -170,8 +170,8 @@ def test_public_holdings_transaction_input_renders_only_when_selected():
 
     assert not at.exception
     text = _app_text(at)
-    assert "거래 1건 입력" in text
-    assert "여러 개 빠른 입력" in text
+    assert "표준 거래 입력" in text
+    assert "고급 입력 · 빠른 입력" in text
 
 
 def test_public_cash_fx_refresh_button_falls_back_and_applies_rate(monkeypatch):

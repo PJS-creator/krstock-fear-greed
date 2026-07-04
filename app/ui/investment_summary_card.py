@@ -417,7 +417,7 @@ def _coverage_label(metrics: PortfolioMetrics) -> str:
     if metrics.total_position_value_krw <= 0:
         return "보유 종목 없음"
     covered_count = sum(1 for row in metrics.rows if row.cost_basis_krw is not None)
-    return f"평단가 입력 {covered_count:,}/{metrics.holdings_count:,}종목"
+    return f"평균단가 입력 {covered_count:,}/{metrics.holdings_count:,}종목"
 
 
 def _holding_table_rows(
@@ -514,7 +514,7 @@ def _mobile_holding_summary_table(metrics: PortfolioMetrics) -> str:
         "<div class='summary-mobile-table-scroll'>"
         "<table class='summary-mobile-holding-table'>"
         "<thead><tr>"
-        "<th>종목명</th><th>수량</th><th>평단가</th><th>현재가</th><th>자산비중</th>"
+        "<th>종목명</th><th>수량</th><th>평균단가</th><th>현재가</th><th>자산비중</th>"
         "</tr></thead>"
         "<tbody>"
         + "".join(rows)
@@ -959,7 +959,7 @@ def _render_styles() -> None:
             }
             .summary-table td:nth-child(1):before { display: none; }
             .summary-table td:nth-child(2):before { content: "수량"; }
-            .summary-table td:nth-child(3):before { content: "평단가"; }
+            .summary-table td:nth-child(3):before { content: "평균단가"; }
             .summary-table td:nth-child(4):before { content: "매입금액"; }
             .summary-table td:nth-child(5):before { content: "현재가"; }
             .summary-table td:nth-child(6):before { content: "당일 흐름"; }
@@ -1035,7 +1035,7 @@ def render_investment_summary_card(
     day_class = _signed_class(metrics.day_change_krw)
     pnl_class = _signed_class(metrics.total_pnl_krw)
     seed = metrics.total_cost_krw if metrics.total_cost_krw > 0 else None
-    seed_label = _krw(seed) if seed is not None else "평단가 필요"
+    seed_label = _krw(seed) if seed is not None else "평균단가 필요"
     kpi_cards = [
         _kpi_card("총자산", _krw(metrics.total_value_krw), f"주식 {percentage(stock_pct, digits=2)} · 현금 {percentage(cash_pct, digits=2)}", "cyan", "₩"),
         _kpi_card("주식 평가금액", _krw(metrics.total_position_value_krw), f"{metrics.priced_count:,}/{metrics.holdings_count:,}종목 평가", "default", "주"),
@@ -1099,7 +1099,7 @@ def render_investment_summary_card(
                         <tr>
                             <th>종목명</th>
                             <th>보유 수량</th>
-                            <th>평단가 (원/달러)</th>
+                            <th>평균단가 (원/달러)</th>
                             <th>매입금액</th>
                             <th>현재 주가</th>
                             <th class="summary-sparkline-th">당일 흐름</th>
@@ -1118,7 +1118,7 @@ def render_investment_summary_card(
             {''.join(kpi_cards)}
         </div>
         <div class="summary-foot">
-            <span>평가 수익률은 입력한 매입 평단가 기준입니다.</span>
+            <span>평가 수익률은 입력한 평균 매입단가 기준입니다.</span>
             <span>수수료 및 세금 비반영</span>
         </div>
     </div>

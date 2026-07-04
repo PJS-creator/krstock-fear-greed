@@ -78,7 +78,7 @@ def test_mobile_holding_summary_table_includes_requested_compact_columns():
 
     assert "summary-mobile-holdings" in table
     assert "summary-mobile-holding-table" in table
-    for label in ("종목명", "수량", "평단가", "현재가", "자산비중"):
+    for label in ("종목명", "수량", "평균단가", "현재가", "자산비중"):
         assert f"<th>{label}</th>" in table
     assert "삼성전자" in table
     assert "Micron" in table
