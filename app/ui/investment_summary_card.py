@@ -88,6 +88,18 @@ def _signed_price(value: float, currency: object) -> str:
     return f"{sign}{format_price(abs(value), currency)}"
 
 
+def _currency_label(value: object) -> str:
+    currency = str(value or "").upper()
+    return currency if currency in {"KRW", "USD"} else "-"
+
+
+def _currency_badge(value: object) -> str:
+    label = _currency_label(value)
+    if label == "-":
+        return ""
+    return f"<span class='summary-currency-badge summary-currency-{label.lower()}'>{escape(label)}</span>"
+
+
 def _price_change_text(holding: dict[str, Any]) -> str:
     change = _holding_day_change_price(holding)
     pct = None
@@ -305,6 +317,7 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
                 "day_change_pct": day_change_pct,
                 "day_change_krw": item.day_change_krw,
                 "kind": "holding",
+                "currency": _currency_label(item.holding.get("currency")),
             }
         )
     rows = sorted(rows, key=_sort_key, reverse=True)
@@ -327,13 +340,49 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
             "day_change_pct": other_day_change_pct,
             "day_change_krw": other_day_change_krw,
             "kind": "other",
+            "currency": "-",
         }
     )
     return kept
 
 
-def _cash_allocation_row(metrics: PortfolioMetrics) -> dict[str, Any] | None:
+def _cash_allocation_rows(metrics: PortfolioMetrics) -> list[dict[str, Any]]:
     if metrics.cash_total_krw <= 0:
+        return []
+    tokens = get_active_theme().tokens()
+    total = metrics.total_value_krw
+    rows: list[dict[str, Any]] = []
+    if metrics.cash.cash_krw > 0:
+        rows.append(
+            {
+                "label": "원화 현금",
+                "detail": _krw(metrics.cash.cash_krw),
+                "value_krw": metrics.cash.cash_krw,
+                "weight": metrics.cash.cash_krw / total if total else 0.0,
+                "color": tokens["krw"],
+                "kind": "cash",
+                "currency": "KRW",
+            }
+        )
+    if metrics.cash.cash_usd > 0:
+        cash_usd_krw = metrics.cash.cash_usd * metrics.usd_krw
+        rows.append(
+            {
+                "label": "달러 현금",
+                "detail": f"{format_price(metrics.cash.cash_usd, 'USD')} · 환산 {_krw(cash_usd_krw)}",
+                "value_krw": cash_usd_krw,
+                "weight": cash_usd_krw / total if total else 0.0,
+                "color": tokens["usd"],
+                "kind": "cash",
+                "currency": "USD",
+            }
+        )
+    return rows
+
+
+def _cash_allocation_row(metrics: PortfolioMetrics) -> dict[str, Any] | None:
+    rows = _cash_allocation_rows(metrics)
+    if not rows:
         return None
     tokens = get_active_theme().tokens()
     total = metrics.total_value_krw
@@ -344,7 +393,30 @@ def _cash_allocation_row(metrics: PortfolioMetrics) -> dict[str, Any] | None:
         "weight": metrics.cash_total_krw / total if total else 0.0,
         "color": tokens["cash"],
         "kind": "cash",
+        "currency": "-",
     }
+
+
+def _currency_totals(metrics: PortfolioMetrics) -> dict[str, dict[str, float]]:
+    totals = {
+        "investment": {"KRW": 0.0, "USD": 0.0},
+        "cash": {"KRW": metrics.cash.cash_krw, "USD": metrics.cash.cash_usd * metrics.usd_krw},
+    }
+    for item in metrics.rows:
+        currency = _currency_label(item.holding.get("currency"))
+        if currency in {"KRW", "USD"} and item.market_value_krw:
+            totals["investment"][currency] += float(item.market_value_krw)
+    return totals
+
+
+def _currency_split_text(values: dict[str, float], total: float) -> str:
+    parts = []
+    for currency in ("KRW", "USD"):
+        value = float(values.get(currency) or 0.0)
+        if value <= 0:
+            continue
+        parts.append(f"{currency} {percentage(value / total if total else 0.0, digits=1)}")
+    return " · ".join(parts) if parts else "KRW/USD 없음"
 
 
 def _split_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -439,10 +511,21 @@ def _holding_table_rows(
     rows = []
     normalized_transactions = _normalized_transactions(transactions)
     irr_date = as_of_date or datetime.now(KST).date()
+    currency_totals = _currency_totals(metrics)
+    if metrics.rows:
+        rows.append(
+            "<tr class='summary-section-row summary-section-investment'>"
+            "<td colspan='11'>"
+            "<span>투자</span>"
+            f"<strong>{escape(_currency_split_text(currency_totals['investment'], metrics.total_value_krw))}</strong>"
+            "</td>"
+            "</tr>"
+        )
     for item in sorted(metrics.rows, key=lambda row: row.market_value_krw or 0.0, reverse=True):
         holding = item.holding
         label = escape(instrument_label(holding))
         color = deterministic_color(holding.get("ticker") or label)
+        currency = _currency_label(holding.get("currency"))
         quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
         avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
         purchase_amount = "-"
@@ -457,7 +540,7 @@ def _holding_table_rows(
         irr_text = signed_percentage(irr) if irr is not None else "-"
         rows.append(
             "<tr>"
-            f"<td class='summary-name'><span style='background:{color}'></span>{label}</td>"
+            f"<td class='summary-name'><span class='summary-name-dot' style='background:{color}'></span><span class='summary-name-text'>{label}</span>{_currency_badge(currency)}</td>"
             f"<td>{escape(quantity)}</td>"
             f"<td>{escape(avg_price)}</td>"
             f"<td>{escape(purchase_amount)}</td>"
@@ -472,13 +555,28 @@ def _holding_table_rows(
         )
     if metrics.cash_total_krw > 0:
         rows.append(
-            "<tr>"
-            "<td class='summary-name'><span style='background:var(--app-cash)'></span>현금</td>"
-            "<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>"
-            f"<td>{escape(_krw(metrics.cash_total_krw))}</td>"
-            f"<td>{escape(percentage(metrics.cash_total_krw / metrics.total_value_krw if metrics.total_value_krw else 0, digits=2))}</td>"
+            "<tr class='summary-section-row summary-section-cash'>"
+            "<td colspan='11'>"
+            "<span>현금</span>"
+            f"<strong>{escape(_currency_split_text(currency_totals['cash'], metrics.total_value_krw))}</strong>"
+            "</td>"
             "</tr>"
         )
+        for cash_row in _cash_allocation_rows(metrics):
+            currency = str(cash_row["currency"])
+            quantity = _krw(metrics.cash.cash_krw) if currency == "KRW" else format_price(metrics.cash.cash_usd, "USD")
+            current_price = "-" if currency == "KRW" else f"{format_number(metrics.usd_krw, digits=0)}원/USD"
+            rows.append(
+                "<tr class='summary-cash-detail-row'>"
+                f"<td class='summary-name'><span class='summary-name-dot' style='background:{cash_row['color']}'></span><span class='summary-name-text'>{escape(str(cash_row['label']))}</span>{_currency_badge(currency)}</td>"
+                f"<td>{escape(quantity)}</td>"
+                "<td>-</td><td>-</td>"
+                f"<td>{escape(current_price)}</td>"
+                "<td>-</td><td>-</td><td>-</td><td>-</td>"
+                f"<td>{escape(_krw(float(cash_row['value_krw'])))}</td>"
+                f"<td>{escape(percentage(float(cash_row['weight']), digits=2))}</td>"
+                "</tr>"
+            )
     portfolio_irr = _portfolio_irr(metrics, normalized_transactions, as_of_date=irr_date)
     total_day_text = f"{_signed_text(metrics.day_change_krw, signed_krw)} ({_signed_text(metrics.day_change_pct, signed_percentage)})"
     rows.append(
@@ -502,13 +600,14 @@ def _mobile_holding_summary_table(metrics: PortfolioMetrics) -> str:
         holding = item.holding
         label = instrument_label(holding)
         color = deterministic_color(holding.get("ticker") or label)
+        currency = _currency_label(holding.get("currency"))
         quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
         avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
         current_price = format_price(holding.get("current_price"), holding.get("currency"))
         rows.append(
             "<tr>"
             "<td>"
-            f"<div class='summary-mobile-summary-name'><span style='background:{color}'></span><strong>{escape(label)}</strong></div>"
+            f"<div class='summary-mobile-summary-name'><span class='summary-name-dot' style='background:{color}'></span><strong>{escape(label)}</strong>{_currency_badge(currency)}</div>"
             "</td>"
             f"<td>{escape(quantity)}</td>"
             f"<td>{escape(avg_price)}</td>"
@@ -597,6 +696,29 @@ def _render_styles() -> None:
         }
         .summary-dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
         .summary-legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .summary-legend-name {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .summary-legend-title {
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .summary-legend-name small {
+            color: var(--app-muted);
+            font-size: 0.78rem;
+            line-height: 1.2;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
         .summary-legend-pct { text-align: right; font-variant-numeric: tabular-nums; }
         .summary-asset-group {
             padding: 10px 0;
@@ -612,6 +734,13 @@ def _render_styles() -> None:
             color: var(--app-heading);
             font-size: 0.94rem;
             font-weight: 850;
+        }
+        .summary-asset-currency-split {
+            margin: -2px 0 6px;
+            color: var(--app-muted);
+            font-size: 0.82rem;
+            font-weight: 720;
+            line-height: 1.25;
         }
         .summary-empty-line {
             color: var(--app-muted);
@@ -720,8 +849,65 @@ def _render_styles() -> None:
         .summary-col-irr { width: 7.5%; }
         .summary-col-value { width: 11%; }
         .summary-col-weight { width: 8.4%; }
-        .summary-name { min-width: 0; }
-        .summary-name span { width: 10px; height: 10px; display: inline-block; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+        .summary-name {
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .summary-name-text {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .summary-name-dot { width: 10px; height: 10px; flex: 0 0 auto; display: inline-block; border-radius: 50%; }
+        .summary-currency-badge {
+            flex: 0 0 auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 34px;
+            padding: 2px 5px;
+            border-radius: 999px;
+            border: 1px solid var(--app-border);
+            color: var(--app-muted);
+            background: var(--app-surface-alt);
+            font-size: 0.68rem;
+            font-weight: 820;
+            line-height: 1;
+        }
+        .summary-currency-usd {
+            color: var(--token-usd);
+            border-color: var(--token-usd);
+            background: var(--token-usd-soft);
+        }
+        .summary-currency-krw {
+            color: var(--token-krw);
+            border-color: var(--token-border-strong);
+            background: var(--token-krw-soft);
+        }
+        .summary-section-row td {
+            padding: 9px 12px !important;
+            text-align: left !important;
+            background: var(--app-panel-strong) !important;
+            color: var(--app-heading);
+            font-weight: 850;
+        }
+        .summary-section-row td {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+        .summary-section-row strong {
+            color: var(--app-muted);
+            font-size: 0.82rem;
+            font-weight: 760;
+            text-align: right;
+        }
+        .summary-cash-detail-row td {
+            color: var(--app-muted);
+        }
         .summary-sparkline-th, .summary-sparkline-cell { text-align: center !important; }
         .summary-sparkline {
             width: 70px;
@@ -970,7 +1156,7 @@ def _render_styles() -> None:
                 color: var(--app-heading);
                 font-weight: 850;
             }
-            .summary-mobile-summary-name span {
+            .summary-mobile-summary-name .summary-name-dot {
                 width: 9px;
                 height: 9px;
                 flex: 0 0 auto;
@@ -1137,6 +1323,7 @@ def render_investment_summary_card(
     pnl_class = _signed_class(metrics.total_pnl_krw)
     seed = metrics.total_cost_krw if metrics.total_cost_krw > 0 else None
     seed_label = _krw(seed) if seed is not None else "평균단가 필요"
+    currency_totals = _currency_totals(metrics)
     kpi_cards = [
         _kpi_card("총자산", _krw(metrics.total_value_krw), f"주식 {percentage(stock_pct, digits=2)} · 현금 {percentage(cash_pct, digits=2)}", "cyan", "₩"),
         _kpi_card("주식 평가금액", _krw(metrics.total_position_value_krw), f"{metrics.priced_count:,}/{metrics.holdings_count:,}종목 평가", "default", "주"),
@@ -1151,22 +1338,29 @@ def render_investment_summary_card(
     investment_legend_rows = "".join(
         "<div class='summary-legend-row'>"
         f"<span class='summary-dot' style='background:{row['color']}'></span>"
-        f"<span class='summary-legend-name'>{escape(str(row['label']))}</span>"
+        "<span class='summary-legend-name'>"
+        f"<span class='summary-legend-title'>{escape(str(row['label']))}{_currency_badge(row.get('currency'))}</span>"
+        f"<small>{escape(_krw(float(row['value_krw'])))} · {escape(str(row.get('currency') or '-'))}</small>"
+        "</span>"
         f"<span class='summary-legend-pct'>{escape(percentage(float(row['weight']), digits=2))}</span>"
         "</div>"
         for row in allocation_rows
     )
     if not investment_legend_rows:
         investment_legend_rows = "<div class='summary-empty-line'>보유 종목 없음</div>"
-    cash_row = _cash_allocation_row(metrics)
     cash_legend_rows = ""
-    if cash_row is not None:
-        cash_legend_rows = (
+    cash_rows = _cash_allocation_rows(metrics)
+    if cash_rows:
+        cash_legend_rows = "".join(
             "<div class='summary-legend-row summary-cash-row'>"
-            f"<span class='summary-dot' style='background:{cash_row['color']}'></span>"
-            f"<span class='summary-legend-name'>{escape(str(cash_row['label']))}</span>"
-            f"<span class='summary-legend-pct'>{escape(percentage(float(cash_row['weight']), digits=2))}</span>"
+            f"<span class='summary-dot' style='background:{row['color']}'></span>"
+            "<span class='summary-legend-name'>"
+            f"<span class='summary-legend-title'>{escape(str(row['label']))}{_currency_badge(row.get('currency'))}</span>"
+            f"<small>{escape(str(row['detail']))}</small>"
+            "</span>"
+            f"<span class='summary-legend-pct'>{escape(percentage(float(row['weight']), digits=2))}</span>"
             "</div>"
+            for row in cash_rows
         )
     else:
         cash_legend_rows = "<div class='summary-empty-line'>현금 없음</div>"
@@ -1196,10 +1390,12 @@ def render_investment_summary_card(
                 <h3>자산 비중</h3>
                 <div class="summary-asset-group">
                     <div class="summary-asset-group-head"><span>투자</span><strong>{escape(percentage(stock_pct, digits=2))}</strong></div>
+                    <div class="summary-asset-currency-split">{escape(_currency_split_text(currency_totals["investment"], metrics.total_value_krw))}</div>
                     {investment_legend_rows}
                 </div>
                 <div class="summary-asset-group summary-asset-group-cash">
                     <div class="summary-asset-group-head"><span>현금</span><strong>{escape(percentage(cash_pct, digits=2))}</strong></div>
+                    <div class="summary-asset-currency-split">{escape(_currency_split_text(currency_totals["cash"], metrics.total_value_krw))}</div>
                     {cash_legend_rows}
                 </div>
                 <div class="summary-legend-total">투자 + 현금 100%</div>

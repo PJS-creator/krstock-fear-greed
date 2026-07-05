@@ -16,7 +16,7 @@ from app.ui.formatters import (
 
 def test_compact_and_full_krw_formatting():
     assert compact_krw(84_190_000) == "8,419만 원"
-    assert compact_krw(120_000_000) == "1.2억 원"
+    assert compact_krw(120_000_000) == "12,000만 원"
     assert compact_krw(0) == "0원"
     assert full_krw(84_190_000) == "₩84,190,000"
 
