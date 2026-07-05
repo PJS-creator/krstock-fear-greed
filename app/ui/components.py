@@ -71,22 +71,17 @@ def render_app_header(
 ) -> dict[str, bool]:
     if render_theme_selector is not None:
         render_theme_selector()
-    tone = status_tone if status_tone in {"success", "warning", "danger", "info", "neutral"} else "neutral"
-    left, middle, right = st.columns([2.0, 2.5, 1.35], vertical_alignment="center")
+    left, middle, right = st.columns([2.0, 1.4, 1.9], vertical_alignment="center")
     with left:
         st.title(title)
     with middle:
-        st.markdown(
-            (
-                "<div class='app-header-status'>"
-                f"<span class='app-badge app-badge-{tone}'>{escape(status_text)}</span>"
-                f"<span class='app-header-save'>{escape(save_status_text)}</span>"
-                "</div>"
-            ),
-            unsafe_allow_html=True,
-        )
+        st.empty()
     with right:
-        refresh_clicked = st.button("가격·환율 갱신", type="primary", width="stretch", icon=":material/refresh:", key="app_header_refresh", disabled=refresh_disabled)
+        refresh_col, meta_col = st.columns([1.18, 1.0], vertical_alignment="center")
+        with refresh_col:
+            refresh_clicked = st.button("가격·환율 갱신", type="primary", width="stretch", icon=":material/refresh:", key="app_header_refresh", disabled=refresh_disabled)
+        with meta_col:
+            st.markdown(f"<div class='app-header-refresh-meta'>{escape(status_text)}</div>", unsafe_allow_html=True)
         retry_clicked = False
         if show_retry:
             retry_clicked = st.button("실패 재시도", width="stretch", icon=":material/replay:", key="app_header_retry", disabled=retry_disabled)

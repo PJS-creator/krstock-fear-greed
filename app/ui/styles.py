@@ -398,6 +398,14 @@ __CSS_VARS__
             font-size: 0.9rem;
             font-weight: 740;
         }
+        .app-header-refresh-meta {
+            color: var(--app-muted);
+            font-size: 0.78rem;
+            font-weight: 760;
+            line-height: 1.35;
+            text-align: left;
+            word-break: keep-all;
+        }
         .metric-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
@@ -646,6 +654,11 @@ __CSS_VARS__
             .app-header-save {
                 width: 100%;
                 font-size: 0.84rem;
+            }
+            .app-header-refresh-meta {
+                font-size: 0.74rem;
+                line-height: 1.3;
+                text-align: left;
             }
             .st-key-app_header_refresh {
                 display: flex;

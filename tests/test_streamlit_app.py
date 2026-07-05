@@ -318,6 +318,26 @@ def test_public_header_refresh_does_not_call_fx_api_without_assets(monkeypatch):
     assert "조회할 보유종목 또는 달러 현금이 없습니다." in _app_text(at)
 
 
+def test_public_header_shows_only_compact_refresh_timestamp():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo@example.com"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["last_price_refresh_at"] = "2026-07-05T00:51:00+00:00"
+    at.run(timeout=20)
+
+    assert not at.exception
+    text = _app_text(at)
+    assert "갱신 2026-07-05 09:51 KST" in text
+    assert "정상 0" not in text
+    assert "캐시 0" not in text
+    assert "이전 0" not in text
+    assert "실패 0" not in text
+    assert "미조회 0" not in text
+    assert "저장됨" not in text
+
+
 def test_public_header_refresh_failure_keeps_app_shell(monkeypatch):
     def fail_refresh(*args, **kwargs):
         raise RuntimeError("provider down")
@@ -351,6 +371,14 @@ def test_public_header_refresh_failure_keeps_app_shell(monkeypatch):
     assert "포트폴리오" in text
     assert "가격·환율 갱신 실패" in text
     assert at.session_state["price_refresh_in_progress"] is False
+
+
+def test_public_auto_load_success_messages_are_not_shown_as_top_alerts():
+    source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+
+    assert "포트폴리오를 자동으로 불러왔습니다" not in source
+    assert "최근 가격을 자동 갱신했습니다" not in source
+    assert "최근 가격과 USD/KRW 환율을 자동 갱신했습니다" not in source
 
 
 def test_public_app_hides_manual_storage_management_ui():
