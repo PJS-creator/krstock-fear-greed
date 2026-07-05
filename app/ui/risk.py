@@ -197,7 +197,7 @@ def _plot_return_scatter(portfolio_returns: dict[date, float], benchmark_returns
 
 
 def _render_mdd_cards(result: MDDResult) -> None:
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5 = st.columns(5, gap="small")
     col1.metric("MDD", percentage(result.max_drawdown), help="관측 기간 중 고점 대비 최대 낙폭입니다.", border=True)
     col2.metric("현재 고점 대비", percentage(result.current_drawdown), help="마지막 기록이 직전 고점에서 얼마나 내려와 있는지입니다.", border=True)
     col3.metric("고점일", _date_label(result.peak_date), border=True)
@@ -206,7 +206,7 @@ def _render_mdd_cards(result: MDDResult) -> None:
 
 
 def _render_beta_cards(result: BetaResult, *, benchmark_label: str, basis_label: str) -> None:
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4, gap="small")
     col1.metric("Beta", format_number(result.beta, digits=2), help="벤치마크 일간 수익률 대비 포트폴리오 민감도입니다.", border=True)
     col2.metric("R-squared", format_number(result.r_squared, digits=2), help="벤치마크 수익률이 포트폴리오 수익률 변동을 설명한 정도입니다.", border=True)
     col3.metric("관측치 수", f"{result.observations}개", border=True)
@@ -250,7 +250,9 @@ def render_risk_analysis(*, history_records: list[object] | None, load_error: st
 
     _render_mdd_cards(mdd)
     st.caption(f"계산 기준: {mdd_source} {mdd.observations}개, {values[0].date.isoformat()} ~ {values[-1].date.isoformat()}")
-    chart_col1, chart_col2 = st.columns(2)
+    if mdd.observations < 5:
+        st.warning("관측치가 적어 MDD 해석에 주의가 필요합니다. 실제 기록이나 과거 보유현황 재구성 기간을 더 확보하면 안정적인 지표가 됩니다.")
+    chart_col1, chart_col2 = st.columns(2, gap="small")
     with chart_col1:
         total_fig = _plot_total_value(values)
         if total_fig is not None:
@@ -272,7 +274,7 @@ def render_risk_analysis(*, history_records: list[object] | None, load_error: st
         st.warning(f"Beta 계산에는 최소 {MIN_BETA_OBSERVATIONS}개 이상의 일간 수익률 관측치가 필요합니다. 현재 {len(portfolio_returns)}개입니다.")
         return
 
-    controls = st.columns([1, 1, 1])
+    controls = st.columns([1, 1, 1], gap="small", vertical_alignment="bottom")
     benchmark_label = controls[0].selectbox("벤치마크", options=list(BENCHMARK_SYMBOLS.keys()), index=2, key="risk_benchmark")
     custom_symbol = ""
     if benchmark_label == "사용자 지정 티커":

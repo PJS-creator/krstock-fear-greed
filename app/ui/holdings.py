@@ -51,6 +51,19 @@ ADVANCED_TEXT_COLUMNS = [
     "error_message",
 ]
 
+SHORT_STATUS_LABELS = {
+    "정상_최근종가": "최근종가",
+    "정상_캐시": "캐시",
+    "이전저장값사용": "이전값",
+    "수동입력값": "수동",
+    "티커미확인": "미확인",
+}
+
+
+def short_quote_status_label(status: object) -> str:
+    label = quote_status_label(status)
+    return SHORT_STATUS_LABELS.get(label, label)
+
 
 @st.cache_data(ttl=60 * 60 * 12, show_spinner=False)
 def _cached_korea_listing_records() -> list[dict[str, str]]:
@@ -279,7 +292,7 @@ def _holdings_table_rows(metrics: PortfolioMetrics) -> list[dict[str, object]]:
                 "오늘 변동액": signed_krw(item.day_change_krw),
                 "오늘 변동률": signed_percentage(item.day_change_pct),
                 "비중": item.weight * 100,
-                "가격 상태": quote_status_label(holding.get("quote_status")),
+                "가격 상태": short_quote_status_label(holding.get("quote_status")),
                 "raw_status": str(holding.get("quote_status") or ""),
                 "조회 시각": format_kst(holding.get("fetched_at"), compact=True),
                 "가격 기준일": holding.get("price_date") or "-",
@@ -362,7 +375,7 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
         return
 
     search = st.text_input("검색", placeholder="종목명 또는 ticker", key="holdings_search")
-    filter_col1, filter_col2, filter_col3 = st.columns([1, 1, 1])
+    filter_col1, filter_col2, filter_col3 = st.columns([1, 1, 1], gap="small", vertical_alignment="bottom")
     market_label = filter_col1.selectbox("시장", list(MARKET_LABELS.keys()), key="holdings_market_filter")
     status_label = filter_col2.selectbox("가격 상태", list(STATUS_FILTERS.keys()), key="holdings_status_filter")
     show_details = filter_col3.checkbox("상세 열 보기", value=False, key="holdings_show_details")
@@ -388,8 +401,8 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
         st.info("필터 조건에 맞는 보유 종목이 없습니다.")
         return
 
-    base_columns = ["종목", "시장", "수량 표시", "최근 제공 가격 표시", "평가액 표시", "오늘 변동액", "오늘 변동률", "비중", "가격 상태", "조회 시각"]
-    detail_columns = ["ticker", "종목명", "통화", "평균단가 표시", "가격 기준일", "기준시각", "출처", "오류", "provider", "비중 표시"]
+    base_columns = ["종목", "시장", "수량 표시", "최근 제공 가격 표시", "평가액 표시", "오늘 변동액", "비중", "가격 상태", "조회 시각"]
+    detail_columns = ["ticker", "종목명", "통화", "평균단가 표시", "오늘 변동률", "가격 기준일", "기준시각", "출처", "오류", "provider", "비중 표시"]
     visible_columns = base_columns + detail_columns if show_details else base_columns
     _render_mobile_holdings_cards(frame)
     st.dataframe(
@@ -404,7 +417,7 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
             "시장": st.column_config.TextColumn("시장"),
             "수량 표시": st.column_config.TextColumn("수량"),
             "평균단가 표시": st.column_config.TextColumn("평균단가"),
-            "최근 제공 가격 표시": st.column_config.TextColumn("최근 제공 가격"),
+            "최근 제공 가격 표시": st.column_config.TextColumn("최근가"),
             "평가액 표시": st.column_config.TextColumn("평가액"),
             "오늘 변동액": st.column_config.TextColumn("오늘 변동액"),
             "오늘 변동률": st.column_config.TextColumn("오늘 변동률"),

@@ -49,7 +49,7 @@ def test_summary_allocation_includes_cash_and_prefers_korean_company_name():
     assert round(sum(row["weight"] for row in rows), 6) == 1
 
 
-def test_summary_holding_table_contains_average_price_and_return_rate():
+def test_summary_holding_table_defaults_to_compact_columns():
     html_rows = "\n".join(
         _holding_table_rows(
             _metrics(),
@@ -61,16 +61,17 @@ def test_summary_holding_table_contains_average_price_and_return_rate():
     )
 
     assert "삼성전자" in html_rows
-    assert "₩72,300" in html_rows
-    assert "₩723,000" in html_rows
-    assert "$100.00" in html_rows
     assert "$120.00" in html_rows
-    assert "당일 흐름" not in html_rows
-    assert "summary-sparkline" in html_rows
+    assert "800,000" in html_rows
     assert "-$5.00 (-4.0%)" in html_rows
     assert "%" in html_rows
-    assert "IRR" not in html_rows
     assert "합계 (주식 평가금액 + 현금)" in html_rows
+    assert "₩72,300" not in html_rows
+    assert "₩723,000" not in html_rows
+    assert "$100.00" not in html_rows
+    assert "당일 흐름" not in html_rows
+    assert "summary-sparkline" not in html_rows
+    assert "IRR" not in html_rows
 
 
 def test_mobile_holding_summary_table_includes_requested_compact_columns():

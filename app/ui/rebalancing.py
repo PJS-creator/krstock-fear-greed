@@ -9,6 +9,7 @@ from portfolio.rebalancing import (
     RebalancePlan,
     calculate_rebalancing_plan,
     default_target_allocations_from_portfolio,
+    is_negligible_rebalance_delta,
     normalize_target_allocations,
     target_weight_sum,
 )
@@ -25,6 +26,8 @@ MODE_LABELS = {
     "cash_only": "현금 우선 사용",
 }
 MODE_BY_LABEL = {label: key for key, label in MODE_LABELS.items()}
+RESULT_BASE_COLUMNS = ["자산", "현재 비중", "목표 비중", "차이 금액", "조정 수량", "조정 방향", "데이터 상태"]
+RESULT_DETAIL_COLUMNS = ["자산 유형", "현재 평가액", "목표 평가액", "현재 수량", "예상 조정 금액", "조정 후 예상 비중"]
 
 
 def _editor_rows(rows: Iterable[Mapping[str, object]]) -> list[dict[str, object]]:
@@ -107,6 +110,7 @@ def _adjustment_quantity_text(value: object) -> str:
 def _result_frame(plan: RebalancePlan) -> pd.DataFrame:
     rows = []
     for row in plan.rows:
+        display_delta = 0.0 if is_negligible_rebalance_delta(row.delta_krw, plan.total_asset_krw) else row.delta_krw
         rows.append(
             {
                 "자산": row.display_name,
@@ -115,7 +119,7 @@ def _result_frame(plan: RebalancePlan) -> pd.DataFrame:
                 "목표 비중": f"{row.target_weight_pct:.2f}%",
                 "현재 평가액": full_krw(row.current_value_krw),
                 "목표 평가액": full_krw(row.target_value_krw),
-                "차이 금액": signed_krw(row.delta_krw),
+                "차이 금액": signed_krw(display_delta),
                 "현재 수량": _quantity_text(row.current_quantity),
                 "조정 수량": _adjustment_quantity_text(row.adjustment_quantity),
                 "예상 조정 금액": signed_krw(row.estimated_adjustment_value_krw),
@@ -138,7 +142,7 @@ def rebalancing_empty_result_message(*, has_targets: bool, total_asset_krw: floa
 
 
 def _render_plan_summary(plan: RebalancePlan) -> None:
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4, gap="small")
     col1.metric("총자산", full_krw(plan.total_asset_krw), border=True)
     col2.metric("목표 합계", f"{plan.target_weight_sum_pct:.2f}%", delta="정상" if plan.weight_sum_ok else "확인 필요", delta_color="off", border=True)
     col3.metric("추가 입금", full_krw(plan.additional_deposit_krw), border=True)
@@ -177,8 +181,9 @@ def render_rebalancing(
         _editor_rows(initial_rows),
         columns=["asset_type", "display_name", "symbol", "market", "currency", "target_weight_pct", "current_price", "is_enabled"],
     )
+    editor_frame["current_price"] = pd.to_numeric(editor_frame["current_price"], errors="coerce")
 
-    action_col1, action_col2 = st.columns([1, 2])
+    action_col1, action_col2 = st.columns([1, 2], vertical_alignment="bottom")
     if action_col1.button("현재 보유 기준 행 생성", icon=":material/refresh:"):
         if not begin_ui_action("rebalance_defaults", payload={"holdings": holdings, "cash_krw": cash_krw, "cash_usd": cash_usd, "usd_krw": usd_krw}):
             return
@@ -243,8 +248,8 @@ def render_rebalancing(
             request_app_rerun()
 
     st.subheader("계산 옵션")
-    option_cols = st.columns([1.3, 1])
-    selected_mode_label = option_cols[0].radio("계산 방식", list(MODE_BY_LABEL.keys()), horizontal=False, key="rebalance_mode")
+    option_cols = st.columns([1.5, 1], vertical_alignment="bottom")
+    selected_mode_label = option_cols[0].radio("계산 방식", list(MODE_BY_LABEL.keys()), horizontal=True, key="rebalance_mode")
     additional_deposit = option_cols[1].number_input("추가 입금 예정액", min_value=0.0, step=100_000.0, value=0.0, help="매도 없이 신규 입금 모드와 현금 우선 사용 모드에서 KRW 기준으로 반영합니다.")
     mode = MODE_BY_LABEL[str(selected_mode_label)]
 
@@ -269,8 +274,10 @@ def render_rebalancing(
 
     _render_plan_summary(plan)
     result = _result_frame(plan)
+    show_detail_columns = st.checkbox("결과 상세 열 보기", value=False, key="rebalance_result_show_detail")
+    result_columns = RESULT_BASE_COLUMNS + (RESULT_DETAIL_COLUMNS if show_detail_columns else [])
     st.dataframe(
-        result,
+        result[result_columns],
         hide_index=True,
         width="stretch",
         height=min(DIMENSIONS.max_table_height, 100 + len(result) * DIMENSIONS.row_height),

@@ -403,12 +403,15 @@ def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
         change_pct = row.get("day_change_pct")
         change_text = signed_percentage(change_pct) if change_pct is not None else "-"
         font_size = _font_size_for_weight(weight)
+        show_text = weight >= 0.035 and float(row.get("width") or 0.0) >= 12 and float(row.get("height") or 0.0) >= 12
+        label_html = f"<div class='summary-heatmap-name'>{escape(str(row['label']))}</div>" if show_text else ""
+        change_html = f"<div class='summary-heatmap-change'>{escape(change_text)}</div>" if show_text else ""
         tiles.append(
             "<div class='summary-heatmap-tile' "
             f"style='left:{row['x']:.4f}%;top:{row['y']:.4f}%;width:{row['width']:.4f}%;height:{row['height']:.4f}%;"
             f"background:{row['heat_color']};font-size:{font_size:.2f}rem;'>"
-            f"<div class='summary-heatmap-name'>{escape(str(row['label']))}</div>"
-            f"<div class='summary-heatmap-change'>{escape(change_text)}</div>"
+            f"{label_html}"
+            f"{change_html}"
             "</div>"
         )
     return "".join(tiles) or (
@@ -431,36 +434,24 @@ def _holding_table_rows(
     as_of_date: date | None = None,
 ) -> list[str]:
     rows = []
-    normalized_transactions = _normalized_transactions(transactions)
-    irr_date = as_of_date or datetime.now(KST).date()
     for item in sorted(metrics.rows, key=lambda row: row.market_value_krw or 0.0, reverse=True):
         holding = item.holding
         label = escape(instrument_label(holding))
         color = deterministic_color(holding.get("ticker") or label)
         quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
-        avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
-        purchase_amount = "-"
-        if holding.get("avg_price") is not None:
-            purchase_amount = format_price(float(holding.get("avg_price") or 0.0) * float(holding.get("quantity") or 0.0), holding.get("currency"))
         current_price = format_price(holding.get("current_price"), holding.get("currency"))
         day_change = _price_change_text(holding)
         pnl_pct = signed_percentage(item.total_pnl_pct) if item.total_pnl_pct is not None else "-"
         day_change_class = _signed_class(_holding_day_change_price(holding))
         day_change_value = _holding_day_change_price(holding)
-        irr = _holding_irr(holding, normalized_transactions, as_of_date=irr_date)
-        irr_text = signed_percentage(irr) if irr is not None else "-"
         rows.append(
             "<tr>"
             f"<td class='summary-name'><span style='background:{color}'></span>{label}</td>"
             f"<td>{escape(quantity)}</td>"
-            f"<td>{escape(avg_price)}</td>"
-            f"<td>{escape(purchase_amount)}</td>"
             f"<td>{escape(current_price)}</td>"
-            f"<td class='summary-sparkline-cell'>{_sparkline_html(holding)}</td>"
+            f"<td>{escape(_krw(item.market_value_krw))}</td>"
             f"<td class='{day_change_class}'>{_badge_html(day_change_value, day_change)}</td>"
             f"<td>{_badge_html(item.total_pnl_pct, pnl_pct)}</td>"
-            f"<td>{_badge_html(irr, irr_text)}</td>"
-            f"<td>{escape(_krw(item.market_value_krw))}</td>"
             f"<td>{escape(percentage(item.weight, digits=2))}</td>"
             "</tr>"
         )
@@ -468,23 +459,20 @@ def _holding_table_rows(
         rows.append(
             "<tr>"
             "<td class='summary-name'><span style='background:var(--app-cash)'></span>현금</td>"
-            "<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>"
+            "<td>-</td><td>-</td>"
             f"<td>{escape(_krw(metrics.cash_total_krw))}</td>"
+            "<td>-</td><td>-</td>"
             f"<td>{escape(percentage(metrics.cash_total_krw / metrics.total_value_krw if metrics.total_value_krw else 0, digits=2))}</td>"
             "</tr>"
         )
-    portfolio_irr = _portfolio_irr(metrics, normalized_transactions, as_of_date=irr_date)
     total_day_text = f"{_signed_text(metrics.day_change_krw, signed_krw)} ({_signed_text(metrics.day_change_pct, signed_percentage)})"
     rows.append(
         "<tr class='summary-total-row'>"
         "<td>합계 (주식 평가금액 + 현금)</td><td>-</td><td>-</td>"
-        f"<td>{escape(_krw(metrics.total_cost_krw) if metrics.total_cost_krw else '-')}</td>"
-        "<td>-</td>"
-        "<td>-</td>"
+        f"<td>{escape(_krw(metrics.total_value_krw))}</td>"
         f"<td>{_badge_html(metrics.day_change_krw, total_day_text)}</td>"
         f"<td>{_badge_html(metrics.total_pnl_pct, _signed_text(metrics.total_pnl_pct, signed_percentage))}</td>"
-        f"<td>{_badge_html(portfolio_irr, signed_percentage(portfolio_irr) if portfolio_irr is not None else '-')}</td>"
-        f"<td>{escape(_krw(metrics.total_value_krw))}</td><td>100.00%</td>"
+        "<td>100.00%</td>"
         "</tr>"
     )
     return rows
@@ -657,12 +645,12 @@ def _render_styles() -> None:
         .summary-table-wrap { margin-top: 16px; overflow: hidden; }
         .summary-table-wrap h3 { padding: 16px 20px; margin: 0; border-bottom: 1px solid var(--app-border); }
         .summary-table-scroll { overflow-x: auto; }
-        .summary-table { width: 100%; min-width: 1220px; border-collapse: collapse; font-size: 0.93rem; }
-        .summary-table th, .summary-table td { border-bottom: 1px solid var(--app-border); padding: 11px 12px; text-align: right; font-variant-numeric: tabular-nums; }
+        .summary-table { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 0.93rem; }
+        .summary-table th, .summary-table td { border-bottom: 1px solid var(--app-border); padding: 10px 12px; text-align: right; font-variant-numeric: tabular-nums; }
         .summary-table th { color: var(--app-muted); font-weight: 760; background: var(--app-table-header); }
         .summary-table tbody tr:not(.summary-total-row):hover td { background: var(--app-table-hover); }
         .summary-table th:first-child, .summary-table td:first-child { text-align: left; }
-        .summary-name { min-width: 220px; }
+        .summary-name { min-width: 190px; }
         .summary-name span { width: 13px; height: 13px; display: inline-block; border-radius: 50%; margin-right: 9px; vertical-align: -1px; }
         .summary-sparkline-th, .summary-sparkline-cell { text-align: center !important; width: 112px; }
         .summary-sparkline {
@@ -994,15 +982,11 @@ def _render_styles() -> None:
             }
             .summary-table td:nth-child(1):before { display: none; }
             .summary-table td:nth-child(2):before { content: "수량"; }
-            .summary-table td:nth-child(3):before { content: "평균단가"; }
-            .summary-table td:nth-child(4):before { content: "매입금액"; }
-            .summary-table td:nth-child(5):before { content: "현재가"; }
-            .summary-table td:nth-child(6):before { content: "당일 흐름"; }
-            .summary-table td:nth-child(7):before { content: "전일 대비"; }
-            .summary-table td:nth-child(8):before { content: "평가 수익률"; }
-            .summary-table td:nth-child(9):before { content: "IRR"; }
-            .summary-table td:nth-child(10):before { content: "평가금액"; }
-            .summary-table td:nth-child(11):before { content: "자산 비중"; }
+            .summary-table td:nth-child(3):before { content: "현재가"; }
+            .summary-table td:nth-child(4):before { content: "평가액"; }
+            .summary-table td:nth-child(5):before { content: "전일 대비"; }
+            .summary-table td:nth-child(6):before { content: "평가 수익률"; }
+            .summary-table td:nth-child(7):before { content: "자산 비중"; }
             .summary-name {
                 min-width: 0;
             }
@@ -1153,14 +1137,10 @@ def render_investment_summary_card(
                         <tr>
                             <th>종목명</th>
                             <th>보유 수량</th>
-                            <th>평균단가 (원/달러)</th>
-                            <th>매입금액</th>
                             <th>현재 주가</th>
-                            <th class="summary-sparkline-th">당일 흐름</th>
+                            <th>평가금액</th>
                             <th>전일 대비 증감</th>
                             <th>평가 수익률 (%)</th>
-                            <th>연환산수익률 (IRR)</th>
-                            <th>평가금액 (원)</th>
                             <th>자산 비중 (%)</th>
                         </tr>
                     </thead>

@@ -24,23 +24,29 @@ __CSS_VARS__
         html, body, .stApp, [data-testid="stAppViewContainer"], button, input, textarea, select {
             font-family: var(--app-font-family);
         }
+        html {
+            scroll-padding-bottom: calc(var(--token-space-12) + 96px);
+        }
         html, body, [data-testid="stAppViewContainer"] {
             background: var(--app-bg);
         }
         .stApp {
-            font-size: 17px;
+            font-size: var(--token-font-md);
             color: var(--app-text);
             background: var(--app-bg-accent);
         }
         .block-container {
-            padding-top: 1.25rem;
-            padding-bottom: 2rem;
+            max-width: var(--token-page-max-width);
+            padding-top: var(--token-space-8);
+            padding-left: var(--token-page-padding-x-desktop);
+            padding-right: var(--token-page-padding-x-desktop);
+            padding-bottom: calc(var(--token-space-12) + 72px);
             position: relative;
         }
         .block-container h1 {
             color: var(--app-heading);
-            font-size: 2.45rem;
-            line-height: 1.08;
+            font-size: clamp(var(--token-font-2xl), 3.4vw, var(--token-font-3xl));
+            line-height: var(--token-line-height-tight);
             word-break: keep-all;
             letter-spacing: 0;
         }
@@ -48,14 +54,17 @@ __CSS_VARS__
         .block-container h3 {
             color: var(--app-heading);
             letter-spacing: 0;
+            line-height: var(--token-line-height-tight);
         }
+        .block-container h2 { font-size: clamp(var(--token-font-xl), 2.1vw, var(--token-font-2xl)); }
+        .block-container h3 { font-size: clamp(var(--token-font-lg), 1.6vw, var(--token-font-xl)); }
         .block-container p,
         .block-container li,
         .block-container label,
         .block-container span {
             letter-spacing: 0;
         }
-        .section-gap { margin-top: 1.25rem; }
+        .section-gap { margin-top: var(--token-section-gap); }
         .small-muted,
         div[data-testid="stCaptionContainer"],
         div[data-testid="stMarkdownContainer"] small {
@@ -88,10 +97,10 @@ __CSS_VARS__
             opacity: 1 !important;
         }
         .journal-event {
-            margin: 0.65rem 0;
-            padding: 0.9rem 1rem;
+            margin: var(--token-space-3) 0 var(--token-space-2);
+            padding: var(--token-card-padding-compact) var(--token-card-padding);
             border: 1px solid var(--app-border);
-            border-radius: 8px;
+            border-radius: var(--token-radius-md);
             background: var(--app-panel);
             box-shadow: var(--app-shadow-sm);
         }
@@ -100,37 +109,38 @@ __CSS_VARS__
             display: flex;
             align-items: center;
             flex-wrap: wrap;
-            gap: 0.55rem;
+            gap: var(--token-space-2);
             color: var(--app-muted);
-            font-size: 0.86rem;
+            font-size: var(--token-font-sm);
             font-weight: 720;
         }
         .journal-event-head strong {
             color: var(--app-primary);
         }
         .journal-event-title {
-            margin-top: 0.35rem;
+            margin-top: var(--token-space-2);
             color: var(--app-heading);
-            font-size: 1rem;
+            font-size: var(--token-font-base);
             font-weight: 820;
             word-break: keep-all;
         }
         .journal-event-subtitle {
-            margin-top: 0.18rem;
+            margin-top: var(--token-space-1);
             color: var(--app-text);
-            font-size: 0.92rem;
+            font-size: var(--token-font-sm);
             overflow-wrap: anywhere;
         }
         .journal-event-meta {
-            margin-top: 0.55rem;
+            margin-top: var(--token-space-2);
         }
-        div[data-testid="stDataFrame"] { font-size: 0.98rem; }
+        div[data-testid="stDataFrame"] { font-size: var(--token-font-sm); }
         div[data-testid="stDataFrame"],
         div[data-testid="stDataEditor"] {
             border: 1px solid var(--app-border);
-            border-radius: 8px;
+            border-radius: var(--token-radius-md);
             background: var(--app-panel);
             overflow: hidden;
+            margin-bottom: var(--token-space-4);
         }
         div[data-testid="stDataFrame"] *,
         div[data-testid="stDataEditor"] *,
@@ -146,10 +156,13 @@ __CSS_VARS__
             background: var(--app-table-header) !important;
             color: var(--app-heading) !important;
             font-weight: 780 !important;
+            min-height: var(--token-table-min-row-height) !important;
+            white-space: nowrap !important;
         }
         div[data-testid="stDataFrame"] [role="row"],
         div[data-testid="stDataEditor"] [role="row"] {
             background: var(--app-panel) !important;
+            min-height: var(--token-table-min-row-height) !important;
         }
         div[data-testid="stDataFrame"] [role="row"]:hover,
         div[data-testid="stDataEditor"] [role="row"]:hover {
@@ -168,12 +181,15 @@ __CSS_VARS__
         div[data-baseweb="form-control"] label * {
             color: var(--app-text) !important;
             opacity: 1 !important;
+            font-size: var(--token-font-sm) !important;
+            line-height: var(--token-line-height-normal) !important;
         }
         div[data-testid="stExpander"] details {
             background: var(--summary-panel-bg);
             border: 1px solid var(--app-border);
-            border-radius: 8px;
+            border-radius: var(--token-radius-md);
             box-shadow: var(--app-shadow-sm);
+            margin-bottom: var(--token-space-3);
         }
         div[data-testid="stExpander"] summary {
             color: var(--app-heading);
@@ -195,6 +211,7 @@ __CSS_VARS__
             background: var(--app-input-bg) !important;
             border-color: var(--app-border) !important;
             color: var(--app-text) !important;
+            min-height: var(--token-input-height-md) !important;
         }
         div[data-baseweb="input"],
         div[data-baseweb="textarea"],
@@ -215,7 +232,8 @@ __CSS_VARS__
             opacity: 1 !important;
         }
         div[data-testid="stButton"] button {
-            border-radius: 8px;
+            min-height: var(--token-button-height-md);
+            border-radius: var(--token-radius-md);
             font-weight: 720;
             letter-spacing: 0;
             display: inline-flex;
@@ -223,6 +241,7 @@ __CSS_VARS__
             justify-content: center;
             gap: 0.45rem;
             text-align: center;
+            white-space: nowrap;
         }
         div[data-testid="stButton"] button p {
             margin: 0;
@@ -242,17 +261,28 @@ __CSS_VARS__
             border-color: var(--app-primary-hover);
             color: var(--app-heading);
         }
+        div[data-testid="stDownloadButton"] button,
+        div[data-testid="stFileUploader"] button {
+            min-height: var(--token-button-height-md);
+            border-radius: var(--token-radius-md);
+            font-weight: 720;
+        }
+        div[data-testid="stFileUploader"] section {
+            border-radius: var(--token-radius-md);
+            border-color: var(--app-border) !important;
+            background: var(--app-panel) !important;
+        }
         div[role="radiogroup"] {
-            gap: 0.45rem;
+            gap: var(--token-space-2);
         }
         div[role="radiogroup"] label {
             box-sizing: border-box;
             display: inline-flex !important;
             align-items: center !important;
             justify-content: center !important;
-            min-height: 2.45rem;
-            padding: 0.45rem 0.74rem;
-            border-radius: 8px;
+            min-height: var(--token-control-height-md);
+            padding: var(--token-space-2) var(--token-space-3);
+            border-radius: var(--token-radius-md);
             border: 1px solid var(--app-border);
             background: var(--app-panel);
             color: var(--app-text);
@@ -291,13 +321,13 @@ __CSS_VARS__
             color: var(--app-primary-text);
         }
         div[data-testid="stTabs"] [role="tablist"] {
-            gap: 0.45rem;
+            gap: var(--token-space-2);
             border-bottom: 1px solid var(--app-border);
         }
         div[data-testid="stTabs"] [role="tab"] {
-            min-height: 2.55rem;
-            padding: 0 0.9rem;
-            border-radius: 8px 8px 0 0;
+            min-height: var(--token-tab-height);
+            padding: 0 var(--token-space-4);
+            border-radius: var(--token-radius-md) var(--token-radius-md) 0 0;
             color: var(--app-muted);
             font-weight: 760;
         }
@@ -306,7 +336,7 @@ __CSS_VARS__
             background: var(--app-primary-soft);
         }
         div[data-testid="stAlert"] {
-            border-radius: 8px;
+            border-radius: var(--token-radius-md);
             border: 1px solid var(--app-border);
             background: var(--app-panel) !important;
             color: var(--app-text) !important;
@@ -324,18 +354,18 @@ __CSS_VARS__
             fill: var(--app-warning) !important;
         }
         .app-empty-state {
-            padding: 1rem;
-            margin: 0.55rem 0 0.85rem;
+            padding: var(--token-card-padding);
+            margin: var(--token-space-3) 0 var(--token-space-4);
             border: 1px dashed var(--app-border-strong);
-            border-radius: 8px;
+            border-radius: var(--token-radius-md);
             background: var(--app-panel);
             color: var(--app-text);
         }
         .app-empty-title {
             color: var(--app-heading);
             font-weight: 850;
-            font-size: 1.06rem;
-            margin-bottom: 0.25rem;
+            font-size: var(--token-font-lg);
+            margin-bottom: var(--token-space-1);
         }
         .app-empty-message {
             color: var(--app-muted);
@@ -343,11 +373,11 @@ __CSS_VARS__
         }
         .app-box {
             display: grid;
-            gap: 0.18rem;
-            padding: 0.82rem 0.95rem;
-            margin: 0.5rem 0 0.75rem;
+            gap: var(--token-space-1);
+            padding: var(--token-space-3) var(--token-space-4);
+            margin: var(--token-space-3) 0 var(--token-space-4);
             border: 1px solid var(--app-border);
-            border-radius: 8px;
+            border-radius: var(--token-radius-md);
             color: var(--app-text);
         }
         .app-box strong {
@@ -363,13 +393,13 @@ __CSS_VARS__
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            min-height: 1.5rem;
-            padding: 0.2rem 0.55rem;
+            min-height: 1.55rem;
+            padding: 0.2rem var(--token-space-2);
             border: 1px solid var(--app-border);
-            border-radius: 999px;
+            border-radius: var(--token-radius-pill);
             color: var(--app-text);
             background: var(--app-panel-strong);
-            font-size: 0.84rem;
+            font-size: var(--token-font-xs);
             font-weight: 800;
             line-height: 1.2;
         }
@@ -381,17 +411,17 @@ __CSS_VARS__
             display: flex;
             flex-wrap: wrap;
             align-items: center;
-            gap: 0.5rem;
-            min-height: 2.4rem;
+            gap: var(--token-space-2);
+            min-height: var(--token-control-height-md);
         }
         .app-header-save {
             color: var(--token-text-muted);
-            font-size: 0.9rem;
+            font-size: var(--token-font-sm);
             font-weight: 740;
         }
         .app-header-refresh-meta {
             color: var(--app-muted);
-            font-size: 0.78rem;
+            font-size: var(--token-font-sm);
             font-weight: 760;
             line-height: 1.35;
             text-align: left;
@@ -400,14 +430,14 @@ __CSS_VARS__
         .metric-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-            gap: 0.75rem;
+            gap: var(--token-card-gap);
         }
         .app-metric-card {
-            min-height: 128px;
-            padding: 1rem;
+            min-height: 120px;
+            padding: var(--token-card-padding);
             border: 1px solid var(--token-border);
             border-left: 4px solid var(--token-border-strong);
-            border-radius: 8px;
+            border-radius: var(--token-radius-md);
             background: var(--token-surface);
             box-shadow: var(--app-shadow);
             color: var(--token-text);
@@ -418,13 +448,13 @@ __CSS_VARS__
         .app-metric-info { border-left-color: var(--token-primary); }
         .app-metric-title {
             color: var(--token-text-muted);
-            font-size: 0.9rem;
+            font-size: var(--token-font-sm);
             font-weight: 760;
             line-height: 1.25;
         }
         .app-metric-value {
             color: var(--token-text);
-            font-size: 1.42rem;
+            font-size: clamp(1.14rem, 1.5vw, 1.42rem);
             font-weight: 880;
             line-height: 1.18;
             margin-top: 0.45rem;
@@ -433,15 +463,19 @@ __CSS_VARS__
         }
         .app-metric-delta {
             color: var(--token-text-subtle);
-            font-size: 0.9rem;
+            font-size: var(--token-font-sm);
             font-weight: 760;
             margin-top: 0.4rem;
         }
         .app-metric-help {
             color: var(--token-text-muted);
-            font-size: 0.8rem;
+            font-size: var(--token-font-xs);
             line-height: 1.35;
             margin-top: 0.55rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
         .app-theme-toggle-label {
             color: var(--app-muted);
@@ -451,7 +485,7 @@ __CSS_VARS__
         }
         .st-key-app_theme_topbar {
             position: absolute;
-            top: 0.95rem;
+            top: var(--token-space-4);
             right: 0;
             z-index: 30;
             width: auto !important;
@@ -459,24 +493,27 @@ __CSS_VARS__
         }
         .st-key-app_theme_topbar div[role="radiogroup"] {
             display: grid !important;
-            grid-template-columns: repeat(2, 4.15rem);
+            grid-template-columns: repeat(2, 4rem);
             justify-content: flex-end;
-            gap: 0.35rem;
+            gap: var(--token-space-2);
         }
         .st-key-app_theme_topbar div[role="radiogroup"] label {
-            width: 4.15rem;
-            min-height: 2.15rem;
-            padding: 0.36rem 0.58rem;
-            font-size: 0.86rem;
+            width: 4rem;
+            min-height: var(--token-button-height-sm);
+            padding: 0 var(--token-space-2);
+            font-size: var(--token-font-sm);
             box-shadow: var(--app-shadow);
         }
         .st-key-app_header_refresh button {
-            min-height: 2.55rem !important;
-            padding: 0.48rem 0.95rem !important;
-            font-size: 0.98rem !important;
+            width: 190px !important;
+            min-width: 190px !important;
+            max-width: 220px !important;
+            min-height: var(--token-button-height-lg) !important;
+            padding: 0 var(--token-space-4) !important;
+            font-size: var(--token-font-md) !important;
         }
         .st-key-public_section_tabs {
-            margin: 0.85rem 0 1.1rem;
+            margin: var(--token-space-5) 0 var(--token-space-6);
         }
         .st-key-public_section_tabs div[role="radiogroup"] {
             display: grid !important;
@@ -492,14 +529,14 @@ __CSS_VARS__
             position: relative;
             width: 100%;
             min-width: 0;
-            min-height: 2.7rem;
-            padding: 0.4rem 0.16rem 0.68rem;
+            min-height: var(--token-tab-height);
+            padding: 0 var(--token-space-2) var(--token-space-2);
             border: 0;
             border-radius: 0;
             background: transparent;
             box-shadow: none;
             color: var(--app-muted);
-            font-size: 0.98rem;
+            font-size: var(--token-font-base);
             font-weight: 820;
             white-space: nowrap;
         }
@@ -525,7 +562,7 @@ __CSS_VARS__
             background: var(--app-primary);
         }
         .st-key-public_input_tabs {
-            margin: 0.1rem 0 0.95rem;
+            margin: 0 0 var(--token-space-5);
         }
         .st-key-public_input_tabs div[role="radiogroup"] {
             display: grid !important;
@@ -540,14 +577,14 @@ __CSS_VARS__
             position: relative;
             width: 100%;
             min-width: 0;
-            min-height: 2.28rem;
-            padding: 0.32rem 0.12rem 0.52rem;
+            min-height: var(--token-subtab-height);
+            padding: 0 var(--token-space-2) var(--token-space-2);
             border: 0;
             border-radius: 0;
             background: transparent;
             box-shadow: none;
             color: var(--app-muted);
-            font-size: 0.9rem;
+            font-size: var(--token-font-sm);
             font-weight: 760;
             white-space: nowrap;
         }
@@ -574,15 +611,23 @@ __CSS_VARS__
         }
         .app-header-panel {
             border: 1px solid var(--app-border);
-            border-radius: 8px;
-            padding: 0.85rem;
+            border-radius: var(--token-radius-md);
+            padding: var(--token-card-padding-compact);
             background: var(--summary-panel-bg);
             box-shadow: var(--app-shadow);
+        }
+        .app-table-note {
+            color: var(--app-muted);
+            font-size: var(--token-font-sm);
+            margin: var(--token-space-2) 0 var(--token-space-4);
         }
         @media (max-width: 720px) {
             .stApp { font-size: 16px; }
             .block-container {
-                padding: 0.75rem 0.75rem 5.5rem;
+                padding-top: var(--token-space-5);
+                padding-left: var(--token-page-padding-x-mobile);
+                padding-right: var(--token-page-padding-x-mobile);
+                padding-bottom: calc(var(--token-space-12) + 96px);
                 max-width: 100%;
             }
             .block-container h1 {
@@ -612,7 +657,7 @@ __CSS_VARS__
             }
             div[data-testid="stMetricDelta"] { font-size: 0.88rem; }
             div[data-testid="stButton"] button {
-                min-height: 2.75rem;
+                min-height: var(--token-button-height-lg);
                 width: 100%;
             }
             .st-key-app_theme_topbar {
@@ -656,12 +701,12 @@ __CSS_VARS__
                 justify-content: center;
             }
             .st-key-app_header_refresh button {
-                width: auto !important;
-                min-width: 11.2rem;
-                max-width: 13.2rem;
-                min-height: 2.45rem !important;
-                padding: 0.42rem 0.9rem !important;
-                font-size: 0.92rem !important;
+                width: 100% !important;
+                min-width: 0 !important;
+                max-width: none !important;
+                min-height: var(--token-button-height-lg) !important;
+                padding: 0 var(--token-space-4) !important;
+                font-size: var(--token-font-base) !important;
                 box-shadow: var(--app-primary-shadow) !important;
             }
             .st-key-public_section_tabs {
@@ -672,7 +717,7 @@ __CSS_VARS__
                 grid-template-columns: none;
                 flex-wrap: nowrap;
                 justify-content: flex-start;
-                gap: 0.85rem;
+                gap: var(--token-space-4);
                 overflow-x: auto;
                 overflow-y: hidden;
                 padding: 0 0.1rem;
@@ -686,9 +731,9 @@ __CSS_VARS__
                 flex: 0 0 auto;
                 width: auto;
                 min-width: max-content;
-                min-height: 2.44rem;
-                padding: 0.34rem 0.04rem 0.54rem;
-                font-size: 0.92rem;
+                min-height: var(--token-tab-height);
+                padding: 0 var(--token-space-1) var(--token-space-2);
+                font-size: var(--token-font-base);
                 letter-spacing: 0;
                 scroll-snap-align: start;
             }
@@ -700,7 +745,7 @@ __CSS_VARS__
             }
             .st-key-public_input_tabs div[role="radiogroup"] label {
                 min-height: 2.16rem;
-                padding: 0.28rem 0.06rem 0.46rem;
+                padding: 0 var(--token-space-1) var(--token-space-1);
                 font-size: clamp(0.72rem, 2.85vw, 0.82rem);
             }
             div[data-testid="stTabs"] [role="tablist"] {
@@ -710,8 +755,8 @@ __CSS_VARS__
                 display: flex;
                 flex-wrap: nowrap;
                 overflow-x: auto;
-                gap: 0.35rem;
-                padding: 0.35rem 0;
+                gap: var(--token-space-2);
+                padding: var(--token-space-2) 0;
                 background: var(--app-surface);
                 backdrop-filter: blur(10px);
                 border-bottom: 1px solid var(--app-border);
@@ -719,9 +764,9 @@ __CSS_VARS__
             div[data-testid="stTabs"] [role="tab"] {
                 flex: 0 0 auto;
                 min-width: 5.8rem;
-                min-height: 2.45rem;
+                min-height: var(--token-tab-height);
                 justify-content: center;
-                border-radius: 8px;
+                border-radius: var(--token-radius-md);
                 background: var(--app-panel);
                 color: var(--app-text);
                 font-weight: 760;

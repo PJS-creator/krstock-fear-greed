@@ -302,6 +302,54 @@ def _theme_values(
         "summary_heatmap_bg": summary_heatmap_bg,
         "summary_heatmap_border": summary_heatmap_border,
         "summary_heatmap_tile_border": summary_heatmap_tile_border,
+        "space_0": "0",
+        "space_1": "4px",
+        "space_2": "8px",
+        "space_3": "12px",
+        "space_4": "16px",
+        "space_5": "20px",
+        "space_6": "24px",
+        "space_8": "32px",
+        "space_10": "40px",
+        "space_12": "48px",
+        "radius_sm": "6px",
+        "radius_md": "10px",
+        "radius_lg": "14px",
+        "radius_xl": "18px",
+        "radius_pill": "999px",
+        "font_xs": "11px",
+        "font_sm": "12px",
+        "font_base": "14px",
+        "font_md": "15px",
+        "font_lg": "18px",
+        "font_xl": "22px",
+        "font_2xl": "28px",
+        "font_3xl": "36px",
+        "line_height_tight": "1.2",
+        "line_height_normal": "1.45",
+        "line_height_loose": "1.65",
+        "control_height_sm": "32px",
+        "control_height_md": "40px",
+        "control_height_lg": "48px",
+        "button_height_sm": "32px",
+        "button_height_md": "40px",
+        "button_height_lg": "44px",
+        "input_height_md": "40px",
+        "tab_height": "42px",
+        "subtab_height": "38px",
+        "page_max_width": "1240px",
+        "page_padding_x_desktop": "32px",
+        "page_padding_x_tablet": "24px",
+        "page_padding_x_mobile": "16px",
+        "section_gap": "28px",
+        "card_gap": "16px",
+        "card_padding": "18px",
+        "card_padding_compact": "14px",
+        "table_min_row_height": "40px",
+        "table_compact_row_height": "34px",
+        "chart_height_sm": "300px",
+        "chart_height_md": "380px",
+        "chart_height_lg": "460px",
     }
     return values
 
@@ -527,10 +575,11 @@ def get_status_color(status: str, tokens: dict[str, str]) -> dict[str, str]:
 @dataclass(frozen=True)
 class ChartDimensions:
     compact_height: int = 300
-    default_height: int = 410
-    tall_height: int = 500
-    row_height: int = 38
-    max_table_height: int = 520
+    default_height: int = 380
+    tall_height: int = 460
+    row_height: int = 40
+    compact_row_height: int = 34
+    max_table_height: int = 480
 
 
 DIMENSIONS = ChartDimensions()

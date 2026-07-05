@@ -205,7 +205,7 @@ def _render_exports(portfolio_snapshot: dict[str, object]) -> None:
         target_allocations=target_allocations,
         portfolio_snapshot=portfolio_snapshot,
     )
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3 = st.columns(3, gap="small")
     col1.download_button(
         "전체 데이터 JSON 내보내기",
         data=json.dumps(full_payload, ensure_ascii=False, indent=2, default=str).encode("utf-8"),

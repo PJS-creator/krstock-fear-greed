@@ -71,13 +71,11 @@ def render_app_header(
 ) -> dict[str, bool]:
     if render_theme_selector is not None:
         render_theme_selector()
-    left, middle, right = st.columns([2.0, 1.4, 1.9], vertical_alignment="center")
+    left, right = st.columns([1.2, 1.0], gap="small", vertical_alignment="center")
     with left:
         st.title(title)
-    with middle:
-        st.empty()
     with right:
-        refresh_col, meta_col = st.columns([1.18, 1.0], vertical_alignment="center")
+        refresh_col, meta_col = st.columns([1.0, 0.9], gap="small", vertical_alignment="center")
         with refresh_col:
             refresh_clicked = st.button("가격·환율 갱신", type="primary", width="stretch", icon=":material/refresh:", key="app_header_refresh", disabled=refresh_disabled)
         with meta_col:
@@ -112,7 +110,7 @@ def render_empty_state(
     primary_clicked = False
     secondary_clicked = False
     if primary_label or secondary_label:
-        cols = st.columns(2 if primary_label and secondary_label else 1)
+        cols = st.columns(2 if primary_label and secondary_label else 1, gap="small")
         if primary_label:
             primary_clicked = cols[0].button(primary_label, type="primary", key=primary_key, use_container_width=True)
         if secondary_label:
@@ -213,7 +211,7 @@ def render_kpi_cards(metrics: PortfolioMetrics, *, history_records: list[Portfol
     chart_data = _history_chart_data(history_records)
     if chart_data:
         total_kwargs = {"chart_data": chart_data, "chart_type": "line"}
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4 = st.columns(4, gap="small")
     col1.metric(
         "총자산",
         compact_krw(metrics.total_value_krw),

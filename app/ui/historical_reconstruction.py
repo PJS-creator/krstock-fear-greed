@@ -318,7 +318,7 @@ def _render_snapshot_cards(rows: list[dict[str, Any]]) -> tuple[list[dict[str, A
 
 
 def _render_add_date_controls(holding_rows: list[dict[str, Any]]) -> None:
-    add_col1, add_col2 = st.columns([1, 2])
+    add_col1, add_col2 = st.columns([1, 2], gap="small", vertical_alignment="bottom")
     new_date = add_col1.date_input("추가할 기준일", value=date.today(), key="historical_new_snapshot_date")
     if add_col2.button("날짜 추가 - 직전 보유현황 복사", width="stretch"):
         if not begin_ui_action("historical_add_snapshot_date", payload={"date": new_date.isoformat()}):
@@ -352,7 +352,7 @@ def _render_upload_preview(label: str, columns: list[str], key: str) -> list[dic
 
 def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalScheduleStore | None) -> None:
     st.subheader("보유현황 스케줄")
-    control_col1, control_col2 = st.columns([2, 1])
+    control_col1, control_col2 = st.columns([2, 1], gap="small", vertical_alignment="bottom")
     with control_col1:
         st.text_input("스케줄 이름", key=SCHEDULE_NAME_KEY)
         st.text_area("메모", key=NOTES_KEY, height=80)
@@ -389,7 +389,7 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
         labels = {f"{record.schedule_name} · {format_kst(record.updated_at or record.created_at, compact=True)}": record for record in records}
         selected_label = st.selectbox("저장된 스케줄", list(labels.keys()), key="historical_saved_schedule")
         selected = labels[selected_label]
-        load_col, delete_col = st.columns(2)
+        load_col, delete_col = st.columns(2, gap="small", vertical_alignment="bottom")
         confirm_load = st.checkbox("현재 입력을 선택 스케줄로 교체 확인", key=f"load_schedule_{selected.schedule_name}")
         if load_col.button("선택 스케줄 불러오기", width="stretch", disabled=not confirm_load):
             if not begin_ui_action("historical_load_saved_schedule", payload={"schedule_name": selected.schedule_name}):
@@ -672,7 +672,7 @@ def _render_editors(*, current_cash_krw: float, current_cash_usd: float, current
         st.session_state[HOLDINGS_STATE_KEY] = card_rows
         holding_rows = card_rows
 
-    holdings_upload, cash_upload = st.columns(2)
+    holdings_upload, cash_upload = st.columns(2, gap="small")
     with holdings_upload.expander("CSV 업로드", expanded=False):
         st.download_button(
             "간편 CSV 템플릿",
@@ -831,7 +831,7 @@ def _render_result(result: ReconstructionResult) -> None:
     change = last.total_value_krw - first.total_value_krw
     change_pct = change / first.total_value_krw if first.total_value_krw else None
     missing_tickers = sorted({row.ticker for row in result.holding_rows if row.market_value_krw is None} | set(result.failed_tickers))
-    cols = st.columns(6)
+    cols = st.columns(6, gap="small")
     cols[0].metric("시작 총자산", compact_krw(first.total_value_krw), help=full_krw(first.total_value_krw), border=True)
     cols[1].metric("마지막 총자산", compact_krw(last.total_value_krw), help=full_krw(last.total_value_krw), border=True)
     cols[2].metric("기간 중 변화액", signed_krw(change), border=True)
@@ -935,7 +935,7 @@ def render_historical_reconstruction_tab(
     )
 
     default_start, default_end = _date_bounds(holding_rows)
-    period_col1, period_col2 = st.columns(2)
+    period_col1, period_col2 = st.columns(2, gap="small", vertical_alignment="bottom")
     start_value = period_col1.date_input("시작일", value=default_start or date.today(), key="historical_start_date")
     end_value = period_col2.date_input("종료일", value=default_end, key="historical_end_date")
     with st.expander("고급 설정", expanded=False):

@@ -108,8 +108,8 @@ def apply_plotly_theme(fig: go.Figure, theme_tokens: dict[str, str] | None = Non
             font=dict(family=APP_FONT_FAMILY, size=13, color=tokens["chart_tooltip_text"]),
         ),
     )
-    fig.update_xaxes(gridcolor=tokens["chart_grid"], zerolinecolor=theme.chart_zero, tickfont=dict(color=tokens["chart_axis"]), automargin=True)
-    fig.update_yaxes(gridcolor=tokens["chart_grid"], zerolinecolor=theme.chart_zero, tickfont=dict(color=tokens["chart_axis"]), automargin=True)
+    fig.update_xaxes(gridcolor=tokens["chart_grid"], zerolinecolor=theme.chart_zero, tickfont=dict(color=tokens["chart_axis"], size=12), automargin=True)
+    fig.update_yaxes(gridcolor=tokens["chart_grid"], zerolinecolor=theme.chart_zero, tickfont=dict(color=tokens["chart_axis"], size=12), automargin=True)
     return fig
 
 
@@ -132,29 +132,30 @@ def apply_chart_layout(
     fig.update_layout(
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        margin=dict(l=16, r=20, t=28, b=18),
+        margin=dict(l=56, r=40, t=32, b=44),
         height=height,
         hovermode=hovermode,
         showlegend=showlegend,
         legend_title_text="",
-        font=dict(family=APP_FONT_FAMILY, size=15, color=theme.text),
+        font=dict(family=APP_FONT_FAMILY, size=14, color=theme.text),
         hoverlabel=dict(
             align="left",
             bgcolor=theme.chart_hover_bg,
             bordercolor=theme.chart_hover_border,
             font=dict(family=APP_FONT_FAMILY, size=13, color=theme.tokens()["chart_tooltip_text"]),
         ),
-        legend=dict(font=dict(size=13), itemclick="toggleothers", itemdoubleclick="toggle"),
+        legend=dict(font=dict(size=12), itemclick="toggleothers", itemdoubleclick="toggle"),
     )
     fig.update_xaxes(
         showgrid=True,
         gridcolor=theme.chart_grid,
         zerolinecolor=theme.chart_zero,
         tickfont=dict(size=12),
-        title_font=dict(size=13),
+        title_font=dict(size=12),
         automargin=True,
+        nticks=7,
     )
-    fig.update_yaxes(showgrid=False, tickfont=dict(size=12), title_font=dict(size=13), automargin=True)
+    fig.update_yaxes(showgrid=False, tickfont=dict(size=12), title_font=dict(size=12), automargin=True)
     return fig
 
 
@@ -321,8 +322,8 @@ def plot_allocation(
         legend=dict(orientation="h", yanchor="top", y=-0.12, xanchor="center", x=0.5),
         uniformtext=dict(minsize=12, mode="hide"),
     )
-    fig = apply_chart_layout(fig, height=DIMENSIONS.tall_height + 70, hovermode="closest")
-    fig.update_layout(margin=dict(l=18, r=18, t=28, b=130))
+    fig = apply_chart_layout(fig, height=DIMENSIONS.tall_height + 40, hovermode="closest")
+    fig.update_layout(margin=dict(l=28, r=28, t=28, b=118))
     return fig
 
 
@@ -366,9 +367,11 @@ def plot_contribution(metrics: PortfolioMetrics, *, limit: int = 10, show_all: b
         )
     )
     fig.add_vline(x=0, line_color=get_active_theme().chart_axis, line_width=1)
-    fig.update_layout(xaxis_title="오늘 변동액", yaxis_title="", bargap=0.32)
+    fig.update_layout(xaxis_title="오늘 변동액", yaxis_title="", bargap=0.32, margin=dict(l=92, r=88, t=28, b=52))
     fig.update_xaxes(tickformat=",.0f", tickprefix="₩")
-    return apply_chart_layout(fig, height=height, hovermode="closest", showlegend=False)
+    fig = apply_chart_layout(fig, height=height, hovermode="closest", showlegend=False)
+    fig.update_layout(margin=dict(l=92, r=88, t=28, b=52))
+    return fig
 
 
 def plot_currency_exposure(metrics: PortfolioMetrics) -> go.Figure | None:

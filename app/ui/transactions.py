@@ -359,7 +359,7 @@ def _render_standard_transaction_form() -> None:
     default_currency = _default_currency_option(default_market, None)
 
     with st.form("standard_transaction_form", clear_on_submit=False):
-        core_cols = st.columns([0.85, 0.85, 2.1, 1.05, 1.0, 1.1, 1.05], gap="small", vertical_alignment="bottom")
+        core_cols = st.columns([0.85, 0.85, 2.35, 1.1], gap="small", vertical_alignment="bottom")
         transaction_type = core_cols[0].selectbox("구분", ["매입", "매도"], help="매입은 보유 수량을 늘리고, 매도는 보유 수량을 줄입니다.")
         market = core_cols[1].selectbox("시장", market_options, index=market_options.index(default_market), help="자동감지가 실패하면 KR 또는 US를 직접 선택하세요.")
         ticker_or_name = core_cols[2].text_input(
@@ -367,13 +367,15 @@ def _render_standard_transaction_form() -> None:
             placeholder="삼성전자, 005930, GOOGL",
             help="국내 종목은 종목명 또는 6자리 코드, 미국 종목은 ticker를 입력하세요.",
         )
-        unit_price = core_cols[3].number_input("체결단가", min_value=0.0, step=0.01, format="%.2f", help="실제 체결된 1주당 가격입니다.")
-        quantity = core_cols[4].number_input("수량", min_value=0.0, step=0.0001, format="%.4f", help="매입 또는 매도한 주식 수량입니다.")
-        occurred_at = core_cols[5].date_input("거래일", value=date.today(), help="문자열 대신 달력에서 선택합니다.")
-        submitted = core_cols[6].form_submit_button("미리보기", type="primary", use_container_width=True)
+        occurred_at = core_cols[3].date_input("거래일", value=date.today(), help="문자열 대신 달력에서 선택합니다.")
+        price_cols = st.columns([1.05, 1.0, 1.0, 1.0], gap="small", vertical_alignment="bottom")
+        unit_price = price_cols[0].number_input("체결단가", min_value=0.0, step=0.01, format="%.2f", help="실제 체결된 1주당 가격입니다.")
+        quantity = price_cols[1].number_input("수량", min_value=0.0, step=0.0001, format="%.4f", help="매입 또는 매도한 주식 수량입니다.")
+        price_cols[2].empty()
+        submitted = price_cols[3].form_submit_button("미리보기", type="primary", use_container_width=True)
 
         with st.expander("상세 옵션", expanded=False):
-            detail_cols = st.columns([1.6, 1.0, 1.0, 1.0], gap="small")
+            detail_cols = st.columns([1.6, 1.0, 1.0, 1.0], gap="small", vertical_alignment="bottom")
             holding_choice = detail_cols[0].selectbox(
                 "기존 보유 종목",
                 holding_options,
