@@ -13,7 +13,7 @@ import streamlit as st
 
 from portfolio.journal import JournalEvent, build_journal_events, filter_journal_events, normalize_journal_notes
 
-from .components import render_empty_state
+from .components import render_empty_state, render_metric_card
 from .formatters import compact_krw, format_number, format_price
 from .stability import request_app_rerun
 
@@ -118,11 +118,16 @@ def render_journal_tab(
     events = build_journal_events(transactions=transactions, cash_ledger=cash_ledger, journal_notes=journal_notes)
     summary = _month_summary(events)
     cols = st.columns(5, gap="small")
-    cols[0].metric("전체 기록", f"{summary['count']:,}건")
-    cols[1].metric("이번달 매수", f"{summary['month_buy_count']:,}건")
-    cols[2].metric("이번달 매도", f"{summary['month_sell_count']:,}건")
-    cols[3].metric("이번달 입출금", f"{summary['month_cash_count']:,}건")
-    cols[4].metric("마지막 기록", summary["last_date"] or "-")
+    summary_cards = [
+        ("전체 기록", f"{summary['count']:,}건"),
+        ("이번달 매수", f"{summary['month_buy_count']:,}건"),
+        ("이번달 매도", f"{summary['month_sell_count']:,}건"),
+        ("이번달 입출금", f"{summary['month_cash_count']:,}건"),
+        ("마지막 기록", summary["last_date"] or "-"),
+    ]
+    for column, (title, value) in zip(cols, summary_cards, strict=True):
+        with column:
+            render_metric_card(title, value)
 
     with st.expander("수동 메모 작성", expanded=False):
         with st.form("journal_note_form", clear_on_submit=True):
