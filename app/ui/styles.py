@@ -64,7 +64,7 @@ __CSS_VARS__
         div[data-testid="stMetric"] {
             background: var(--summary-panel-bg);
             border-color: var(--app-border) !important;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+            box-shadow: var(--app-shadow-sm);
         }
         div[data-testid="stMetricLabel"],
         div[data-testid="stMetricLabel"] * {
@@ -173,7 +173,7 @@ __CSS_VARS__
             background: var(--summary-panel-bg);
             border: 1px solid var(--app-border);
             border-radius: 8px;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+            box-shadow: var(--app-shadow-sm);
         }
         div[data-testid="stExpander"] summary {
             color: var(--app-heading);
@@ -230,8 +230,8 @@ __CSS_VARS__
         div[data-testid="stButton"] button[kind="primary"] {
             background: linear-gradient(135deg, var(--app-primary), var(--app-primary-hover));
             border: 1px solid var(--app-primary-hover);
-            color: #FFFFFF;
-            box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
+            color: var(--app-primary-text);
+            box-shadow: var(--app-primary-shadow);
         }
         div[data-testid="stButton"] button[kind="secondary"] {
             background: var(--app-panel);
@@ -288,7 +288,7 @@ __CSS_VARS__
         div[role="radiogroup"] label:has(input:checked) {
             border-color: var(--app-primary-hover);
             background: var(--app-primary);
-            color: #FFFFFF;
+            color: var(--app-primary-text);
         }
         div[data-testid="stTabs"] [role="tablist"] {
             gap: 0.45rem;
@@ -310,7 +310,7 @@ __CSS_VARS__
             border: 1px solid var(--app-border);
             background: var(--app-panel) !important;
             color: var(--app-text) !important;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+            box-shadow: var(--app-shadow-sm);
         }
         div[data-testid="stAlert"] *,
         div[data-testid="stAlert"] [data-testid="stMarkdownContainer"] *,
@@ -356,18 +356,9 @@ __CSS_VARS__
         .app-box span {
             color: var(--app-text);
         }
-        .app-box-info {
-            background: var(--token-info-bg);
-            border-color: var(--app-primary);
-        }
-        .app-box-warning {
-            background: var(--token-warning-bg);
-            border-color: var(--app-warning);
-        }
-        .app-box-danger {
-            background: var(--token-danger-bg);
-            border-color: var(--app-negative);
-        }
+        .app-box-info { background: var(--token-info-soft); border-color: var(--app-info); }
+        .app-box-warning { background: var(--token-warning-soft); border-color: var(--app-warning); }
+        .app-box-danger { background: var(--token-danger-soft); border-color: var(--app-danger); }
         .app-badge {
             display: inline-flex;
             align-items: center;
@@ -382,10 +373,10 @@ __CSS_VARS__
             font-weight: 800;
             line-height: 1.2;
         }
-        .app-badge-success { color: var(--app-positive); background: var(--token-success-bg); border-color: var(--app-positive); }
-        .app-badge-warning { color: var(--app-warning); background: var(--token-warning-bg); border-color: var(--app-warning); }
-        .app-badge-danger { color: var(--app-negative); background: var(--token-danger-bg); border-color: var(--app-negative); }
-        .app-badge-info { color: var(--app-primary); background: var(--token-info-bg); border-color: var(--app-primary); }
+        .app-badge-success { color: var(--token-success-text); background: var(--token-success-soft); border-color: var(--app-success); }
+        .app-badge-warning { color: var(--token-warning-text); background: var(--token-warning-soft); border-color: var(--app-warning); }
+        .app-badge-danger { color: var(--token-danger-text); background: var(--token-danger-soft); border-color: var(--app-danger); }
+        .app-badge-info { color: var(--token-info-text); background: var(--token-info-soft); border-color: var(--app-info); }
         .app-header-status {
             display: flex;
             flex-wrap: wrap;
@@ -671,7 +662,7 @@ __CSS_VARS__
                 min-height: 2.45rem !important;
                 padding: 0.42rem 0.9rem !important;
                 font-size: 0.92rem !important;
-                box-shadow: 0 8px 18px rgba(37, 99, 235, 0.2) !important;
+                box-shadow: var(--app-primary-shadow) !important;
             }
             .st-key-public_section_tabs {
                 margin: 0.7rem 0 0.95rem;
@@ -738,7 +729,7 @@ __CSS_VARS__
             }
             div[data-testid="stTabs"] [role="tab"][aria-selected="true"] {
                 background: var(--app-primary);
-                color: #FFFFFF;
+                color: var(--app-primary-text);
             }
             div[data-testid="stDataFrame"],
             div[data-testid="stDataEditor"] {

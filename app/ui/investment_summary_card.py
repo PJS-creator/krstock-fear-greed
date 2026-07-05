@@ -12,7 +12,7 @@ from portfolio.transactions import normalize_transaction_rows
 
 from .components import render_empty_state
 from .formatters import KST, format_kst, format_number, format_price, instrument_label, percentage, signed_krw, signed_percentage
-from .theme import SEMANTIC_COLORS, deterministic_color
+from .theme import deterministic_color, get_active_theme, get_chart_palette
 
 
 def _krw(value: float | None) -> str:
@@ -156,12 +156,13 @@ def _sparkline_html(holding: dict[str, Any]) -> str:
 
 
 def _heatmap_tone(change_pct: float | None) -> str:
+    tokens = get_active_theme().tokens()
     if change_pct is None or abs(change_pct) < 1e-12:
-        return "#4B5563"
+        return tokens["neutral_value"]
     intensity = min(abs(change_pct) / 0.045, 1.0)
     if change_pct > 0:
-        return _mix_hex("#7F2535", "#DC5A5E", intensity)
-    return _mix_hex("#1F3D63", "#3B82F6", intensity)
+        return _mix_hex(tokens["profit_text"], tokens["profit"], intensity)
+    return _mix_hex(tokens["loss_text"], tokens["loss"], intensity)
 
 
 def _font_size_for_weight(weight: float) -> float:
@@ -284,6 +285,8 @@ def _portfolio_irr(metrics: PortfolioMetrics, transactions: list[dict[str, objec
 
 
 def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[dict[str, Any]]:
+    tokens = get_active_theme().tokens()
+    allocation_palette = get_chart_palette(tokens, "allocation")
     rows: list[dict[str, Any]] = []
     total = metrics.total_value_krw
     for index, item in enumerate(metrics.rows):
@@ -297,7 +300,7 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
                 "detail": instrument_label(item.holding, include_ticker=True),
                 "value_krw": value,
                 "weight": value / total if total else 0.0,
-                "color": deterministic_color(item.holding.get("ticker") or index),
+                "color": deterministic_color(item.holding.get("ticker") or index, allocation_palette),
                 "heat_color": _heatmap_tone(day_change_pct),
                 "day_change_pct": day_change_pct,
                 "day_change_krw": item.day_change_krw,
@@ -311,8 +314,8 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
                 "detail": "원화/달러 현금",
                 "value_krw": metrics.cash_total_krw,
                 "weight": metrics.cash_total_krw / total if total else 0.0,
-                "color": "#8C99A8",
-                "heat_color": "#374151",
+                "color": tokens["cash"],
+                "heat_color": tokens["neutral_value"],
                 "day_change_pct": 0.0,
                 "day_change_krw": 0.0,
                 "kind": "cash",
@@ -333,7 +336,7 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
             "detail": f"{len(other)}개 항목 합산",
             "value_krw": other_value,
             "weight": other_value / total if total else 0.0,
-            "color": "#64748B",
+            "color": tokens["text_subtle"],
             "heat_color": _heatmap_tone(other_day_change_pct),
             "day_change_pct": other_day_change_pct,
             "day_change_krw": other_day_change_krw,
@@ -464,7 +467,7 @@ def _holding_table_rows(
     if metrics.cash_total_krw > 0:
         rows.append(
             "<tr>"
-            "<td class='summary-name'><span style='background:#8C99A8'></span>현금</td>"
+            "<td class='summary-name'><span style='background:var(--app-cash)'></span>현금</td>"
             "<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>"
             f"<td>{escape(_krw(metrics.cash_total_krw))}</td>"
             f"<td>{escape(percentage(metrics.cash_total_krw / metrics.total_value_krw if metrics.total_value_krw else 0, digits=2))}</td>"
@@ -563,7 +566,7 @@ def _render_styles() -> None:
             border: 1px solid var(--app-border);
             border-radius: 8px;
         }
-        .summary-top-box { padding: 16px 18px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+        .summary-top-box { padding: 16px 18px; box-shadow: var(--app-shadow-sm); }
         .summary-top-label { color: var(--app-muted); font-size: 0.92rem; }
         .summary-date { color: var(--app-positive); font-size: 1.64rem; margin-top: 4px; font-weight: 850; }
         .summary-delta { font-size: 1.82rem; margin-top: 8px; font-weight: 900; }
@@ -575,7 +578,7 @@ def _render_styles() -> None:
             margin-top: 16px;
             align-items: stretch;
         }
-        .summary-panel { padding: 18px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+        .summary-panel { padding: 18px; box-shadow: var(--app-shadow-sm); }
         .summary-panel h3, .summary-table-wrap h3 { margin: 0 0 16px; color: var(--app-heading); font-size: 1.24rem; font-weight: 850; }
         .summary-legend-row {
             display: grid;
@@ -613,8 +616,8 @@ def _render_styles() -> None:
             display: inline-block;
             margin-right: 5px;
         }
-        .summary-heatmap-legend .up:before { background: #D94B4B; }
-        .summary-heatmap-legend .down:before { background: #2F80ED; }
+        .summary-heatmap-legend .up:before { background: var(--app-profit); }
+        .summary-heatmap-legend .down:before { background: var(--app-loss); }
         .summary-heatmap-area {
             position: relative;
             flex: 1;
@@ -624,12 +627,12 @@ def _render_styles() -> None:
             border: 1px solid var(--summary-heatmap-border);
             border-radius: 7px;
             overflow: hidden;
-            box-shadow: 0 24px 58px rgba(0, 0, 0, 0.26);
+            box-shadow: var(--app-shadow);
         }
         .summary-heatmap-tile {
             position: absolute;
             border: 2px solid var(--summary-heatmap-tile-border);
-            color: #F8FAFC;
+            color: var(--token-chart-tooltip-text);
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -638,8 +641,8 @@ def _render_styles() -> None:
             line-height: 1.15;
             padding: 6px;
             overflow: hidden;
-            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.56);
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -24px 58px rgba(0,0,0,0.16);
+            text-shadow: none;
+            box-shadow: inset 0 -24px 58px var(--token-overlay);
         }
         .summary-heatmap-name {
             font-weight: 900;
@@ -681,13 +684,13 @@ def _render_styles() -> None:
         }
         .summary-sparkline circle { fill: currentColor; }
         .summary-sparkline-baseline { stroke: var(--app-border-strong); stroke-width: 1; stroke-dasharray: 3 4; }
-        .summary-sparkline-up { color: #F87171; background: rgba(220, 90, 94, 0.10); }
-        .summary-sparkline-down { color: #60A5FA; background: rgba(59, 130, 246, 0.10); }
+        .summary-sparkline-up { color: var(--app-profit); background: var(--token-profit-soft); }
+        .summary-sparkline-down { color: var(--app-loss); background: var(--token-loss-soft); }
         .summary-sparkline-neutral { color: var(--app-muted); }
         .summary-sparkline-empty:before {
             content: "";
             width: 54px;
-            border-top: 1px dashed rgba(148, 163, 184, 0.36);
+            border-top: 1px dashed var(--app-border-strong);
         }
         .summary-split-grid {
             display: grid;
@@ -700,7 +703,7 @@ def _render_styles() -> None:
             border-radius: 8px;
             background: var(--summary-panel-bg);
             padding: 16px 18px;
-            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+            box-shadow: var(--app-shadow-sm);
         }
         .summary-split-label {
             color: var(--app-muted);
@@ -744,21 +747,21 @@ def _render_styles() -> None:
             border-radius: 9px;
             display: grid;
             place-items: center;
-            color: #C7D2FE;
-            background: rgba(59, 130, 246, 0.16);
-            border: 1px solid rgba(147, 197, 253, 0.18);
+            color: var(--token-info-text);
+            background: var(--token-info-soft);
+            border: 1px solid var(--app-border);
             font-weight: 900;
             font-size: 0.84rem;
         }
         .summary-kpi-title { color: var(--app-muted); font-size: 0.96rem; }
         .summary-kpi-value { color: var(--app-heading); font-size: 1.58rem; font-weight: 900; margin-top: 6px; font-variant-numeric: tabular-nums; }
         .summary-kpi-sub { color: var(--app-muted); font-size: 0.9rem; margin-top: 4px; }
-        .summary-kpi-cyan .summary-kpi-value { color: var(--app-positive); }
-        .summary-kpi-cyan .summary-kpi-icon { color: #A7F3D0; background: rgba(16, 185, 129, 0.16); border-color: rgba(52, 211, 153, 0.26); }
+        .summary-kpi-cyan .summary-kpi-value { color: var(--app-accent); }
+        .summary-kpi-cyan .summary-kpi-icon { color: var(--app-accent); background: var(--app-accent-soft); border-color: var(--app-accent); }
         .summary-kpi-red .summary-kpi-value, .summary-up { color: var(--summary-up-text); }
-        .summary-kpi-red .summary-kpi-icon { color: #FECACA; background: rgba(220, 90, 94, 0.18); border-color: rgba(248, 113, 113, 0.28); }
+        .summary-kpi-red .summary-kpi-icon { color: var(--summary-up-text); background: var(--summary-up-bg); border-color: var(--summary-up-border); }
         .summary-kpi-blue .summary-kpi-value, .summary-down { color: var(--summary-down-text); }
-        .summary-kpi-blue .summary-kpi-icon { color: #BFDBFE; background: rgba(59, 130, 246, 0.18); border-color: rgba(96, 165, 250, 0.28); }
+        .summary-kpi-blue .summary-kpi-icon { color: var(--summary-down-text); background: var(--summary-down-bg); border-color: var(--summary-down-border); }
         .summary-neutral { color: var(--app-muted); }
         .summary-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; color: var(--app-muted); font-size: 0.9rem; }
         @media (max-width: 980px) {
@@ -769,7 +772,7 @@ def _render_styles() -> None:
         @media (max-width: 720px) {
             .summary-card {
                 padding: 12px;
-                box-shadow: 0 12px 34px rgba(2, 8, 23, 0.32);
+                box-shadow: var(--app-shadow-sm);
             }
             .summary-title h2 {
                 font-size: 1.72rem;
