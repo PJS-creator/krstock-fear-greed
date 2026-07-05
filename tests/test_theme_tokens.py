@@ -56,3 +56,10 @@ def test_dark_mode_input_tokens_are_visible_against_page_background():
     assert tokens["input_bg"] != tokens["bg"]
     assert tokens["input_border"] == tokens["border_strong"]
     assert tokens["input_text"] != tokens["input_bg"]
+
+
+def test_light_mode_muted_text_uses_primary_text_color_for_readability():
+    tokens = get_theme_tokens("light")
+
+    assert tokens["text_muted"] == tokens["text"]
+    assert tokens["text_subtle"] == tokens["text"]
