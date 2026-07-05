@@ -544,7 +544,7 @@ def _holding_table_rows(
         irr_text = signed_percentage(irr) if irr is not None else "-"
         rows.append(
             "<tr>"
-            f"<td class='summary-name'><span class='summary-name-dot' style='background:{color}'></span><span class='summary-name-text'>{label}</span>{_currency_badge(currency)}</td>"
+            f"<td class='summary-name'><span class='summary-name-inner'><span class='summary-name-dot' style='background:{color}'></span><span class='summary-name-text'>{label}</span>{_currency_badge(currency)}</span></td>"
             f"<td>{escape(quantity)}</td>"
             f"<td>{escape(avg_price)}</td>"
             f"<td>{escape(purchase_amount)}</td>"
@@ -571,7 +571,7 @@ def _holding_table_rows(
             current_price = "-" if currency == "KRW" else f"{format_number(metrics.usd_krw, digits=0)}원/USD"
             rows.append(
                 "<tr class='summary-cash-detail-row'>"
-                f"<td class='summary-name'><span class='summary-name-dot' style='background:{cash_row['color']}'></span><span class='summary-name-text'>{escape(str(cash_row['label']))}</span>{_currency_badge(currency)}</td>"
+                f"<td class='summary-name'><span class='summary-name-inner'><span class='summary-name-dot' style='background:{cash_row['color']}'></span><span class='summary-name-text'>{escape(str(cash_row['label']))}</span>{_currency_badge(currency)}</span></td>"
                 f"<td>{escape(quantity)}</td>"
                 "<td>-</td><td>-</td>"
                 f"<td>{escape(current_price)}</td>"
@@ -878,12 +878,21 @@ def _render_styles() -> None:
         .summary-col-weight { width: 8.4%; }
         .summary-name {
             min-width: 0;
-            display: flex;
+        }
+        .summary-name-inner {
+            min-width: 0;
+            width: 100%;
+            max-width: 100%;
+            display: inline-flex;
             align-items: center;
             gap: 5px;
+            line-height: inherit;
+            vertical-align: middle;
         }
         .summary-name-text {
+            flex: 1 1 auto;
             min-width: 0;
+            display: inline-block;
             overflow: hidden;
             text-overflow: ellipsis;
         }

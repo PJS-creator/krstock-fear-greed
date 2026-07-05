@@ -79,6 +79,7 @@ def test_summary_holding_table_restores_detailed_columns():
     assert "<tr class='summary-section-row summary-section-cash'><td colspan='11'><span>현금</span></td></tr>" in html_rows
     assert "summary-currency-krw" in html_rows
     assert "summary-currency-usd" in html_rows
+    assert "summary-name-inner" in html_rows
     assert "원화 현금" in html_rows
     assert "달러 현금" in html_rows
     assert "₩72,300" in html_rows
@@ -131,6 +132,9 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "summary-dot-rule-down" in html
     assert "summary-dot-rule-flat" in html
     assert "보합·미산정" in html
+    assert ".summary-name-inner" in html
+    assert "width: 100%;" in html
+    assert ".summary-name {\n            min-width: 0;\n            display: flex;" not in html
     assert "display: table-cell !important;" in html
     assert ".summary-section-row td {\n            display: flex;" not in html
     assert "KRW" in html
