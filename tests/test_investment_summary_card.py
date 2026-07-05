@@ -9,7 +9,7 @@ from app.ui.investment_summary_card import (
     _sparkline_html,
     render_investment_summary_card,
 )
-from app.ui.theme import get_app_theme
+from app.ui.theme import get_active_theme, get_app_theme
 
 
 def _metrics():
@@ -53,6 +53,14 @@ def test_summary_allocation_separates_cash_and_prefers_korean_company_name():
     assert round(sum(row["weight"] for row in rows) + cash_row["weight"], 6) == 1
 
 
+def test_summary_asset_dots_use_daily_movement_colors():
+    tokens = get_active_theme().tokens()
+    rows = {row["label"]: row for row in _allocation_rows(_metrics())}
+
+    assert rows["삼성전자"]["color"] == tokens["profit"]
+    assert rows["MU · Micron"]["color"] == tokens["loss"]
+
+
 def test_summary_holding_table_restores_detailed_columns():
     html_rows = "\n".join(
         _holding_table_rows(
@@ -67,6 +75,8 @@ def test_summary_holding_table_restores_detailed_columns():
     assert "삼성전자" in html_rows
     assert "summary-section-investment" in html_rows
     assert "summary-section-cash" in html_rows
+    assert "<tr class='summary-section-row summary-section-investment'><td colspan='11'><span>투자</span></td></tr>" in html_rows
+    assert "<tr class='summary-section-row summary-section-cash'><td colspan='11'><span>현금</span></td></tr>" in html_rows
     assert "summary-currency-krw" in html_rows
     assert "summary-currency-usd" in html_rows
     assert "원화 현금" in html_rows
@@ -116,6 +126,8 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "<div class=\"summary-asset-group-head\"><span>투자</span>" in html
     assert "<div class=\"summary-asset-group-head\"><span>현금</span>" in html
     assert "summary-asset-currency-split" in html
+    assert "summary-dot-rule" in html
+    assert "당일 상승·하락·보합 기준" in html
     assert "KRW" in html
     assert "USD" in html
     assert "원화 현금" in html
