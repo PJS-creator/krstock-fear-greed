@@ -42,12 +42,9 @@ from app.ui.components import render_app_header, render_price_update_log, safe_r
 from app.ui.data_portability import render_data_portability_tools
 from app.ui.formatters import format_kst, format_number, format_price, format_relative_time, full_krw
 from app.ui.holdings import render_holdings_table
-from app.ui.history import (
-    render_actual_history_section,
-    render_historical_reconstruction_section,
-    render_history_tab,
-    render_risk_history_section,
-)
+from app.ui.history import render_history_tab
+from app.ui.investment_summary_card import render_investment_summary_card
+from app.ui.journal import render_journal_tab
 from app.ui.onboarding import SAMPLE_PORTFOLIO_ACTIVE_KEY, render_onboarding
 from app.ui.manage import (
     list_portfolios_cached,
@@ -57,15 +54,6 @@ from app.ui.manage import (
     render_storage_tools,
 )
 from app.ui.overview import render_overview
-from app.ui.performance import render_performance_analysis
-from app.ui.product_dashboard import (
-    render_allocation_analysis_screen,
-    render_dividend_summary_screen,
-    render_home_dashboard,
-    render_journal_screen,
-    render_profit_analysis_screen,
-    render_tax_summary_screen,
-)
 from app.ui.rebalancing import render_rebalancing
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
 from app.ui.stability import begin_ui_action, finish_ui_action, render_action_guard_notice, request_app_rerun, reset_stale_ui_action_guard
@@ -84,7 +72,6 @@ from portfolio.auth import (
 from portfolio.history import build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
-from portfolio.navigation import resolve_quick_nav_target
 from portfolio.cash_ledger import (
     calculate_cash_balances,
     create_balance_adjustment_entries,
@@ -158,44 +145,24 @@ THEME_LABEL_BY_MODE = {"dark": "다크", "light": "라이트"}
 THEME_MODE_BY_LABEL = {label: mode for mode, label in THEME_LABEL_BY_MODE.items()}
 PUBLIC_SECTION_LABELS = {
     "summary": "총괄현황",
-    "analysis": "분석",
-    "journal": "매매일지",
+    "details": "세부내역",
     "input": "사용자입력",
+    "history": "자산추이",
+    "journal": "매매일지",
     "rebalancing": "리밸런싱",
 }
 PUBLIC_SECTION_LEGACY_MAP = {
     "투자 총괄 카드": "summary",
     "총괄현황": "summary",
-    "개요": "analysis",
-    "세부내역": "analysis",
-    "분석": "analysis",
-    "매매일지": "journal",
+    "개요": "details",
+    "세부내역": "details",
     "보유자산": "input",
     "사용자 입력": "input",
     "사용자입력": "input",
-    "자산추이": "analysis",
+    "자산추이": "history",
+    "매매일지": "journal",
     "리밸런싱": "rebalancing",
     "리스크·리밸런싱": "rebalancing",
-}
-ANALYSIS_VIEW_KEY = "active_analysis_view"
-ANALYSIS_VIEW_LABELS = {
-    "profit": "수익",
-    "tax": "세금",
-    "dividend": "배당",
-    "trend": "추이",
-    "allocation": "비중",
-    "risk": "리스크",
-}
-ANALYSIS_VIEW_LEGACY_MAP = {
-    "성과분석": "profit",
-    "수익": "profit",
-    "세금": "tax",
-    "배당": "dividend",
-    "자산추이": "trend",
-    "추이": "trend",
-    "비중": "allocation",
-    "리스크": "risk",
-    "리스크분석": "risk",
 }
 PUBLIC_HOLDINGS_VIEW_LABELS = {
     "holdings": "보유 현황",
@@ -295,8 +262,8 @@ def _current_portfolio_state() -> dict[str, object]:
         "portfolio_name": _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_KEY)),
         "portfolio_transactions": st.session_state.get("portfolio_transactions", []),
         "cash_ledger_entries": st.session_state.get("cash_ledger_entries", []),
-        "journal_notes": st.session_state.get("journal_notes", []),
         "target_allocations": st.session_state.get("target_allocations", []),
+        "journal_notes": st.session_state.get("journal_notes", []),
         "holdings_rows": st.session_state.get("holdings_rows", []),
         "cash_krw": st.session_state.get("cash_krw", 0.0),
         "cash_usd": st.session_state.get("cash_usd", 0.0),
@@ -326,8 +293,8 @@ def _restore_last_saved_state() -> None:
         "portfolio_name": _clean_portfolio_name(state.get("portfolio_name")),
         "portfolio_transactions": list(state.get("portfolio_transactions") or []),
         "cash_ledger_entries": list(state.get("cash_ledger_entries") or []),
-        "journal_notes": list(state.get("journal_notes") or []),
         "target_allocations": list(state.get("target_allocations") or []),
+        "journal_notes": list(state.get("journal_notes") or []),
         "holdings_rows": list(state.get("holdings_rows") or []),
         "cash_krw": float(state.get("cash_krw") or 0.0),
         "cash_usd": float(state.get("cash_usd") or 0.0),
@@ -347,8 +314,8 @@ def _reset_current_portfolio_state(portfolio_name: str = "main") -> None:
         "portfolio_name": clean_name,
         "portfolio_transactions": [],
         "cash_ledger_entries": [],
-        "journal_notes": [],
         "target_allocations": [],
+        "journal_notes": [],
         "holdings_rows": [],
         "cash_krw": 0.0,
         "cash_usd": 0.0,
@@ -475,8 +442,8 @@ def _apply_pending_portfolio_state() -> None:
         "holdings_rows",
         "portfolio_transactions",
         "cash_ledger_entries",
-        "journal_notes",
         "target_allocations",
+        "journal_notes",
         "cash_krw",
         "cash_usd",
         "usd_krw",
@@ -510,8 +477,8 @@ def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     st.session_state.setdefault(PORTFOLIO_NAME_INPUT_KEY, st.session_state[PORTFOLIO_NAME_KEY])
     st.session_state.setdefault("portfolio_transactions", [])
     st.session_state.setdefault("cash_ledger_entries", [])
-    st.session_state.setdefault("journal_notes", [])
     st.session_state.setdefault("target_allocations", [])
+    st.session_state.setdefault("journal_notes", [])
     st.session_state.setdefault("holdings_rows", [])
     st.session_state.setdefault("cash_krw", 0.0)
     st.session_state.setdefault("cash_usd", 0.0)
@@ -701,8 +668,8 @@ def _current_portfolio_payload():
         cash_usd=st.session_state.cash_usd,
         transactions=st.session_state.get("portfolio_transactions", []),
         cash_ledger=st.session_state.get("cash_ledger_entries", []),
-        journal_notes=st.session_state.get("journal_notes", []),
         target_allocations=st.session_state.get("target_allocations", []),
+        journal_notes=st.session_state.get("journal_notes", []),
         fx_metadata={
             "rate_date": st.session_state.get("fx_rate_date"),
             "as_of_timestamp": st.session_state.get("fx_as_of_timestamp"),
@@ -1500,27 +1467,12 @@ def _render_status_messages() -> None:
 
 
 def _render_summary_card_section(metrics) -> None:
-    last_refresh = metrics.last_price_refresh_at or st.session_state.last_price_refresh_at
-    last_refresh_text = f"{format_kst(last_refresh)} · {format_relative_time(last_refresh)}" if last_refresh else "미조회"
-    selected_nav = render_home_dashboard(
-        metrics=metrics,
+    render_investment_summary_card(
+        metrics,
+        portfolio_name=_current_portfolio_name(),
+        last_refresh=metrics.last_price_refresh_at or st.session_state.last_price_refresh_at,
         transactions=list(st.session_state.get("portfolio_transactions", [])),
-        cash_ledger=list(st.session_state.get("cash_ledger_entries", [])),
-        last_refresh_text=last_refresh_text,
-        save_status_text=_current_save_status_text(public_auth_enabled=_read_public_auth_settings(), dirty=_portfolio_is_dirty()),
-        sample_mode=bool(st.session_state.get(SAMPLE_PORTFOLIO_ACTIVE_KEY)),
     )
-    target = resolve_quick_nav_target(selected_nav or "")
-    if target is not None:
-        section, subtab = target
-        st.session_state[PUBLIC_SECTION_KEY] = section
-        if section == "analysis" and subtab is not None:
-            st.session_state[ANALYSIS_VIEW_KEY] = subtab
-        if section == "input" and subtab is not None:
-            st.session_state[PUBLIC_HOLDINGS_VIEW_KEY] = subtab
-        request_app_rerun()
-    with st.expander("상세 보유현황 표 보기", expanded=False):
-        render_holdings_table(metrics)
 
 
 def _render_overview_section(metrics) -> None:
@@ -1584,56 +1536,8 @@ def _render_history_section(owner_id, history_store, historical_schedule_store, 
     )
 
 
-def _render_analysis_section(owner_id, history_store, historical_schedule_store, metrics) -> None:
-    _normalize_radio_state(ANALYSIS_VIEW_KEY, ANALYSIS_VIEW_LABELS, ANALYSIS_VIEW_LEGACY_MAP, "profit")
-    with st.container(key="analysis_section_tabs"):
-        selected_view = st.radio(
-            "분석 화면",
-            list(ANALYSIS_VIEW_LABELS.keys()),
-            format_func=ANALYSIS_VIEW_LABELS.get,
-            key=ANALYSIS_VIEW_KEY,
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-    transactions = list(st.session_state.get("portfolio_transactions", []))
-    cash_ledger = list(st.session_state.get("cash_ledger_entries", []))
-    holdings = list(st.session_state.get("holdings_rows", []))
-    if selected_view == "profit":
-        render_profit_analysis_screen(metrics=metrics, transactions=transactions, cash_ledger=cash_ledger)
-        with st.expander("상세 성과분석 보기", expanded=False):
-            render_performance_analysis(
-                transactions=transactions,
-                cash_ledger=cash_ledger,
-                holdings=holdings,
-                usd_krw=float(st.session_state.usd_krw),
-                current_total_value_krw=metrics.total_value_krw,
-            )
-    elif selected_view == "tax":
-        render_tax_summary_screen(transactions=transactions, cash_ledger=cash_ledger)
-    elif selected_view == "dividend":
-        render_dividend_summary_screen(cash_ledger=cash_ledger)
-    elif selected_view == "trend":
-        render_actual_history_section(owner_id=owner_id, portfolio_name=_current_portfolio_name(), history_store=history_store)
-        with st.expander("고급 도구 · 과거 보유현황 재구성", expanded=False):
-            render_historical_reconstruction_section(
-                owner_id=owner_id,
-                historical_schedule_store=historical_schedule_store,
-                current_holdings_rows=holdings,
-                current_cash_krw=float(st.session_state.cash_krw),
-                current_cash_usd=float(st.session_state.cash_usd),
-                current_usd_krw=float(st.session_state.usd_krw),
-                is_authenticated=_is_authenticated(),
-            )
-    elif selected_view == "allocation":
-        render_allocation_analysis_screen(metrics)
-        with st.expander("기존 세부내역 보기", expanded=False):
-            render_overview(metrics)
-    else:
-        render_risk_history_section(owner_id=owner_id, portfolio_name=_current_portfolio_name(), history_store=history_store)
-
-
 def _render_journal_section() -> None:
-    render_journal_screen(
+    render_journal_tab(
         transactions=list(st.session_state.get("portfolio_transactions", [])),
         cash_ledger=list(st.session_state.get("cash_ledger_entries", [])),
         journal_notes=list(st.session_state.get("journal_notes", [])),
@@ -1668,15 +1572,17 @@ def _render_manage_section(owner_id, portfolio_store, target_allocation_store, h
 
 
 def _render_private_dashboard_sections(security_config, owner_id, portfolio_store, target_allocation_store, history_store, historical_schedule_store, metrics) -> None:
-    summary_card_tab, analysis_tab, journal_tab, holdings_tab, rebalancing_tab, manage_tab = st.tabs(["총괄현황", "분석", "매매일지", "사용자 입력", "리밸런싱", "저장 관리"])
+    summary_card_tab, overview_tab, holdings_tab, history_tab, journal_tab, rebalancing_tab, manage_tab = st.tabs(["총괄현황", "세부내역", "사용자 입력", "자산추이", "매매일지", "리밸런싱", "저장 관리"])
     with summary_card_tab:
         safe_render_section("총괄현황", lambda: _render_summary_card_section(metrics))
-    with analysis_tab:
-        safe_render_section("분석", lambda: _render_analysis_section(owner_id, history_store, historical_schedule_store, metrics))
-    with journal_tab:
-        safe_render_section("매매일지", _render_journal_section)
+    with overview_tab:
+        safe_render_section("세부내역", lambda: _render_overview_section(metrics))
     with holdings_tab:
         safe_render_section("사용자 입력", lambda: _render_holdings_section(security_config, public_auth_enabled=False))
+    with history_tab:
+        safe_render_section("자산추이", lambda: _render_history_section(owner_id, history_store, historical_schedule_store, metrics))
+    with journal_tab:
+        safe_render_section("매매일지", _render_journal_section)
     with rebalancing_tab:
         safe_render_section("리밸런싱", lambda: _render_rebalancing_section(metrics))
     with manage_tab:
@@ -1696,12 +1602,14 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
         )
     if selected_section == "summary":
         safe_render_section("총괄현황", lambda: _render_summary_card_section(metrics))
-    elif selected_section == "analysis":
-        safe_render_section("분석", lambda: _render_analysis_section(owner_id, history_store, historical_schedule_store, metrics))
-    elif selected_section == "journal":
-        safe_render_section("매매일지", _render_journal_section)
+    elif selected_section == "details":
+        safe_render_section("세부내역", lambda: _render_overview_section(metrics))
     elif selected_section == "input":
         safe_render_section("사용자입력", lambda: _render_public_holdings_section(security_config))
+    elif selected_section == "history":
+        safe_render_section("자산추이", lambda: _render_history_section(owner_id, history_store, historical_schedule_store, metrics))
+    elif selected_section == "journal":
+        safe_render_section("매매일지", _render_journal_section)
     else:
         safe_render_section("리밸런싱", lambda: _render_rebalancing_section(metrics))
 

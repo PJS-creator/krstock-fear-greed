@@ -689,6 +689,37 @@ def _render_styles() -> None:
             width: 54px;
             border-top: 1px dashed rgba(148, 163, 184, 0.36);
         }
+        .summary-split-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 16px;
+        }
+        .summary-split-card {
+            border: 1px solid var(--app-border);
+            border-radius: 8px;
+            background: var(--summary-panel-bg);
+            padding: 16px 18px;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+        }
+        .summary-split-label {
+            color: var(--app-muted);
+            font-size: 0.92rem;
+            font-weight: 760;
+        }
+        .summary-split-value {
+            color: var(--app-heading);
+            font-size: 1.58rem;
+            font-weight: 900;
+            margin-top: 6px;
+            font-variant-numeric: tabular-nums;
+            overflow-wrap: anywhere;
+        }
+        .summary-split-sub {
+            color: var(--app-muted);
+            font-size: 0.9rem;
+            margin-top: 4px;
+        }
         .summary-badge {
             display: inline-flex;
             align-items: center;
@@ -731,7 +762,7 @@ def _render_styles() -> None:
         .summary-neutral { color: var(--app-muted); }
         .summary-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; color: var(--app-muted); font-size: 0.9rem; }
         @media (max-width: 980px) {
-            .summary-top, .summary-main, .summary-kpi-grid { grid-template-columns: 1fr; }
+            .summary-top, .summary-main, .summary-split-grid, .summary-kpi-grid { grid-template-columns: 1fr; }
             .summary-heatmap-card { min-height: 360px; }
             .summary-heatmap-area { min-height: 300px; }
         }
@@ -1065,6 +1096,7 @@ def render_investment_summary_card(
     heatmap_tiles = _heatmap_tiles(allocation_rows)
     mobile_holding_summary = _mobile_holding_summary_table(metrics)
     table_rows = "".join(_holding_table_rows(metrics, transactions=transactions, as_of_date=as_of_date))
+    cash_detail = f"KRW {_krw(metrics.cash.cash_krw)} · USD ${format_number(metrics.cash.cash_usd)}"
     html = f"""
     <div class="summary-card">
         <div class="summary-top">
@@ -1095,6 +1127,18 @@ def render_investment_summary_card(
                     <div class="summary-heatmap-legend"><span class="up">상승</span><span class="down">하락</span></div>
                 </div>
                 <div class="summary-heatmap-area">{heatmap_tiles}</div>
+            </div>
+        </div>
+        <div class="summary-split-grid">
+            <div class="summary-split-card">
+                <div class="summary-split-label">투자자산</div>
+                <div class="summary-split-value">{escape(_krw(metrics.total_position_value_krw))}</div>
+                <div class="summary-split-sub">주식 평가금액 · 총자산 대비 {escape(percentage(stock_pct, digits=2))}</div>
+            </div>
+            <div class="summary-split-card">
+                <div class="summary-split-label">현금</div>
+                <div class="summary-split-value">{escape(_krw(metrics.cash_total_krw))}</div>
+                <div class="summary-split-sub">{escape(cash_detail)} · 총자산 대비 {escape(percentage(cash_pct, digits=2))}</div>
             </div>
         </div>
         {mobile_holding_summary}
