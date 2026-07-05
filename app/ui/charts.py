@@ -28,7 +28,7 @@ from .formatters import (
     signed_krw,
     signed_percentage,
 )
-from .theme import CURRENCY_COLORS, DIMENSIONS, SEMANTIC_COLORS, deterministic_color, get_active_theme, signed_color
+from .theme import DIMENSIONS, deterministic_color, get_active_theme, get_chart_palette, signed_color
 
 
 def sanitize_chart_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -105,7 +105,7 @@ def apply_plotly_theme(fig: go.Figure, theme_tokens: dict[str, str] | None = Non
             align="left",
             bgcolor=theme.chart_hover_bg,
             bordercolor=theme.chart_hover_border,
-            font=dict(family=APP_FONT_FAMILY, size=13, color="#FFFFFF"),
+            font=dict(family=APP_FONT_FAMILY, size=13, color=tokens["chart_tooltip_text"]),
         ),
     )
     fig.update_xaxes(gridcolor=tokens["chart_grid"], zerolinecolor=theme.chart_zero, tickfont=dict(color=tokens["chart_axis"]), automargin=True)
@@ -142,7 +142,7 @@ def apply_chart_layout(
             align="left",
             bgcolor=theme.chart_hover_bg,
             bordercolor=theme.chart_hover_border,
-            font=dict(family=APP_FONT_FAMILY, size=13, color="#FFFFFF"),
+            font=dict(family=APP_FONT_FAMILY, size=13, color=theme.tokens()["chart_tooltip_text"]),
         ),
         legend=dict(font=dict(size=13), itemclick="toggleothers", itemdoubleclick="toggle"),
     )
@@ -254,12 +254,14 @@ def plot_allocation(
         else ""
         for row in rows
     ]
+    tokens = theme.tokens()
+    allocation_palette = get_chart_palette(tokens, "allocation")
     colors = [
-        SEMANTIC_COLORS["cash"]
+        tokens["cash"]
         if row["ticker"] == "현금"
-        else SEMANTIC_COLORS["missing"]
+        else tokens["text_subtle"]
         if row["ticker"] == "기타"
-        else deterministic_color(row["color_key"])
+        else deterministic_color(row["color_key"], allocation_palette)
         for row in rows
     ]
     customdata = [
@@ -363,7 +365,7 @@ def plot_contribution(metrics: PortfolioMetrics, *, limit: int = 10, show_all: b
             hovertemplate="<b>%{y}</b><br>티커 %{customdata[1]}<br>변동액 %{customdata[2]}<br>변동률 %{customdata[3]}<extra></extra>",
         )
     )
-    fig.add_vline(x=0, line_color="rgba(100,116,139,0.65)", line_width=1)
+    fig.add_vline(x=0, line_color=get_active_theme().chart_axis, line_width=1)
     fig.update_layout(xaxis_title="오늘 변동액", yaxis_title="", bargap=0.32)
     fig.update_xaxes(tickformat=",.0f", tickprefix="₩")
     return apply_chart_layout(fig, height=height, hovermode="closest", showlegend=False)
@@ -377,6 +379,9 @@ def plot_currency_exposure(metrics: PortfolioMetrics) -> go.Figure | None:
     if total <= 0:
         return None
     fig = go.Figure()
+    theme = get_active_theme()
+    tokens = theme.tokens()
+    currency_colors = {"KRW": tokens["krw"], "USD": tokens["usd"], "CASH": tokens["cash"]}
     for _, row in frame.iterrows():
         currency = "USD" if "USD" in str(row["currency"]) else "KRW"
         value = float(row["value_krw"])
@@ -387,11 +392,11 @@ def plot_currency_exposure(metrics: PortfolioMetrics) -> go.Figure | None:
                 y=["통화 노출"],
                 orientation="h",
                 name=str(row["currency"]),
-                marker=dict(color=CURRENCY_COLORS[currency], line=dict(color="rgba(255,255,255,0.75)", width=1)),
+                marker=dict(color=currency_colors[currency], line=dict(color=tokens["border"], width=1)),
                 text=[f"{currency}<br>{percentage(ratio)}"],
                 textposition="inside",
                 insidetextanchor="middle",
-                textfont=dict(size=14, family=APP_FONT_FAMILY, color="#FFFFFF"),
+                textfont=dict(size=14, family=APP_FONT_FAMILY, color=tokens["chart_tooltip_text"]),
                 customdata=[[full_krw(value), percentage(ratio)]],
                 hovertemplate="%{fullData.name}<br>KRW 환산 %{customdata[0]}<br>비중 %{customdata[1]}<extra></extra>",
             )
@@ -423,6 +428,8 @@ def _history_rows(records: Iterable[PortfolioHistoryRecord], period: HistoryPeri
 
 
 def plot_total_value_history(records: list[PortfolioHistoryRecord], period: HistoryPeriod = "all") -> go.Figure | None:
+    theme = get_active_theme()
+    tokens = theme.tokens()
     rows = _history_rows(records, period)
     if len(rows) < 2:
         return None
@@ -451,9 +458,9 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
             name="총자산",
             mode="lines+markers" if marker_size else "lines",
             marker=dict(size=marker_size),
-            line=dict(color=SEMANTIC_COLORS["primary"], width=3.0, shape="spline", smoothing=0.35),
+            line=dict(color=tokens["primary"], width=3.0, shape="spline", smoothing=0.35),
             fill="tozeroy",
-            fillcolor="rgba(37,99,235,0.12)",
+            fillcolor=tokens["primary_soft"],
             customdata=customdata,
             hovertemplate=(
                 "%{customdata[0]}<br>총자산 %{customdata[1]}<br>"
@@ -467,7 +474,7 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
             y=position_values,
             name="투자자산",
             mode="lines",
-            line=dict(color=SEMANTIC_COLORS["secondary"], width=1.8, dash="dot"),
+            line=dict(color=tokens["accent"], width=1.8, dash="dot"),
             hovertemplate="투자자산 ₩%{y:,.0f}<extra></extra>",
         )
     )
@@ -477,7 +484,7 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
             y=cash_values,
             name="총현금",
             mode="lines",
-            line=dict(color=SEMANTIC_COLORS["cash"], width=1.8, dash="dot"),
+            line=dict(color=tokens["cash"], width=1.8, dash="dot"),
             hovertemplate="총현금 ₩%{y:,.0f}<extra></extra>",
         )
     )
@@ -487,6 +494,8 @@ def plot_total_value_history(records: list[PortfolioHistoryRecord], period: Hist
 
 
 def plot_transaction_cashflow(transactions: list[dict[str, object]], *, usd_krw: float) -> go.Figure | None:
+    theme = get_active_theme()
+    tokens = theme.tokens()
     rows = transaction_cashflow_rows(transactions, usd_krw=usd_krw)
     if not rows:
         return None
@@ -528,14 +537,14 @@ def plot_transaction_cashflow(transactions: list[dict[str, object]], *, usd_krw:
             y=cumulative_values,
             name="누적 순매입",
             mode="lines+markers",
-            line=dict(color=SEMANTIC_COLORS["primary"], width=3.0, shape="spline", smoothing=0.25),
+            line=dict(color=tokens["primary"], width=3.0, shape="spline", smoothing=0.25),
             marker=dict(size=6),
             customdata=customdata,
             hovertemplate="%{x}<br>누적 순매입 %{customdata[3]}<extra></extra>",
             yaxis="y2",
         )
     )
-    fig.add_hline(y=0, line_color="rgba(100,116,139,0.55)", line_width=1)
+    fig.add_hline(y=0, line_color=tokens["chart_axis"], line_width=1)
     fig.update_layout(
         xaxis_title="거래일",
         yaxis=dict(title="일별 순매입", tickformat=",.0f", tickprefix="₩"),
@@ -546,6 +555,8 @@ def plot_transaction_cashflow(transactions: list[dict[str, object]], *, usd_krw:
 
 
 def plot_reconstructed_total_value(result: ReconstructionResult, *, include_cash: bool = True) -> go.Figure | None:
+    theme = get_active_theme()
+    tokens = theme.tokens()
     if not result.daily_rows:
         return None
     x_values = [row.date for row in result.daily_rows]
@@ -571,10 +582,10 @@ def plot_reconstructed_total_value(result: ReconstructionResult, *, include_cash
             y=y_values,
             name="총자산" if include_cash else "투자자산",
             mode="lines+markers" if len(x_values) <= 12 else "lines",
-            line=dict(color=SEMANTIC_COLORS["primary"], width=3.0, shape="spline", smoothing=0.35),
+            line=dict(color=tokens["primary"], width=3.0, shape="spline", smoothing=0.35),
             marker=dict(size=6 if len(x_values) <= 12 else 0),
             fill="tozeroy",
-            fillcolor="rgba(37,99,235,0.12)",
+            fillcolor=tokens["primary_soft"],
             customdata=customdata,
             hovertemplate=(
                 "%{customdata[0]}<br>"
@@ -588,13 +599,16 @@ def plot_reconstructed_total_value(result: ReconstructionResult, *, include_cash
         )
     )
     for marker in sorted({row.applied_snapshot_date for row in result.daily_rows}):
-        fig.add_vline(x=marker, line_color="rgba(217,119,6,0.55)", line_width=1, line_dash="dot")
+        fig.add_vline(x=marker, line_color=tokens["warning"], line_width=1, line_dash="dot")
     fig.update_layout(yaxis_title="KRW", xaxis_title="", legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     fig.update_yaxes(tickformat=",.0f", tickprefix="₩")
     return apply_chart_layout(fig, height=DIMENSIONS.default_height, hovermode="x unified")
 
 
 def plot_reconstructed_holdings_area(result: ReconstructionResult, *, top_n: int = 8) -> go.Figure | None:
+    theme = get_active_theme()
+    tokens = theme.tokens()
+    allocation_palette = get_chart_palette(tokens, "allocation")
     rows = build_ticker_value_series(result, top_n=top_n)
     if not rows:
         return None
@@ -624,7 +638,7 @@ def plot_reconstructed_holdings_area(result: ReconstructionResult, *, top_n: int
                 name=str(display_names.get(ticker, ticker)) if str(display_names.get(ticker, ticker)) != ticker else ticker,
                 mode="lines",
                 stackgroup="one",
-                line=dict(width=1.1, color=SEMANTIC_COLORS["missing"] if ticker == "기타" else deterministic_color(ticker)),
+                line=dict(width=1.1, color=tokens["text_subtle"] if ticker == "기타" else deterministic_color(ticker, allocation_palette)),
                 customdata=customdata,
                 hovertemplate=(
                     f"<b>%{{customdata[0]}}</b><br>"
