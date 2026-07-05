@@ -76,11 +76,26 @@ __CSS_VARS__
             box-shadow: var(--app-shadow-sm);
             min-height: 118px;
             height: 100%;
+            padding: var(--token-card-padding-compact) var(--token-card-padding) !important;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: stretch;
+            gap: var(--token-space-1);
+        }
+        div[data-testid="stMetric"] > div {
+            width: 100%;
         }
         div[data-testid="stMetricLabel"],
-        div[data-testid="stMetricLabel"] * {
-            color: var(--app-muted) !important;
+        div[data-testid="stMetricLabel"] *,
+        div[data-testid="stMetricLabel"] svg,
+        div[data-testid="stMetricLabel"] path {
+            color: var(--token-text-muted) !important;
+            fill: var(--token-text-muted) !important;
+            stroke: var(--token-text-muted) !important;
             font-size: 0.98rem;
+            font-weight: 760;
+            line-height: var(--token-line-height-normal);
             opacity: 1 !important;
         }
         div[data-testid="stMetricValue"],
@@ -153,6 +168,16 @@ __CSS_VARS__
             color: var(--app-text) !important;
             border-color: var(--app-border) !important;
         }
+        div[data-testid="stDataFrame"] [role="grid"],
+        div[data-testid="stDataEditor"] [role="grid"],
+        div[data-testid="stDataFrame"] [role="rowgroup"],
+        div[data-testid="stDataEditor"] [role="rowgroup"],
+        div[data-testid="stDataFrame"] [role="gridcell"],
+        div[data-testid="stDataEditor"] [role="gridcell"],
+        div[data-testid="stDataFrame"] canvas,
+        div[data-testid="stDataEditor"] canvas {
+            background: var(--app-panel) !important;
+        }
         div[data-testid="stDataFrame"] [role="columnheader"],
         div[data-testid="stDataEditor"] [role="columnheader"] {
             background: var(--app-table-header) !important;
@@ -169,6 +194,81 @@ __CSS_VARS__
         div[data-testid="stDataFrame"] [role="row"]:hover,
         div[data-testid="stDataEditor"] [role="row"]:hover {
             background: var(--app-table-hover) !important;
+        }
+        .app-data-table-wrap {
+            width: 100%;
+            overflow-x: auto;
+            border: 1px solid var(--app-border);
+            border-radius: var(--token-radius-md);
+            background: var(--app-panel);
+            box-shadow: var(--app-shadow-sm);
+            margin-bottom: var(--token-space-4);
+        }
+        .app-data-table {
+            width: 100%;
+            border-collapse: collapse;
+            color: var(--app-text);
+            font-size: var(--token-font-sm);
+            line-height: var(--token-line-height-normal);
+            font-variant-numeric: tabular-nums;
+        }
+        .app-data-table th,
+        .app-data-table td {
+            min-height: var(--token-table-min-row-height);
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--app-border);
+            background: var(--app-panel);
+            color: var(--app-text);
+            vertical-align: middle;
+            white-space: nowrap;
+        }
+        .app-data-table th {
+            background: var(--app-table-header);
+            color: var(--app-heading);
+            font-weight: 800;
+            text-align: left;
+        }
+        .app-data-table tr:nth-child(even) td {
+            background: var(--token-table-row-alt-bg);
+        }
+        .app-data-table tbody tr:hover td {
+            background: var(--app-table-hover);
+        }
+        .app-data-table tbody tr:last-child td {
+            border-bottom: 0;
+        }
+        .app-data-table .num,
+        .app-data-table .pct {
+            text-align: right;
+        }
+        .app-data-table .center {
+            text-align: center;
+        }
+        .app-table-progress {
+            display: inline-grid;
+            grid-template-columns: minmax(5.2rem, 1fr) 3.5rem;
+            align-items: center;
+            gap: var(--token-space-2);
+            width: 100%;
+            min-width: 9rem;
+        }
+        .app-table-progress-track {
+            height: 0.42rem;
+            border-radius: var(--token-radius-pill);
+            background: var(--app-surface-alt);
+            border: 1px solid var(--app-border);
+            overflow: hidden;
+        }
+        .app-table-progress-fill {
+            display: block;
+            height: 100%;
+            border-radius: inherit;
+            background: var(--app-primary);
+        }
+        .app-table-progress-value {
+            color: var(--app-text);
+            font-weight: 760;
+            text-align: right;
         }
         div[data-testid="stWidgetLabel"],
         div[data-testid="stWidgetLabel"] *,
@@ -193,9 +293,25 @@ __CSS_VARS__
             box-shadow: var(--app-shadow-sm);
             margin-bottom: var(--token-space-3);
         }
-        div[data-testid="stExpander"] summary {
-            color: var(--app-heading);
+        div[data-testid="stExpander"] details > summary,
+        div[data-testid="stExpander"] details > summary:hover,
+        div[data-testid="stExpander"] details[open] > summary {
+            background: var(--app-panel) !important;
+            color: var(--app-heading) !important;
+            border-radius: var(--token-radius-md) var(--token-radius-md) 0 0;
             font-weight: 760;
+        }
+        div[data-testid="stExpander"] details[open] > summary {
+            border-bottom: 1px solid var(--app-border) !important;
+        }
+        div[data-testid="stExpander"] summary,
+        div[data-testid="stExpander"] summary *,
+        div[data-testid="stExpander"] summary svg,
+        div[data-testid="stExpander"] summary path {
+            color: var(--app-heading) !important;
+            fill: var(--app-heading) !important;
+            stroke: var(--app-heading) !important;
+            opacity: 1 !important;
         }
         section[data-testid="stSidebar"] {
             background: var(--app-surface);
@@ -804,6 +920,9 @@ __CSS_VARS__
             div[data-testid="stDataFrame"],
             div[data-testid="stDataEditor"] {
                 overflow-x: auto;
+            }
+            .holdings-data-table-wrap {
+                display: none;
             }
             .mobile-holdings-cards {
                 display: grid;

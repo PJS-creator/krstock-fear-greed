@@ -58,6 +58,30 @@ SHORT_STATUS_LABELS = {
     "수동입력값": "수동",
     "티커미확인": "미확인",
 }
+HOLDINGS_TABLE_LABELS = {
+    "ticker": "ticker",
+    "종목": "종목",
+    "종목명": "종목명",
+    "시장": "시장",
+    "수량 표시": "수량",
+    "통화": "통화",
+    "평균단가 표시": "평균단가",
+    "최근 제공 가격 표시": "최근가",
+    "평가액 표시": "평가액",
+    "오늘 변동액": "오늘 변동액",
+    "오늘 변동률": "오늘 변동률",
+    "비중": "비중",
+    "가격 상태": "가격 상태",
+    "조회 시각": "조회 시각",
+    "가격 기준일": "가격 기준일",
+    "기준시각": "기준시각",
+    "출처": "출처",
+    "오류": "오류",
+    "provider": "provider",
+    "비중 표시": "비중 표시",
+}
+RIGHT_ALIGN_COLUMNS = {"수량 표시", "평균단가 표시", "최근 제공 가격 표시", "평가액 표시", "오늘 변동액", "오늘 변동률", "비중", "비중 표시"}
+CENTER_ALIGN_COLUMNS = {"시장", "통화", "가격 상태", "조회 시각", "가격 기준일", "기준시각", "출처", "provider"}
 
 
 def short_quote_status_label(status: object) -> str:
@@ -367,6 +391,74 @@ def _render_mobile_holdings_cards(frame: pd.DataFrame) -> None:
     st.markdown(_mobile_holdings_cards_html(frame), unsafe_allow_html=True)
 
 
+def _display_text(value: object) -> str:
+    try:
+        if pd.isna(value):
+            return "-"
+    except (TypeError, ValueError):
+        pass
+    text = str(value or "").strip()
+    return text or "-"
+
+
+def _progress_cell_html(value: object) -> str:
+    try:
+        numeric = max(0.0, min(float(value or 0.0), 100.0))
+    except (TypeError, ValueError):
+        numeric = 0.0
+    label = f"{numeric:.1f}%"
+    return (
+        "<div class='app-table-progress'>"
+        "<span class='app-table-progress-track'>"
+        f"<span class='app-table-progress-fill' style='width:{numeric:.2f}%'></span>"
+        "</span>"
+        f"<span class='app-table-progress-value'>{escape(label)}</span>"
+        "</div>"
+    )
+
+
+def _cell_class(column: str, value: object) -> str:
+    classes = []
+    if column in RIGHT_ALIGN_COLUMNS:
+        classes.append("num")
+    if column in CENTER_ALIGN_COLUMNS:
+        classes.append("center")
+    if column in {"오늘 변동액", "오늘 변동률"}:
+        text = _display_text(value)
+        if text.startswith("+"):
+            classes.append("mobile-holding-up")
+        elif text.startswith("-"):
+            classes.append("mobile-holding-down")
+    return " ".join(classes)
+
+
+def _holdings_table_html(frame: pd.DataFrame, columns: list[str]) -> str:
+    headers = "".join(f"<th>{escape(HOLDINGS_TABLE_LABELS.get(column, column))}</th>" for column in columns)
+    body_rows = []
+    for _, row in frame[columns].iterrows():
+        cells = []
+        for column in columns:
+            value = row.get(column)
+            cell_class = _cell_class(column, value)
+            class_attr = f" class='{cell_class}'" if cell_class else ""
+            if column == "비중":
+                cell_html = _progress_cell_html(value)
+            else:
+                cell_html = escape(_display_text(value))
+            cells.append(f"<td{class_attr}>{cell_html}</td>")
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+    if not body_rows:
+        body_rows.append(f"<tr><td colspan='{len(columns)}'>표시할 보유 종목이 없습니다.</td></tr>")
+    return (
+        "<div class='app-data-table-wrap holdings-data-table-wrap'>"
+        "<table class='app-data-table holdings-data-table'>"
+        f"<thead><tr>{headers}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        "</table>"
+        "</div>"
+    )
+
+
 def render_holdings_table(metrics: PortfolioMetrics) -> None:
     st.subheader("보유 현황")
     rows = _holdings_table_rows(metrics)
@@ -405,28 +497,4 @@ def render_holdings_table(metrics: PortfolioMetrics) -> None:
     detail_columns = ["ticker", "종목명", "통화", "평균단가 표시", "오늘 변동률", "가격 기준일", "기준시각", "출처", "오류", "provider", "비중 표시"]
     visible_columns = base_columns + detail_columns if show_details else base_columns
     _render_mobile_holdings_cards(frame)
-    st.dataframe(
-        frame[visible_columns],
-        hide_index=True,
-        width="stretch",
-        height=min(DIMENSIONS.max_table_height, 100 + len(frame) * DIMENSIONS.row_height),
-        column_config={
-            "종목": st.column_config.TextColumn("종목"),
-            "ticker": st.column_config.TextColumn("ticker"),
-            "종목명": st.column_config.TextColumn("종목명"),
-            "시장": st.column_config.TextColumn("시장"),
-            "수량 표시": st.column_config.TextColumn("수량"),
-            "평균단가 표시": st.column_config.TextColumn("평균단가"),
-            "최근 제공 가격 표시": st.column_config.TextColumn("최근가"),
-            "평가액 표시": st.column_config.TextColumn("평가액"),
-            "오늘 변동액": st.column_config.TextColumn("오늘 변동액"),
-            "오늘 변동률": st.column_config.TextColumn("오늘 변동률"),
-            "비중": st.column_config.ProgressColumn("비중", min_value=0, max_value=100, format="%.1f%%"),
-            "가격 상태": st.column_config.TextColumn("가격 상태"),
-            "조회 시각": st.column_config.TextColumn("조회 시각"),
-            "가격 기준일": st.column_config.TextColumn("가격 기준일"),
-            "기준시각": st.column_config.TextColumn("기준시각"),
-            "출처": st.column_config.TextColumn("출처"),
-            "오류": st.column_config.TextColumn("오류"),
-        },
-    )
+    st.markdown(_holdings_table_html(frame, visible_columns), unsafe_allow_html=True)
