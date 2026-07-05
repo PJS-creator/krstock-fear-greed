@@ -166,7 +166,7 @@ def _heatmap_tone(change_pct: float | None) -> str:
 
 
 def _font_size_for_weight(weight: float) -> float:
-    return max(0.78, min(1.85, 0.72 + math.sqrt(max(weight, 0.0)) * 2.15))
+    return max(0.66, min(1.85, 0.62 + math.sqrt(max(weight, 0.0)) * 2.0))
 
 
 def _safe_date(value: object | None) -> date | None:
@@ -307,20 +307,6 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
                 "kind": "holding",
             }
         )
-    if metrics.cash_total_krw > 0:
-        rows.append(
-            {
-                "label": "현금",
-                "detail": "원화/달러 현금",
-                "value_krw": metrics.cash_total_krw,
-                "weight": metrics.cash_total_krw / total if total else 0.0,
-                "color": tokens["cash"],
-                "heat_color": tokens["neutral_value"],
-                "day_change_pct": 0.0,
-                "day_change_krw": 0.0,
-                "kind": "cash",
-            }
-        )
     rows = sorted(rows, key=_sort_key, reverse=True)
     if len(rows) <= max_items:
         return rows
@@ -344,6 +330,21 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
         }
     )
     return kept
+
+
+def _cash_allocation_row(metrics: PortfolioMetrics) -> dict[str, Any] | None:
+    if metrics.cash_total_krw <= 0:
+        return None
+    tokens = get_active_theme().tokens()
+    total = metrics.total_value_krw
+    return {
+        "label": "현금",
+        "detail": "KRW/USD 현금",
+        "value_krw": metrics.cash_total_krw,
+        "weight": metrics.cash_total_krw / total if total else 0.0,
+        "color": tokens["cash"],
+        "kind": "cash",
+    }
 
 
 def _split_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -403,7 +404,9 @@ def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
         change_pct = row.get("day_change_pct")
         change_text = signed_percentage(change_pct) if change_pct is not None else "-"
         font_size = _font_size_for_weight(weight)
-        show_text = weight >= 0.035 and float(row.get("width") or 0.0) >= 12 and float(row.get("height") or 0.0) >= 12
+        tile_width = float(row.get("width") or 0.0)
+        tile_height = float(row.get("height") or 0.0)
+        show_text = weight >= 0.015 and tile_width >= 7 and tile_height >= 7
         label_html = f"<div class='summary-heatmap-name'>{escape(str(row['label']))}</div>" if show_text else ""
         change_html = f"<div class='summary-heatmap-change'>{escape(change_text)}</div>" if show_text else ""
         tiles.append(
@@ -434,24 +437,36 @@ def _holding_table_rows(
     as_of_date: date | None = None,
 ) -> list[str]:
     rows = []
+    normalized_transactions = _normalized_transactions(transactions)
+    irr_date = as_of_date or datetime.now(KST).date()
     for item in sorted(metrics.rows, key=lambda row: row.market_value_krw or 0.0, reverse=True):
         holding = item.holding
         label = escape(instrument_label(holding))
         color = deterministic_color(holding.get("ticker") or label)
         quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
+        avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
+        purchase_amount = "-"
+        if holding.get("avg_price") is not None:
+            purchase_amount = format_price(float(holding.get("avg_price") or 0.0) * float(holding.get("quantity") or 0.0), holding.get("currency"))
         current_price = format_price(holding.get("current_price"), holding.get("currency"))
         day_change = _price_change_text(holding)
         pnl_pct = signed_percentage(item.total_pnl_pct) if item.total_pnl_pct is not None else "-"
         day_change_class = _signed_class(_holding_day_change_price(holding))
         day_change_value = _holding_day_change_price(holding)
+        irr = _holding_irr(holding, normalized_transactions, as_of_date=irr_date)
+        irr_text = signed_percentage(irr) if irr is not None else "-"
         rows.append(
             "<tr>"
             f"<td class='summary-name'><span style='background:{color}'></span>{label}</td>"
             f"<td>{escape(quantity)}</td>"
+            f"<td>{escape(avg_price)}</td>"
+            f"<td>{escape(purchase_amount)}</td>"
             f"<td>{escape(current_price)}</td>"
-            f"<td>{escape(_krw(item.market_value_krw))}</td>"
+            f"<td class='summary-sparkline-cell'>{_sparkline_html(holding)}</td>"
             f"<td class='{day_change_class}'>{_badge_html(day_change_value, day_change)}</td>"
             f"<td>{_badge_html(item.total_pnl_pct, pnl_pct)}</td>"
+            f"<td>{_badge_html(irr, irr_text)}</td>"
+            f"<td>{escape(_krw(item.market_value_krw))}</td>"
             f"<td>{escape(percentage(item.weight, digits=2))}</td>"
             "</tr>"
         )
@@ -459,20 +474,23 @@ def _holding_table_rows(
         rows.append(
             "<tr>"
             "<td class='summary-name'><span style='background:var(--app-cash)'></span>현금</td>"
-            "<td>-</td><td>-</td>"
+            "<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>"
             f"<td>{escape(_krw(metrics.cash_total_krw))}</td>"
-            "<td>-</td><td>-</td>"
             f"<td>{escape(percentage(metrics.cash_total_krw / metrics.total_value_krw if metrics.total_value_krw else 0, digits=2))}</td>"
             "</tr>"
         )
+    portfolio_irr = _portfolio_irr(metrics, normalized_transactions, as_of_date=irr_date)
     total_day_text = f"{_signed_text(metrics.day_change_krw, signed_krw)} ({_signed_text(metrics.day_change_pct, signed_percentage)})"
     rows.append(
         "<tr class='summary-total-row'>"
         "<td>합계 (주식 평가금액 + 현금)</td><td>-</td><td>-</td>"
-        f"<td>{escape(_krw(metrics.total_value_krw))}</td>"
+        f"<td>{escape(_krw(metrics.total_cost_krw) if metrics.total_cost_krw else '-')}</td>"
+        "<td>-</td>"
+        "<td>-</td>"
         f"<td>{_badge_html(metrics.day_change_krw, total_day_text)}</td>"
         f"<td>{_badge_html(metrics.total_pnl_pct, _signed_text(metrics.total_pnl_pct, signed_percentage))}</td>"
-        "<td>100.00%</td>"
+        f"<td>{_badge_html(portfolio_irr, signed_percentage(portfolio_irr) if portfolio_irr is not None else '-')}</td>"
+        f"<td>{escape(_krw(metrics.total_value_krw))}</td><td>100.00%</td>"
         "</tr>"
     )
     return rows
@@ -580,6 +598,26 @@ def _render_styles() -> None:
         .summary-dot { width: 14px; height: 14px; border-radius: 50%; display: inline-block; }
         .summary-legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .summary-legend-pct { text-align: right; font-variant-numeric: tabular-nums; }
+        .summary-asset-group {
+            padding: 10px 0;
+            border-bottom: 1px solid var(--app-border);
+        }
+        .summary-asset-group:first-of-type { padding-top: 0; }
+        .summary-asset-group-cash { border-bottom: 0; }
+        .summary-asset-group-head {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 8px;
+            color: var(--app-heading);
+            font-size: 0.94rem;
+            font-weight: 850;
+        }
+        .summary-empty-line {
+            color: var(--app-muted);
+            font-size: 0.9rem;
+            padding: 6px 0 8px;
+        }
         .summary-legend-total { border-top: 1px solid var(--app-border); margin-top: 12px; padding-top: 14px; color: var(--app-positive); text-align: center; font-size: 1.18rem; font-weight: 850; }
         .summary-heatmap-card {
             padding: 18px;
@@ -627,7 +665,7 @@ def _render_styles() -> None:
             justify-content: center;
             text-align: center;
             line-height: 1.15;
-            padding: 6px;
+            padding: 4px;
             overflow: hidden;
             text-shadow: none;
             box-shadow: inset 0 -24px 58px var(--token-overlay);
@@ -635,9 +673,14 @@ def _render_styles() -> None:
         .summary-heatmap-name {
             font-weight: 900;
             max-width: 100%;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
             overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+            text-overflow: clip;
+            white-space: normal;
+            word-break: keep-all;
+            overflow-wrap: anywhere;
         }
         .summary-heatmap-change { font-size: 0.82em; margin-top: 6px; font-weight: 760; font-variant-numeric: tabular-nums; }
         .summary-heatmap-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--app-muted); }
@@ -645,24 +688,51 @@ def _render_styles() -> None:
         .summary-table-wrap { margin-top: 16px; overflow: hidden; }
         .summary-table-wrap h3 { padding: 16px 20px; margin: 0; border-bottom: 1px solid var(--app-border); }
         .summary-table-scroll { overflow-x: auto; }
-        .summary-table { width: 100%; min-width: 860px; border-collapse: collapse; font-size: 0.93rem; }
-        .summary-table th, .summary-table td { border-bottom: 1px solid var(--app-border); padding: 10px 12px; text-align: right; font-variant-numeric: tabular-nums; }
+        .summary-table {
+            width: 100%;
+            min-width: 0;
+            table-layout: fixed;
+            border-collapse: collapse;
+            font-size: clamp(0.68rem, 0.63vw, 0.79rem);
+            line-height: 1.22;
+        }
+        .summary-table th, .summary-table td {
+            border-bottom: 1px solid var(--app-border);
+            padding: 8px 5px;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            vertical-align: middle;
+        }
         .summary-table th { color: var(--app-muted); font-weight: 760; background: var(--app-table-header); }
         .summary-table tbody tr:not(.summary-total-row):hover td { background: var(--app-table-hover); }
         .summary-table th:first-child, .summary-table td:first-child { text-align: left; }
-        .summary-name { min-width: 190px; }
-        .summary-name span { width: 13px; height: 13px; display: inline-block; border-radius: 50%; margin-right: 9px; vertical-align: -1px; }
-        .summary-sparkline-th, .summary-sparkline-cell { text-align: center !important; width: 112px; }
+        .summary-col-name { width: 13.5%; }
+        .summary-col-qty { width: 7%; }
+        .summary-col-avg { width: 8.3%; }
+        .summary-col-cost { width: 8.7%; }
+        .summary-col-price { width: 8.2%; }
+        .summary-col-spark { width: 8.2%; }
+        .summary-col-day { width: 11.2%; }
+        .summary-col-pnl { width: 8%; }
+        .summary-col-irr { width: 7.5%; }
+        .summary-col-value { width: 11%; }
+        .summary-col-weight { width: 8.4%; }
+        .summary-name { min-width: 0; }
+        .summary-name span { width: 10px; height: 10px; display: inline-block; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+        .summary-sparkline-th, .summary-sparkline-cell { text-align: center !important; }
         .summary-sparkline {
-            width: 92px;
-            height: 32px;
+            width: 70px;
+            height: 26px;
             display: inline-grid;
             place-items: center;
-            border-radius: 8px;
+            border-radius: 7px;
             background: var(--app-surface-alt);
             border: 1px solid var(--app-border);
         }
-        .summary-sparkline svg { width: 86px; height: 26px; display: block; overflow: visible; }
+        .summary-sparkline svg { width: 64px; height: 20px; display: block; overflow: visible; }
         .summary-sparkline polyline {
             fill: none;
             stroke: currentColor;
@@ -715,13 +785,15 @@ def _render_styles() -> None:
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            min-width: 68px;
-            padding: 4px 8px;
+            min-width: 0;
+            max-width: 100%;
+            padding: 3px 6px;
             border-radius: 999px;
             font-weight: 820;
-            line-height: 1.15;
+            line-height: 1.12;
             white-space: nowrap;
             border: 1px solid var(--app-border);
+            font-size: 0.92em;
         }
         .summary-badge.summary-up { color: var(--summary-up-text); background: var(--summary-up-bg); border-color: var(--summary-up-border); }
         .summary-badge.summary-down { color: var(--summary-down-text); background: var(--summary-down-bg); border-color: var(--summary-down-border); }
@@ -982,11 +1054,15 @@ def _render_styles() -> None:
             }
             .summary-table td:nth-child(1):before { display: none; }
             .summary-table td:nth-child(2):before { content: "수량"; }
-            .summary-table td:nth-child(3):before { content: "현재가"; }
-            .summary-table td:nth-child(4):before { content: "평가액"; }
-            .summary-table td:nth-child(5):before { content: "전일 대비"; }
-            .summary-table td:nth-child(6):before { content: "평가 수익률"; }
-            .summary-table td:nth-child(7):before { content: "자산 비중"; }
+            .summary-table td:nth-child(3):before { content: "평균단가"; }
+            .summary-table td:nth-child(4):before { content: "매입금액"; }
+            .summary-table td:nth-child(5):before { content: "현재가"; }
+            .summary-table td:nth-child(6):before { content: "당일 흐름"; }
+            .summary-table td:nth-child(7):before { content: "전일 대비"; }
+            .summary-table td:nth-child(8):before { content: "평가 수익률"; }
+            .summary-table td:nth-child(9):before { content: "IRR"; }
+            .summary-table td:nth-child(10):before { content: "평가액"; }
+            .summary-table td:nth-child(11):before { content: "자산 비중"; }
             .summary-name {
                 min-width: 0;
             }
@@ -1072,7 +1148,7 @@ def render_investment_summary_card(
         _kpi_card("투자원금", seed_label, _coverage_label(metrics), "default", "Σ"),
         _kpi_card("환율", f"{format_number(metrics.usd_krw)}원 / USD", "미국 주식 및 달러 현금 환산", "default", "FX"),
     ]
-    legend_rows = "".join(
+    investment_legend_rows = "".join(
         "<div class='summary-legend-row'>"
         f"<span class='summary-dot' style='background:{row['color']}'></span>"
         f"<span class='summary-legend-name'>{escape(str(row['label']))}</span>"
@@ -1080,6 +1156,20 @@ def render_investment_summary_card(
         "</div>"
         for row in allocation_rows
     )
+    if not investment_legend_rows:
+        investment_legend_rows = "<div class='summary-empty-line'>보유 종목 없음</div>"
+    cash_row = _cash_allocation_row(metrics)
+    cash_legend_rows = ""
+    if cash_row is not None:
+        cash_legend_rows = (
+            "<div class='summary-legend-row summary-cash-row'>"
+            f"<span class='summary-dot' style='background:{cash_row['color']}'></span>"
+            f"<span class='summary-legend-name'>{escape(str(cash_row['label']))}</span>"
+            f"<span class='summary-legend-pct'>{escape(percentage(float(cash_row['weight']), digits=2))}</span>"
+            "</div>"
+        )
+    else:
+        cash_legend_rows = "<div class='summary-empty-line'>현금 없음</div>"
     heatmap_tiles = _heatmap_tiles(allocation_rows)
     mobile_holding_summary = _mobile_holding_summary_table(metrics)
     table_rows = "".join(_holding_table_rows(metrics, transactions=transactions, as_of_date=as_of_date))
@@ -1089,7 +1179,6 @@ def render_investment_summary_card(
         <div class="summary-top">
             <div class="summary-title">
                 <h2>총괄현황</h2>
-                <p>{escape(portfolio_name)} · 총자산 기준</p>
             </div>
             <div class="summary-top-box">
                 <div class="summary-top-label">기준일</div>
@@ -1105,8 +1194,15 @@ def render_investment_summary_card(
         <div class="summary-main">
             <div class="summary-panel">
                 <h3>자산 비중</h3>
-                {legend_rows}
-                <div class="summary-legend-total">총 100%</div>
+                <div class="summary-asset-group">
+                    <div class="summary-asset-group-head"><span>투자</span><strong>{escape(percentage(stock_pct, digits=2))}</strong></div>
+                    {investment_legend_rows}
+                </div>
+                <div class="summary-asset-group summary-asset-group-cash">
+                    <div class="summary-asset-group-head"><span>현금</span><strong>{escape(percentage(cash_pct, digits=2))}</strong></div>
+                    {cash_legend_rows}
+                </div>
+                <div class="summary-legend-total">투자 + 현금 100%</div>
             </div>
             <div class="summary-panel summary-heatmap-card">
                 <div class="summary-heatmap-head">
@@ -1133,15 +1229,32 @@ def render_investment_summary_card(
             <h3>보유 종목</h3>
             <div class="summary-table-scroll">
                 <table class="summary-table">
+                    <colgroup>
+                        <col class="summary-col-name" />
+                        <col class="summary-col-qty" />
+                        <col class="summary-col-avg" />
+                        <col class="summary-col-cost" />
+                        <col class="summary-col-price" />
+                        <col class="summary-col-spark" />
+                        <col class="summary-col-day" />
+                        <col class="summary-col-pnl" />
+                        <col class="summary-col-irr" />
+                        <col class="summary-col-value" />
+                        <col class="summary-col-weight" />
+                    </colgroup>
                     <thead>
                         <tr>
                             <th>종목명</th>
                             <th>보유 수량</th>
-                            <th>현재 주가</th>
+                            <th>평균단가</th>
+                            <th>매입금액</th>
+                            <th>현재가</th>
+                            <th class="summary-sparkline-th">당일 흐름</th>
+                            <th>전일대비</th>
+                            <th>수익률</th>
+                            <th>IRR</th>
                             <th>평가금액</th>
-                            <th>전일 대비 증감</th>
-                            <th>평가 수익률 (%)</th>
-                            <th>자산 비중 (%)</th>
+                            <th>비중</th>
                         </tr>
                     </thead>
                     <tbody>{table_rows}</tbody>
