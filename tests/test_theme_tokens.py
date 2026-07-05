@@ -48,3 +48,11 @@ def test_status_tokens_are_semantic_not_pnl_aliases():
         assert failed["color"] == tokens["danger"]
         assert success["color"] != tokens["profit"]
         assert failed["color"] != tokens["loss"]
+
+
+def test_dark_mode_input_tokens_are_visible_against_page_background():
+    tokens = get_theme_tokens("dark")
+
+    assert tokens["input_bg"] != tokens["bg"]
+    assert tokens["input_border"] == tokens["border_strong"]
+    assert tokens["input_text"] != tokens["input_bg"]
