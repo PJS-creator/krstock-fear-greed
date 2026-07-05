@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from app.ui.formatters import (
     compact_krw,
+    eok_man_krw,
     format_number,
     format_price,
     format_kst,
@@ -21,6 +22,14 @@ def test_compact_and_full_krw_formatting():
     assert compact_krw(199_145_337) == "1억 9,915만 원"
     assert compact_krw(0) == "0원"
     assert full_krw(84_190_000) == "₩84,190,000"
+
+
+def test_eok_man_krw_keeps_eok_unit_visible():
+    assert eok_man_krw(0) == "0원"
+    assert eok_man_krw(84_190_000) == "8,419만 원"
+    assert eok_man_krw(100_000_000) == "1억 0,000만 원"
+    assert eok_man_krw(199_145_337) == "1억 9,915만 원"
+    assert eok_man_krw(-120_000_000) == "-1억 2,000만 원"
 
 
 def test_signed_amount_and_percentage_formatting():

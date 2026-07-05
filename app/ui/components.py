@@ -14,7 +14,7 @@ from portfolio.history import PortfolioHistoryRecord
 from portfolio.holdings import PortfolioMetrics
 from portfolio.sample_data import sample_portfolio
 
-from .formatters import compact_krw, full_krw, instrument_label, percentage, signed_krw, signed_percentage
+from .formatters import compact_krw, eok_man_krw, full_krw, instrument_label, percentage, signed_krw, signed_percentage
 from .stability import begin_ui_action, request_app_rerun
 from .status import aggregate_price_statuses, build_price_log_rows, present_diagnostic, quote_status_label, split_diagnostics
 from .theme import DIMENSIONS, chart_config
@@ -40,20 +40,65 @@ def render_metric_card(
     status: str = "neutral",
     help_text: str | None = None,
 ) -> None:
-    status = status if status in {"success", "warning", "danger", "info", "neutral"} else "neutral"
-    delta_html = f"<div class='app-metric-delta'>{escape(str(delta))}</div>" if delta not in (None, "") else ""
-    help_html = f"<div class='app-metric-help'>{escape(help_text)}</div>" if help_text else ""
     st.markdown(
-        (
-            f"<div class='app-metric-card app-metric-{status}'>"
-            f"<div class='app-metric-title'>{escape(title)}</div>"
-            f"<div class='app-metric-value'>{escape(str(value))}</div>"
-            f"{delta_html}"
-            f"{help_html}"
-            "</div>"
-        ),
+        _metric_card_html(title, value, delta=delta, status=status, help_text=help_text),
         unsafe_allow_html=True,
     )
+
+
+def _metric_card_html(
+    title: str,
+    value: object,
+    *,
+    delta: object | None = None,
+    status: str = "neutral",
+    help_text: str | None = None,
+) -> str:
+    status = status if status in {"success", "warning", "danger", "info", "neutral", "profit", "loss"} else "neutral"
+    delta_html = f"<div class='app-metric-delta'>{escape(str(delta))}</div>" if delta not in (None, "") else ""
+    help_html = f"<div class='app-metric-help'>{escape(help_text)}</div>" if help_text else ""
+    return (
+        f"<div class='app-metric-card app-metric-{status}'>"
+        f"<div class='app-metric-title'>{escape(title)}</div>"
+        f"<div class='app-metric-value'>{escape(str(value))}</div>"
+        f"{delta_html}"
+        f"{help_html}"
+        "</div>"
+    )
+
+
+def render_metric_card_grid(cards: list[dict[str, object]]) -> None:
+    if not cards:
+        return
+    st.markdown(
+        "<div class='metric-grid'>"
+        + "".join(
+            _metric_card_html(
+                str(card.get("title", "")),
+                card.get("value", ""),
+                delta=card.get("delta"),
+                status=str(card.get("status") or "neutral"),
+                help_text=str(card["help_text"]) if card.get("help_text") not in (None, "") else None,
+            )
+            for card in cards
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _pnl_status(value: float | None) -> str:
+    if value is None or value == 0:
+        return "neutral"
+    return "profit" if value > 0 else "loss"
+
+
+def _diagnostic_status(severity_label: str) -> str:
+    if severity_label == "확인 필요":
+        return "warning"
+    if severity_label == "데이터 부족":
+        return "info"
+    return "success"
 
 
 def render_app_header(
@@ -201,36 +246,38 @@ def render_empty_portfolio() -> None:
 
 
 def render_kpi_cards(metrics: PortfolioMetrics, *, history_records: list[PortfolioHistoryRecord] | None = None) -> None:
-    col1, col2, col3, col4 = st.columns(4, gap="small")
-    col1.metric(
-        "총자산",
-        compact_krw(metrics.total_value_krw),
-        help=f"KRW 환산 총자산입니다. 전체 금액: {full_krw(metrics.total_value_krw)}",
-        border=True,
-    )
-    col2.metric(
-        "오늘 변동",
-        signed_krw(metrics.day_change_krw),
-        delta=signed_percentage(metrics.day_change_pct) if metrics.day_change_pct is not None else None,
-        help=f"최근 제공 가격과 전일 종가 차이로 계산합니다. 전체 금액: {full_krw(metrics.day_change_krw)}",
-        border=True,
-    )
+    _ = history_records
     cash_weight = metrics.cash_total_krw / metrics.total_value_krw if metrics.total_value_krw else None
-    col3.metric(
-        "총현금",
-        compact_krw(metrics.cash_total_krw),
-        delta=f"총자산 대비 {percentage(cash_weight)}" if cash_weight is not None else None,
-        delta_color="off",
-        help=f"KRW 현금과 USD 현금을 USD/KRW로 환산한 금액입니다. 전체 금액: {full_krw(metrics.cash_total_krw)}",
-        border=True,
-    )
-    col4.metric(
-        "USD 노출도",
-        percentage(metrics.usd_exposure_pct),
-        delta=full_krw(metrics.usd_exposure_krw),
-        delta_color="off",
-        help="USD 현금과 USD 표시 자산의 KRW 환산 비중입니다.",
-        border=True,
+    render_metric_card_grid(
+        [
+            {
+                "title": "총자산",
+                "value": eok_man_krw(metrics.total_value_krw),
+                "status": "info",
+                "help_text": f"KRW 환산 총자산입니다. 전체 금액: {full_krw(metrics.total_value_krw)}",
+            },
+            {
+                "title": "오늘 변동",
+                "value": signed_krw(metrics.day_change_krw),
+                "delta": signed_percentage(metrics.day_change_pct) if metrics.day_change_pct is not None else None,
+                "status": _pnl_status(metrics.day_change_krw),
+                "help_text": f"최근 제공 가격과 전일 종가 차이로 계산합니다. 전체 금액: {full_krw(metrics.day_change_krw)}",
+            },
+            {
+                "title": "총현금",
+                "value": compact_krw(metrics.cash_total_krw),
+                "delta": f"총자산 대비 {percentage(cash_weight)}" if cash_weight is not None else None,
+                "status": "neutral",
+                "help_text": f"KRW 현금과 USD 현금을 USD/KRW로 환산한 금액입니다. 전체 금액: {full_krw(metrics.cash_total_krw)}",
+            },
+            {
+                "title": "USD 노출도",
+                "value": percentage(metrics.usd_exposure_pct),
+                "delta": full_krw(metrics.usd_exposure_krw),
+                "status": "info",
+                "help_text": "USD 현금과 USD 표시 자산의 KRW 환산 비중입니다.",
+            },
+        ]
     )
 
 
@@ -274,21 +321,32 @@ def render_diagnostics(metrics: PortfolioMetrics) -> None:
         for item in calculate_diagnostics(metrics)
     ]
     primary, details = split_diagnostics(presentations)
-    cols = st.columns(3)
-    for index, item in enumerate(primary):
-        with cols[index % 3]:
-            st.metric(
-                item.label,
-                item.value,
-                delta=item.severity_label,
-                delta_color="off",
-                help=item.help_text,
-                border=True,
-            )
+    render_metric_card_grid(
+        [
+            {
+                "title": item.label,
+                "value": item.value,
+                "delta": item.severity_label,
+                "status": _diagnostic_status(item.severity_label),
+                "help_text": item.help_text,
+            }
+            for item in primary
+        ]
+    )
     if details:
         with st.expander("세부 진단", expanded=False):
-            for item in details:
-                st.metric(item.label, item.value, delta=item.severity_label, delta_color="off", help=item.help_text, border=True)
+            render_metric_card_grid(
+                [
+                    {
+                        "title": item.label,
+                        "value": item.value,
+                        "delta": item.severity_label,
+                        "status": _diagnostic_status(item.severity_label),
+                        "help_text": item.help_text,
+                    }
+                    for item in details
+                ]
+            )
 
 
 def render_single_currency_exposure(metrics: PortfolioMetrics) -> None:
@@ -299,13 +357,12 @@ def render_single_currency_exposure(metrics: PortfolioMetrics) -> None:
     krw_pct = 1 - usd_pct
     dominant = "USD" if usd_pct >= krw_pct else "KRW"
     value = usd_pct if dominant == "USD" else krw_pct
-    st.metric(
+    render_metric_card(
         "통화 노출",
         f"{dominant} {percentage(value)}",
         delta=full_krw(metrics.usd_exposure_krw if dominant == "USD" else metrics.total_value_krw - metrics.usd_exposure_krw),
-        delta_color="off",
-        help="통화가 하나뿐이거나 한쪽 노출만 있을 때는 차트 대신 요약으로 표시합니다.",
-        border=True,
+        status="info",
+        help_text="통화가 하나뿐이거나 한쪽 노출만 있을 때는 차트 대신 요약으로 표시합니다.",
     )
 
 
@@ -315,20 +372,23 @@ def render_contribution_summary(metrics: PortfolioMetrics) -> None:
         return
     best = max(rows, key=lambda row: row.day_change_krw or 0.0)
     worst = min(rows, key=lambda row: row.day_change_krw or 0.0)
-    col1, col2 = st.columns(2)
-    col1.metric(
-        "최대 상승 기여",
-        instrument_label(best.holding),
-        delta=signed_krw(best.day_change_krw),
-        help=instrument_label(best.holding, include_ticker=True),
-        border=True,
-    )
-    col2.metric(
-        "최대 하락 기여",
-        instrument_label(worst.holding),
-        delta=signed_krw(worst.day_change_krw),
-        help=instrument_label(worst.holding, include_ticker=True),
-        border=True,
+    render_metric_card_grid(
+        [
+            {
+                "title": "최대 상승 기여",
+                "value": instrument_label(best.holding),
+                "delta": signed_krw(best.day_change_krw),
+                "status": "profit",
+                "help_text": instrument_label(best.holding, include_ticker=True),
+            },
+            {
+                "title": "최대 하락 기여",
+                "value": instrument_label(worst.holding),
+                "delta": signed_krw(worst.day_change_krw),
+                "status": "loss",
+                "help_text": instrument_label(worst.holding, include_ticker=True),
+            },
+        ]
     )
 
 
