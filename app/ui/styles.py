@@ -90,12 +90,21 @@ __CSS_VARS__
         div[data-testid="stMetricLabel"] *,
         div[data-testid="stMetricLabel"] svg,
         div[data-testid="stMetricLabel"] path {
-            color: var(--token-text-muted) !important;
-            fill: var(--token-text-muted) !important;
-            stroke: var(--token-text-muted) !important;
+            color: var(--app-text) !important;
+            fill: var(--app-text) !important;
+            stroke: var(--app-text) !important;
             font-size: 0.98rem;
             font-weight: 760;
             line-height: var(--token-line-height-normal);
+            opacity: 1 !important;
+        }
+        div[data-testid="stMetricLabel"] p,
+        div[data-testid="stMetric"] label,
+        div[data-testid="stMetric"] label *,
+        div[data-testid="stMetric"] [data-testid="stMetricDelta"],
+        div[data-testid="stMetric"] [data-testid="stMetricDelta"] * {
+            color: var(--app-text) !important;
+            fill: var(--app-text) !important;
             opacity: 1 !important;
         }
         div[data-testid="stMetricValue"],
@@ -106,7 +115,7 @@ __CSS_VARS__
             letter-spacing: 0;
         }
         div[data-testid="stMetricDelta"] {
-            color: var(--app-muted);
+            color: var(--app-text);
             font-size: 0.98rem;
             opacity: 1 !important;
         }

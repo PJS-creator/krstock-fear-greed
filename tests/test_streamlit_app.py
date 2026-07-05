@@ -86,7 +86,10 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert 'div[data-baseweb="select"] *' in source
     assert 'div[data-testid="stMetricLabel"] *' in source
     assert 'div[data-testid="stMetricLabel"] svg' in source
+    assert 'div[data-testid="stMetricLabel"] p' in source
+    assert 'div[data-testid="stMetric"] label' in source
     assert 'div[data-testid="stMetricValue"] *' in source
+    assert 'color: var(--app-text) !important;' in source
     assert 'div[data-testid="stDataFrame"] canvas' in source
     assert ".app-data-table-wrap" in source
     assert ".holdings-data-table-wrap" in source
