@@ -74,6 +74,8 @@ __CSS_VARS__
             background: var(--summary-panel-bg);
             border-color: var(--app-border) !important;
             box-shadow: var(--app-shadow-sm);
+            min-height: 118px;
+            height: 100%;
         }
         div[data-testid="stMetricLabel"],
         div[data-testid="stMetricLabel"] * {

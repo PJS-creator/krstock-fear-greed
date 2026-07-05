@@ -43,9 +43,6 @@ def compact_number(value: float | None, *, digits: int = 1) -> str:
         return "미산정"
     abs_value = abs(float(value))
     sign = "-" if value < 0 else ""
-    if abs_value >= 100_000_000:
-        text = f"{abs_value / 100_000_000:.{digits}f}".rstrip("0").rstrip(".")
-        return f"{sign}{text}억"
     if abs_value >= 10_000:
         return f"{sign}{abs_value / 10_000:,.0f}만"
     return f"{value:,.0f}"

@@ -65,6 +65,12 @@ def test_summary_holding_table_restores_detailed_columns():
     )
 
     assert "삼성전자" in html_rows
+    assert "summary-section-investment" in html_rows
+    assert "summary-section-cash" in html_rows
+    assert "summary-currency-krw" in html_rows
+    assert "summary-currency-usd" in html_rows
+    assert "원화 현금" in html_rows
+    assert "달러 현금" in html_rows
     assert "₩72,300" in html_rows
     assert "₩723,000" in html_rows
     assert "$100.00" in html_rows
@@ -109,6 +115,11 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "<h3>보유 종목</h3>" in html
     assert "<div class=\"summary-asset-group-head\"><span>투자</span>" in html
     assert "<div class=\"summary-asset-group-head\"><span>현금</span>" in html
+    assert "summary-asset-currency-split" in html
+    assert "KRW" in html
+    assert "USD" in html
+    assert "원화 현금" in html
+    assert "달러 현금" in html
     assert "main · 총자산 기준" not in html
     assert "<th>평균단가</th>" in html
     assert "<th>매입금액</th>" in html

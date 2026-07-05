@@ -200,24 +200,13 @@ def render_empty_portfolio() -> None:
         request_app_rerun()
 
 
-def _history_chart_data(records: list[PortfolioHistoryRecord] | None) -> list[float] | None:
-    if not records or len(records) < 2:
-        return None
-    return [record.total_value_krw for record in records[-24:]]
-
-
 def render_kpi_cards(metrics: PortfolioMetrics, *, history_records: list[PortfolioHistoryRecord] | None = None) -> None:
-    total_kwargs = {}
-    chart_data = _history_chart_data(history_records)
-    if chart_data:
-        total_kwargs = {"chart_data": chart_data, "chart_type": "line"}
     col1, col2, col3, col4 = st.columns(4, gap="small")
     col1.metric(
         "총자산",
         compact_krw(metrics.total_value_krw),
         help=f"KRW 환산 총자산입니다. 전체 금액: {full_krw(metrics.total_value_krw)}",
         border=True,
-        **total_kwargs,
     )
     col2.metric(
         "오늘 변동",
