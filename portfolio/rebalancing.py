@@ -9,6 +9,8 @@ from portfolio.holdings import clean_text, normalize_holding_rows, normalize_kor
 
 TARGET_ASSET_TYPES = {"stock", "cash"}
 TARGET_WEIGHT_TOLERANCE_PCT = 0.1
+MIN_REBALANCE_TRADE_VALUE_KRW = 100_000.0
+MIN_REBALANCE_WEIGHT_DIFF_PCT = 0.05
 CASH_SYMBOL_BY_CURRENCY = {"KRW": "CASH_KRW", "USD": "CASH_USD"}
 CASH_DISPLAY_BY_CURRENCY = {"KRW": "원화 현금", "USD": "달러 현금"}
 RebalanceMode = Literal["full", "deposit_only", "cash_only"]
@@ -244,6 +246,14 @@ def _cash_adjustment_amount(delta_krw: float, currency: str, usd_krw: float) -> 
     return delta_krw if currency == "KRW" else delta_krw / usd_krw
 
 
+def is_negligible_rebalance_delta(delta_krw: float, total_asset_krw: float) -> bool:
+    if abs(delta_krw) <= MIN_REBALANCE_TRADE_VALUE_KRW:
+        return True
+    if total_asset_krw <= 0:
+        return False
+    return abs(delta_krw) / total_asset_krw * 100.0 <= MIN_REBALANCE_WEIGHT_DIFF_PCT
+
+
 def calculate_rebalancing_plan(
     *,
     target_allocations: Iterable[Mapping[str, Any]],
@@ -371,6 +381,8 @@ def calculate_rebalancing_plan(
             effective_delta = max(delta, 0.0)
         if mode == "cash_only" and row["asset_type"] == "stock":
             effective_delta = max(delta, 0.0) * scale
+        if is_negligible_rebalance_delta(effective_delta, total):
+            effective_delta = 0.0
 
         estimated_value = effective_delta
         adjustment_quantity: int | None = None

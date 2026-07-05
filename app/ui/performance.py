@@ -12,6 +12,12 @@ from .formatters import format_number, format_price, full_krw, instrument_label,
 from .theme import DIMENSIONS, SEMANTIC_COLORS
 
 
+SYMBOL_BASE_COLUMNS = ["종목", "보유수량", "현재가", "미실현손익", "실현손익", "총손익"]
+SYMBOL_DETAIL_COLUMNS = ["평균단가", "배당", "수수료/세금", "환율효과", "환율"]
+MONTHLY_BASE_COLUMNS = ["월", "실현손익", "배당/이자", "수수료/세금", "월 손익", "외부 순입금"]
+MONTHLY_DETAIL_COLUMNS = ["매수액", "매도액"]
+
+
 def _analysis_available(transactions: list[dict[str, object]], cash_ledger: list[dict[str, object]], holdings: list[dict[str, object]]) -> bool:
     return bool(transactions or cash_ledger or holdings)
 
@@ -35,7 +41,7 @@ def _render_metric_cards(analysis: PerformanceAnalysis) -> None:
         ("입출금 제외 성과", signed_krw(analysis.flow_adjusted_asset_change_krw), signed_percentage(analysis.twr_base_return), tone(analysis.flow_adjusted_asset_change_krw), "현재 총자산에서 순입금액을 뺀 값입니다. TWR 계산을 위한 기초 참고값입니다."),
     ]
     for row_start in range(0, len(cards), 4):
-        columns = st.columns(4)
+        columns = st.columns(4, gap="small")
         for column, (title, value, delta, status, help_text) in zip(columns, cards[row_start : row_start + 4]):
             with column:
                 render_metric_card(title, value, delta=delta, status=status, help_text=help_text)
@@ -171,7 +177,7 @@ def render_performance_analysis(
 
     asset_fig = _plot_asset_vs_deposit(analysis)
     waterfall_fig = _plot_pnl_waterfall(analysis)
-    chart_col1, chart_col2 = st.columns(2)
+    chart_col1, chart_col2 = st.columns(2, gap="small")
     with chart_col1:
         if asset_fig is not None:
             render_plotly_chart(asset_fig, key="performance_asset_vs_deposit")
@@ -188,8 +194,10 @@ def render_performance_analysis(
     if symbol_frame.empty:
         st.info("종목별 성과를 계산할 거래 또는 보유 종목이 없습니다.")
     else:
+        show_symbol_details = st.checkbox("종목별 상세 열 보기", value=False, key="performance_symbol_show_detail")
+        symbol_columns = SYMBOL_BASE_COLUMNS + (SYMBOL_DETAIL_COLUMNS if show_symbol_details else [])
         st.dataframe(
-            symbol_frame,
+            symbol_frame[symbol_columns],
             hide_index=True,
             width="stretch",
             height=min(DIMENSIONS.max_table_height, 100 + len(symbol_frame) * DIMENSIONS.row_height),
@@ -200,8 +208,10 @@ def render_performance_analysis(
     if monthly_frame.empty:
         st.info("월별 집계를 표시할 거래 또는 현금 원장 항목이 없습니다.")
     else:
+        show_monthly_details = st.checkbox("월별 상세 열 보기", value=False, key="performance_monthly_show_detail")
+        monthly_columns = MONTHLY_BASE_COLUMNS + (MONTHLY_DETAIL_COLUMNS if show_monthly_details else [])
         st.dataframe(
-            monthly_frame,
+            monthly_frame[monthly_columns],
             hide_index=True,
             width="stretch",
             height=min(DIMENSIONS.max_table_height, 100 + len(monthly_frame) * DIMENSIONS.row_height),

@@ -117,7 +117,7 @@ def render_journal_tab(
 
     events = build_journal_events(transactions=transactions, cash_ledger=cash_ledger, journal_notes=journal_notes)
     summary = _month_summary(events)
-    cols = st.columns(5)
+    cols = st.columns(5, gap="small")
     cols[0].metric("전체 기록", f"{summary['count']:,}건")
     cols[1].metric("이번달 매수", f"{summary['month_buy_count']:,}건")
     cols[2].metric("이번달 매도", f"{summary['month_sell_count']:,}건")
@@ -126,7 +126,7 @@ def render_journal_tab(
 
     with st.expander("수동 메모 작성", expanded=False):
         with st.form("journal_note_form", clear_on_submit=True):
-            note_cols = st.columns([1, 1, 1])
+            note_cols = st.columns([1, 1, 1], gap="small", vertical_alignment="bottom")
             note_date = note_cols[0].date_input("날짜", value=date.today())
             symbol = note_cols[1].text_input("종목 연결", placeholder="선택 입력")
             tags = note_cols[2].multiselect("태그", ["전략", "복기", "실수", "뉴스", "기타"], default=["복기"])
@@ -144,7 +144,7 @@ def render_journal_tab(
             except ValueError as exc:
                 st.error(f"메모를 저장할 수 없습니다: {exc}")
 
-    filter_cols = st.columns([1.4, 1])
+    filter_cols = st.columns([1.4, 1], gap="small", vertical_alignment="bottom")
     event_group = filter_cols[0].radio("필터", JOURNAL_FILTERS, horizontal=True, key="journal_filter")
     symbol_filter = filter_cols[1].text_input("종목 필터", placeholder="예: 삼성전자, QURE", key="journal_symbol_filter")
     filtered = filter_journal_events(events, event_group=event_group, symbol=symbol_filter)

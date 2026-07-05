@@ -1008,7 +1008,7 @@ def _render_cash_balance_cards() -> None:
     balances = _cash_balances_from_ledger_or_state()
     usd_krw = float(st.session_state.get("usd_krw") or 0.0)
     total_cash_krw = balances["KRW"] + balances["USD"] * usd_krw
-    cols = st.columns(4)
+    cols = st.columns(4, gap="small")
     cols[0].metric("원화 현금", full_krw(balances["KRW"]))
     cols[1].metric("달러 현금", format_price(balances["USD"], "USD"))
     cols[2].metric("USD/KRW 환율", f"{format_number(usd_krw, digits=2, trim=True)}원")
@@ -1030,7 +1030,7 @@ def _render_cash_movement_form() -> None:
     st.divider()
     st.subheader("입출금 입력")
     with st.form("cash_movement_form"):
-        col1, col2, col3, col4 = st.columns([1.0, 1.0, 1.3, 1.2], gap="small")
+        col1, col2, col3, col4 = st.columns([1.0, 1.0, 1.35, 1.15], gap="small", vertical_alignment="bottom")
         event_label = col1.selectbox("구분", list(CASH_MOVEMENT_EVENT_BY_LABEL.keys()), help="현금 증가/감소 원인을 선택합니다.")
         currency = col2.selectbox("통화", ["KRW", "USD"], help="원화 현금 또는 달러 현금입니다.")
         amount = col3.number_input(
@@ -1041,8 +1041,9 @@ def _render_cash_movement_form() -> None:
             help="입금/출금/배당/이자는 양수로 입력합니다. 수동 조정은 음수 입력도 가능합니다.",
         )
         event_date = col4.date_input("일자", value=date.today(), help="현금이 실제로 들어오거나 나간 날짜입니다.")
-        memo = st.text_input("메모", placeholder="선택 입력")
-        submitted = st.form_submit_button("입출금 저장", type="primary")
+        memo_col, submit_col = st.columns([3.2, 1.0], gap="small", vertical_alignment="bottom")
+        memo = memo_col.text_input("메모", placeholder="선택 입력")
+        submitted = submit_col.form_submit_button("입출금 저장", type="primary")
     if not submitted:
         return
     event_type = CASH_MOVEMENT_EVENT_BY_LABEL[event_label]
@@ -1082,15 +1083,16 @@ def _render_cash_movement_form() -> None:
 def _render_fx_conversion_form() -> None:
     st.subheader("환전 입력")
     with st.form("fx_conversion_form"):
-        col1, col2, col3, col4, col5, col6 = st.columns([1.0, 1.0, 1.25, 1.25, 1.0, 1.1], gap="small")
+        col1, col2, col3, col4 = st.columns([1.0, 1.0, 1.25, 1.25], gap="small", vertical_alignment="bottom")
         from_currency = col1.selectbox("From 통화", ["KRW", "USD"], key="fx_from_currency")
         to_currency = col2.selectbox("To 통화", ["USD", "KRW"], key="fx_to_currency")
         from_amount = col3.number_input("From 금액", min_value=0.0, step=1.0, format="%.2f")
         fx_rate = col4.number_input("적용 환율", min_value=0.01, step=1.0, value=float(st.session_state.get("usd_krw") or 1380.0), format="%.2f")
-        fee = col5.number_input("수수료", min_value=0.0, step=1.0, format="%.2f")
-        event_date = col6.date_input("날짜", value=date.today(), key="fx_conversion_date")
-        memo = st.text_input("환전 메모", placeholder="선택 입력")
-        submitted = st.form_submit_button("환전 저장", type="primary")
+        fee_col, date_col, memo_col, submit_col = st.columns([1.0, 1.1, 2.4, 1.0], gap="small", vertical_alignment="bottom")
+        fee = fee_col.number_input("수수료", min_value=0.0, step=1.0, format="%.2f")
+        event_date = date_col.date_input("날짜", value=date.today(), key="fx_conversion_date")
+        memo = memo_col.text_input("환전 메모", placeholder="선택 입력")
+        submitted = submit_col.form_submit_button("환전 저장", type="primary")
     if not submitted:
         return
     action_payload = {
@@ -1126,7 +1128,7 @@ def _render_manual_cash_adjustment() -> None:
     with st.expander("고급: 수동 현금 조정", expanded=False):
         st.caption("목표 현금 잔고를 입력하면 현재 원장 합계와의 차이만 manual_adjustment로 추가합니다.")
         with st.form("inline_cash_fx_form"):
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3 = st.columns(3, gap="small", vertical_alignment="bottom")
             col1.number_input("목표 원화 현금", step=100000.0, key=INLINE_CASH_KRW_KEY)
             col2.number_input("목표 달러 현금", step=100.0, key=INLINE_CASH_USD_KEY)
             col3.number_input("USD/KRW 환율", min_value=0.01, step=1.0, key=INLINE_USD_KRW_KEY)
@@ -1176,7 +1178,7 @@ def _render_cash_ledger_table() -> None:
         st.info("입출금, 환전, 매입/매도 거래를 저장하면 현금 원장이 표시됩니다.")
         return
 
-    filter_cols = st.columns([1.0, 1.4, 1.2, 1.2], gap="small")
+    filter_cols = st.columns([1.0, 1.4, 1.2, 1.2], gap="small", vertical_alignment="bottom")
     currency_filter = filter_cols[0].selectbox("통화", ["전체", "KRW", "USD"], key="cash_ledger_filter_currency")
     event_options = ["전체"] + list(CASH_LEDGER_EVENT_LABELS.values())
     event_filter = filter_cols[1].selectbox("구분", event_options, key="cash_ledger_filter_event")
@@ -1201,6 +1203,7 @@ def _render_cash_ledger_table() -> None:
         pd.DataFrame(_ledger_display_rows(filtered_rows)),
         hide_index=True,
         width="stretch",
+        height=min(DIMENSIONS.max_table_height, 100 + len(filtered_rows) * DIMENSIONS.row_height),
     )
 
     with st.expander("원장 취소 조정", expanded=False):
