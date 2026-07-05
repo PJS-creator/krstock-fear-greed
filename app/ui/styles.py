@@ -209,9 +209,32 @@ __CSS_VARS__
         div[data-baseweb="select"] > div,
         div[data-baseweb="base-input"] {
             background: var(--app-input-bg) !important;
-            border-color: var(--app-border) !important;
+            border-color: var(--token-input-border) !important;
             color: var(--app-text) !important;
             min-height: var(--token-input-height-md) !important;
+        }
+        div[data-testid="stTextInput"] div[data-baseweb="input"],
+        div[data-testid="stNumberInput"] div[data-baseweb="input"],
+        div[data-testid="stTextArea"] div[data-baseweb="textarea"],
+        div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+        div[data-testid="stDateInput"] div[data-baseweb="input"] {
+            background: var(--app-input-bg) !important;
+            border: 1px solid var(--token-input-border) !important;
+            border-radius: var(--token-radius-md) !important;
+            box-shadow: inset 0 0 0 1px var(--token-input-border) !important;
+        }
+        div[data-testid="stTextInput"] div[data-baseweb="input"]:focus-within,
+        div[data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within,
+        div[data-testid="stTextArea"] div[data-baseweb="textarea"]:focus-within,
+        div[data-testid="stSelectbox"] div[data-baseweb="select"]:focus-within > div,
+        div[data-testid="stDateInput"] div[data-baseweb="input"]:focus-within {
+            border-color: var(--token-input-focus) !important;
+            box-shadow: inset 0 0 0 1px var(--token-input-focus), 0 0 0 3px var(--app-primary-soft) !important;
+        }
+        div[data-testid="stTextInput"] input,
+        div[data-testid="stNumberInput"] input,
+        div[data-testid="stDateInput"] input {
+            background: transparent !important;
         }
         div[data-baseweb="input"],
         div[data-baseweb="textarea"],

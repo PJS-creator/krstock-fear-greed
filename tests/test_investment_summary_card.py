@@ -2,6 +2,7 @@ from portfolio.holdings import build_portfolio_metrics
 
 from app.ui.investment_summary_card import (
     _allocation_rows,
+    _cash_allocation_row,
     _heatmap_tiles,
     _holding_table_rows,
     _mobile_holding_summary_table,
@@ -41,15 +42,18 @@ def _metrics():
     )
 
 
-def test_summary_allocation_includes_cash_and_prefers_korean_company_name():
+def test_summary_allocation_separates_cash_and_prefers_korean_company_name():
     rows = _allocation_rows(_metrics())
+    cash_row = _cash_allocation_row(_metrics())
 
     assert any(row["label"] == "삼성전자" for row in rows)
-    assert any(row["label"] == "현금" for row in rows)
-    assert round(sum(row["weight"] for row in rows), 6) == 1
+    assert all(row["label"] != "현금" for row in rows)
+    assert cash_row is not None
+    assert cash_row["label"] == "현금"
+    assert round(sum(row["weight"] for row in rows) + cash_row["weight"], 6) == 1
 
 
-def test_summary_holding_table_defaults_to_compact_columns():
+def test_summary_holding_table_restores_detailed_columns():
     html_rows = "\n".join(
         _holding_table_rows(
             _metrics(),
@@ -61,16 +65,16 @@ def test_summary_holding_table_defaults_to_compact_columns():
     )
 
     assert "삼성전자" in html_rows
+    assert "₩72,300" in html_rows
+    assert "₩723,000" in html_rows
+    assert "$100.00" in html_rows
     assert "$120.00" in html_rows
     assert "800,000" in html_rows
     assert "-$5.00 (-4.0%)" in html_rows
     assert "%" in html_rows
     assert "합계 (주식 평가금액 + 현금)" in html_rows
-    assert "₩72,300" not in html_rows
-    assert "₩723,000" not in html_rows
-    assert "$100.00" not in html_rows
     assert "당일 흐름" not in html_rows
-    assert "summary-sparkline" not in html_rows
+    assert "summary-sparkline" in html_rows
     assert "IRR" not in html_rows
 
 
@@ -103,10 +107,33 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "summary-mobile-holding-table" in html
     assert '<div class="summary-table-wrap">' in html
     assert "<h3>보유 종목</h3>" in html
+    assert "<div class=\"summary-asset-group-head\"><span>투자</span>" in html
+    assert "<div class=\"summary-asset-group-head\"><span>현금</span>" in html
+    assert "main · 총자산 기준" not in html
+    assert "<th>평균단가</th>" in html
+    assert "<th>매입금액</th>" in html
+    assert "<th class=\"summary-sparkline-th\">당일 흐름</th>" in html
+    assert "<th>IRR</th>" in html
+    assert "table-layout: fixed;" in html
+    assert "font-size: clamp(0.68rem, 0.63vw, 0.79rem);" in html
+    for col_class in (
+        "summary-col-name",
+        "summary-col-qty",
+        "summary-col-avg",
+        "summary-col-cost",
+        "summary-col-price",
+        "summary-col-spark",
+        "summary-col-day",
+        "summary-col-pnl",
+        "summary-col-irr",
+        "summary-col-value",
+        "summary-col-weight",
+    ):
+        assert col_class in html
     assert ".summary-table-wrap {\n                display: none;" not in html
 
 
-def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels():
+def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_exclude_cash():
     tiles = _heatmap_tiles(_allocation_rows(_metrics()))
 
     assert "summary-heatmap-tile" in tiles
@@ -114,6 +141,7 @@ def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels():
     assert "height:" in tiles
     assert "삼성전자" in tiles
     assert "+1.3%" in tiles
+    assert "현금" not in tiles
 
 
 def test_light_theme_separates_heatmap_tile_borders_from_outer_border():
