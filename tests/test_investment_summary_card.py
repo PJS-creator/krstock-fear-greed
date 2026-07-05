@@ -114,6 +114,22 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "<th>매입금액</th>" in html
     assert "<th class=\"summary-sparkline-th\">당일 흐름</th>" in html
     assert "<th>IRR</th>" in html
+    assert "table-layout: fixed;" in html
+    assert "font-size: clamp(0.68rem, 0.63vw, 0.79rem);" in html
+    for col_class in (
+        "summary-col-name",
+        "summary-col-qty",
+        "summary-col-avg",
+        "summary-col-cost",
+        "summary-col-price",
+        "summary-col-spark",
+        "summary-col-day",
+        "summary-col-pnl",
+        "summary-col-irr",
+        "summary-col-value",
+        "summary-col-weight",
+    ):
+        assert col_class in html
     assert ".summary-table-wrap {\n                display: none;" not in html
 
 

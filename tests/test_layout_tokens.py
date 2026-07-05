@@ -1,4 +1,5 @@
 from app.ui.theme import get_theme_tokens
+from app.ui.styles import inject_styles
 
 
 SPACING_KEYS = {
@@ -71,3 +72,21 @@ def test_layout_token_sets_are_identical_between_modes():
     for key in SPACING_KEYS | TYPOGRAPHY_KEYS | CONTROL_KEYS | LAYOUT_KEYS:
         assert key in light
         assert key in dark
+
+
+def test_injected_styles_make_dark_mode_text_inputs_visible(monkeypatch):
+    rendered: list[str] = []
+
+    def capture_markdown(body, **_kwargs):
+        rendered.append(str(body))
+
+    monkeypatch.setattr("app.ui.styles.st.markdown", capture_markdown)
+
+    inject_styles("dark")
+    css = "\n".join(rendered)
+
+    assert 'div[data-testid="stTextInput"] div[data-baseweb="input"]' in css
+    assert "background: var(--app-input-bg) !important;" in css
+    assert "border: 1px solid var(--token-input-border) !important;" in css
+    assert "box-shadow: inset 0 0 0 1px var(--token-input-border) !important;" in css
+    assert "focus-within" in css
