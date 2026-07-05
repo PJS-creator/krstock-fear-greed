@@ -85,8 +85,14 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert 'div[data-testid="stForm"] label' in source
     assert 'div[data-baseweb="select"] *' in source
     assert 'div[data-testid="stMetricLabel"] *' in source
+    assert 'div[data-testid="stMetricLabel"] svg' in source
     assert 'div[data-testid="stMetricValue"] *' in source
+    assert 'div[data-testid="stDataFrame"] canvas' in source
+    assert ".app-data-table-wrap" in source
+    assert ".holdings-data-table-wrap" in source
     assert 'div[data-testid="stDataEditor"] [role="columnheader"]' in source
+    assert 'div[data-testid="stExpander"] details > summary' in source
+    assert 'div[data-testid="stExpander"] details[open] > summary' in source
     assert 'div[role="radiogroup"] label > div:first-child' in source
     assert ".app-empty-state" in source
     assert ".app-box" in source
@@ -113,10 +119,12 @@ def test_theme_selector_does_not_set_widget_key_default_from_session_state():
 def test_shared_metric_card_component_exists():
     source = Path("app/ui/components.py").read_text(encoding="utf-8")
     performance_source = Path("app/ui/performance.py").read_text(encoding="utf-8")
+    journal_source = Path("app/ui/journal.py").read_text(encoding="utf-8")
 
     assert "def render_metric_card(" in source
     assert "app-metric-card" in source
     assert "render_metric_card(" in performance_source
+    assert "render_metric_card(" in journal_source
 
 
 def test_investment_summary_preserves_heatmap_and_adds_cash_split():
