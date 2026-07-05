@@ -406,7 +406,7 @@ def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
         font_size = _font_size_for_weight(weight)
         tile_width = float(row.get("width") or 0.0)
         tile_height = float(row.get("height") or 0.0)
-        show_text = weight >= 0.015 and tile_width >= 7 and tile_height >= 7
+        show_text = weight >= 0.006 and tile_width >= 5 and tile_height >= 5
         label_html = f"<div class='summary-heatmap-name'>{escape(str(row['label']))}</div>" if show_text else ""
         change_html = f"<div class='summary-heatmap-change'>{escape(change_text)}</div>" if show_text else ""
         tiles.append(
