@@ -367,3 +367,28 @@ def test_public_app_hides_manual_storage_management_ui():
     for hidden in ("관리", "포트폴리오 저장", "저장된 포트폴리오", "선택 포트폴리오 불러오기"):
         assert hidden not in text
     assert at.session_state["portfolio_name"] == "main"
+
+
+def test_public_journal_renders_krw_cash_events_without_section_fallback():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo@example.com"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["public_dashboard_section"] = "journal"
+    at.session_state["cash_ledger_entries"] = [
+        {
+            "event_date": "2026-07-01",
+            "currency": "KRW",
+            "event_type": "deposit",
+            "amount": "1000000",
+            "memo": "원화 입금",
+        }
+    ]
+    at.run(timeout=20)
+
+    assert not at.exception
+    text = _app_text(at)
+    assert "매매일지" in text
+    assert "입금" in text
+    assert "이 영역을 불러오는 중 문제가 발생했습니다." not in text
