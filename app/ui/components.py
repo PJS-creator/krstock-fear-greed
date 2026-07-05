@@ -14,7 +14,7 @@ from portfolio.history import PortfolioHistoryRecord
 from portfolio.holdings import PortfolioMetrics
 from portfolio.sample_data import sample_portfolio
 
-from .formatters import compact_krw, full_krw, instrument_label, percentage, signed_krw, signed_percentage
+from .formatters import compact_krw, eok_man_krw, full_krw, instrument_label, percentage, signed_krw, signed_percentage
 from .stability import begin_ui_action, request_app_rerun
 from .status import aggregate_price_statuses, build_price_log_rows, present_diagnostic, quote_status_label, split_diagnostics
 from .theme import DIMENSIONS, chart_config
@@ -252,7 +252,7 @@ def render_kpi_cards(metrics: PortfolioMetrics, *, history_records: list[Portfol
         [
             {
                 "title": "총자산",
-                "value": compact_krw(metrics.total_value_krw),
+                "value": eok_man_krw(metrics.total_value_krw),
                 "status": "info",
                 "help_text": f"KRW 환산 총자산입니다. 전체 금액: {full_krw(metrics.total_value_krw)}",
             },

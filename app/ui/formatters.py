@@ -74,6 +74,22 @@ def compact_krw(value: float | None) -> str:
     return f"{compact_number(numeric)} 원"
 
 
+def eok_man_krw(value: float | None) -> str:
+    if value is None or not _is_number(value):
+        return "미산정"
+    numeric = float(value)
+    sign = "-" if numeric < 0 else ""
+    total_man = int(round(abs(numeric) / 10_000))
+    if total_man == 0:
+        return "0원"
+    eok, man = divmod(total_man, 10_000)
+    if eok == 0:
+        return f"{sign}{man:,}만 원"
+    padded_man = f"{man:04d}"
+    man_text = f"{padded_man[:-3]},{padded_man[-3:]}"
+    return f"{sign}{eok:,}억 {man_text}만 원"
+
+
 def full_krw(value: float | None) -> str:
     if value is None or not _is_number(value):
         return "미산정"

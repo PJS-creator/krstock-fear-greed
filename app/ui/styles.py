@@ -629,22 +629,16 @@ __CSS_VARS__
             background: linear-gradient(135deg, var(--token-surface) 0%, var(--app-loss-soft) 100%);
         }
         .app-metric-title {
-            color: var(--token-text-muted);
+            color: var(--app-heading);
             font-size: var(--token-font-sm);
             font-weight: 760;
             line-height: 1.25;
         }
-        .app-metric-info .app-metric-title,
         .app-metric-info .app-metric-delta { color: var(--app-primary); }
-        .app-metric-success .app-metric-title,
         .app-metric-success .app-metric-delta { color: var(--token-success-text); }
-        .app-metric-warning .app-metric-title,
         .app-metric-warning .app-metric-delta { color: var(--token-warning-text); }
-        .app-metric-danger .app-metric-title,
         .app-metric-danger .app-metric-delta { color: var(--token-danger-text); }
-        .app-metric-profit .app-metric-title,
         .app-metric-profit .app-metric-delta { color: var(--app-profit); }
-        .app-metric-loss .app-metric-title,
         .app-metric-loss .app-metric-delta { color: var(--app-loss); }
         .app-metric-value {
             color: var(--token-text);

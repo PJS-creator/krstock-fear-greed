@@ -107,6 +107,9 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert ".app-metric-card" in source
     assert ".app-metric-profit" in source
     assert ".app-metric-loss" in source
+    assert ".app-metric-title {\n            color: var(--app-heading);" in source
+    assert ".app-metric-info .app-metric-title" not in source
+    assert ".app-metric-profit .app-metric-title" not in source
     assert "justify-content: center !important;" in source
     assert ".st-key-app_theme_topbar" in source
     assert ".st-key-public_section_tabs" in source
@@ -143,6 +146,7 @@ def test_overview_components_use_shared_metric_cards_instead_of_streamlit_metric
     assert "st.metric(" not in source
     assert "render_metric_card_grid(" in source
     assert "_pnl_status(metrics.day_change_krw)" in source
+    assert "eok_man_krw(metrics.total_value_krw)" in source
     assert "최대 상승 기여" in source
     assert "최대 하락 기여" in source
 
