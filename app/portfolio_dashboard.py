@@ -40,7 +40,7 @@ _stop_if_unsupported_python_runtime()
 
 from app.ui.components import render_app_header, render_price_update_log, safe_render_section
 from app.ui.data_portability import render_data_portability_tools
-from app.ui.formatters import format_kst, format_number, format_price, format_relative_time, full_krw
+from app.ui.formatters import format_kst, format_number, format_price, full_krw
 from app.ui.holdings import render_holdings_table
 from app.ui.history import render_history_tab
 from app.ui.investment_summary_card import render_investment_summary_card
@@ -1303,7 +1303,6 @@ def _auto_load_account_portfolio(owner_id, store, target_allocation_store=None) 
         st.session_state[ACCOUNT_STATUS_KEY] = f"저장된 포트폴리오를 불러올 수 없습니다: {exc}"
         return
     st.session_state.pop(AUTO_PRICE_REFRESHED_KEY, None)
-    st.session_state[ACCOUNT_STATUS_KEY] = f"{record.portfolio_name} 포트폴리오를 자동으로 불러왔습니다."
 
 
 def _auto_refresh_loaded_prices(owner_id, store, target_allocation_store, history_store) -> None:
@@ -1331,9 +1330,6 @@ def _auto_refresh_loaded_prices(owner_id, store, target_allocation_store, histor
         except (PortfolioStoreError, ValueError) as exc:
             st.session_state[ACCOUNT_STATUS_KEY] = f"가격 자동 갱신은 완료했지만 저장에 실패했습니다: {exc}"
             return
-    existing_message = st.session_state.get(ACCOUNT_STATUS_KEY)
-    suffix = "최근 가격과 USD/KRW 환율을 자동 갱신했습니다." if refreshed_fx else "최근 가격을 자동 갱신했습니다."
-    st.session_state[ACCOUNT_STATUS_KEY] = f"{existing_message} {suffix}" if existing_message else suffix
 
 
 def _render_saved_portfolio_selector(owner_id, store) -> None:
@@ -1419,11 +1415,8 @@ def _render_header(config: AppSecurityConfig, owner_id, store, target_allocation
     dirty = _portfolio_is_dirty()
     summary = aggregate_price_statuses(st.session_state.get("price_update_statuses", []))
     last_refresh = metrics.last_price_refresh_at or st.session_state.last_price_refresh_at
-    refresh_label = f"{format_kst(last_refresh)} · {format_relative_time(last_refresh)}" if last_refresh else "미조회"
-    status_label = (
-        f"갱신 {refresh_label} · 정상 {metrics.priced_count} · 캐시 {summary.cached} · "
-        f"이전 {metrics.stale_quote_count} · 실패 {metrics.failed_quote_count} · 미조회 {metrics.missing_quote_count}"
-    )
+    refresh_label = format_kst(last_refresh) if last_refresh else "미조회"
+    status_label = f"갱신 {refresh_label}"
     in_progress = bool(st.session_state.get(PRICE_REFRESH_IN_PROGRESS_KEY))
     actions = render_app_header(
         title="포트폴리오",
