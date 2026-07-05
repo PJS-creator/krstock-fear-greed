@@ -14,7 +14,7 @@ import streamlit as st
 from portfolio.journal import JournalEvent, build_journal_events, filter_journal_events, normalize_journal_notes
 
 from .components import render_empty_state
-from .formatters import format_number, format_price
+from .formatters import compact_krw, format_number, format_price
 from .stability import request_app_rerun
 
 JOURNAL_FILTERS = ["전체", "매수/매도", "입금/출금", "환전", "배당/이자", "메모"]
