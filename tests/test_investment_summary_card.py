@@ -125,9 +125,14 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "<h3>보유 종목</h3>" in html
     assert "<div class=\"summary-asset-group-head\"><span>투자</span>" in html
     assert "<div class=\"summary-asset-group-head\"><span>현금</span>" in html
-    assert "summary-asset-currency-split" in html
+    assert "summary-asset-currency-split" not in html
     assert "summary-dot-rule" in html
-    assert "당일 상승·하락·보합 기준" in html
+    assert "summary-dot-rule-up" in html
+    assert "summary-dot-rule-down" in html
+    assert "summary-dot-rule-flat" in html
+    assert "보합·미산정" in html
+    assert "display: table-cell !important;" in html
+    assert ".summary-section-row td {\n            display: flex;" not in html
     assert "KRW" in html
     assert "USD" in html
     assert "원화 현금" in html
