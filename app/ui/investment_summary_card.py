@@ -12,7 +12,7 @@ from portfolio.transactions import normalize_transaction_rows
 
 from .components import render_empty_state
 from .formatters import KST, format_kst, format_number, format_price, instrument_label, percentage, signed_krw, signed_percentage
-from .theme import deterministic_color, get_active_theme, get_chart_palette
+from .theme import get_active_theme
 
 
 def _krw(value: float | None) -> str:
@@ -36,6 +36,13 @@ def _signed_class(value: float | None) -> str:
     if value is None or value == 0:
         return "summary-neutral"
     return "summary-up" if value > 0 else "summary-down"
+
+
+def _movement_dot_color(change: float | None) -> str:
+    tokens = get_active_theme().tokens()
+    if change is None or abs(change) < 1e-12:
+        return tokens["neutral_value"]
+    return tokens["profit"] if change > 0 else tokens["loss"]
 
 
 def _signed_text(value: float | None, formatter) -> str:
@@ -298,10 +305,9 @@ def _portfolio_irr(metrics: PortfolioMetrics, transactions: list[dict[str, objec
 
 def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[dict[str, Any]]:
     tokens = get_active_theme().tokens()
-    allocation_palette = get_chart_palette(tokens, "allocation")
     rows: list[dict[str, Any]] = []
     total = metrics.total_value_krw
-    for index, item in enumerate(metrics.rows):
+    for item in metrics.rows:
         value = item.market_value_krw
         if value is None or value <= 0:
             continue
@@ -312,7 +318,7 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
                 "detail": instrument_label(item.holding, include_ticker=True),
                 "value_krw": value,
                 "weight": value / total if total else 0.0,
-                "color": deterministic_color(item.holding.get("ticker") or index, allocation_palette),
+                "color": _movement_dot_color(day_change_pct),
                 "heat_color": _heatmap_tone(day_change_pct),
                 "day_change_pct": day_change_pct,
                 "day_change_krw": item.day_change_krw,
@@ -335,7 +341,7 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
             "detail": f"{len(other)}개 항목 합산",
             "value_krw": other_value,
             "weight": other_value / total if total else 0.0,
-            "color": tokens["text_subtle"],
+            "color": _movement_dot_color(other_day_change_pct),
             "heat_color": _heatmap_tone(other_day_change_pct),
             "day_change_pct": other_day_change_pct,
             "day_change_krw": other_day_change_krw,
@@ -511,20 +517,18 @@ def _holding_table_rows(
     rows = []
     normalized_transactions = _normalized_transactions(transactions)
     irr_date = as_of_date or datetime.now(KST).date()
-    currency_totals = _currency_totals(metrics)
     if metrics.rows:
         rows.append(
             "<tr class='summary-section-row summary-section-investment'>"
             "<td colspan='11'>"
             "<span>투자</span>"
-            f"<strong>{escape(_currency_split_text(currency_totals['investment'], metrics.total_value_krw))}</strong>"
             "</td>"
             "</tr>"
         )
     for item in sorted(metrics.rows, key=lambda row: row.market_value_krw or 0.0, reverse=True):
         holding = item.holding
         label = escape(instrument_label(holding))
-        color = deterministic_color(holding.get("ticker") or label)
+        color = _movement_dot_color(_holding_day_change_price(holding))
         currency = _currency_label(holding.get("currency"))
         quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
         avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
@@ -558,7 +562,6 @@ def _holding_table_rows(
             "<tr class='summary-section-row summary-section-cash'>"
             "<td colspan='11'>"
             "<span>현금</span>"
-            f"<strong>{escape(_currency_split_text(currency_totals['cash'], metrics.total_value_krw))}</strong>"
             "</td>"
             "</tr>"
         )
@@ -599,7 +602,7 @@ def _mobile_holding_summary_table(metrics: PortfolioMetrics) -> str:
     for item in sorted(metrics.rows, key=lambda row: row.market_value_krw or 0.0, reverse=True):
         holding = item.holding
         label = instrument_label(holding)
-        color = deterministic_color(holding.get("ticker") or label)
+        color = _movement_dot_color(_holding_day_change_price(holding))
         currency = _currency_label(holding.get("currency"))
         quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
         avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
@@ -740,6 +743,12 @@ def _render_styles() -> None:
             color: var(--app-muted);
             font-size: 0.82rem;
             font-weight: 720;
+            line-height: 1.25;
+        }
+        .summary-dot-rule {
+            margin: 0 0 6px;
+            color: var(--app-muted);
+            font-size: 0.76rem;
             line-height: 1.25;
         }
         .summary-empty-line {
@@ -896,14 +905,8 @@ def _render_styles() -> None:
         .summary-section-row td {
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-start;
             gap: 12px;
-        }
-        .summary-section-row strong {
-            color: var(--app-muted);
-            font-size: 0.82rem;
-            font-weight: 760;
-            text-align: right;
         }
         .summary-cash-detail-row td {
             color: var(--app-muted);
@@ -1391,6 +1394,7 @@ def render_investment_summary_card(
                 <div class="summary-asset-group">
                     <div class="summary-asset-group-head"><span>투자</span><strong>{escape(percentage(stock_pct, digits=2))}</strong></div>
                     <div class="summary-asset-currency-split">{escape(_currency_split_text(currency_totals["investment"], metrics.total_value_krw))}</div>
+                    <div class="summary-dot-rule">종목 점 색상은 당일 상승·하락·보합 기준입니다.</div>
                     {investment_legend_rows}
                 </div>
                 <div class="summary-asset-group summary-asset-group-cash">
