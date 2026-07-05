@@ -60,9 +60,18 @@ def format_number(value: float | None, *, digits: int = 0, trim: bool = False) -
 def compact_krw(value: float | None) -> str:
     if value is None or not _is_number(value):
         return "미산정"
-    if float(value) == 0:
+    numeric = float(value)
+    if numeric == 0:
         return "0원"
-    return f"{compact_number(float(value))} 원"
+    abs_value = abs(numeric)
+    sign = "-" if numeric < 0 else ""
+    if abs_value >= 100_000_000:
+        total_man = int(round(abs_value / 10_000))
+        eok, man = divmod(total_man, 10_000)
+        if man:
+            return f"{sign}{eok:,}억 {man:,}만 원"
+        return f"{sign}{eok:,}억 원"
+    return f"{compact_number(numeric)} 원"
 
 
 def full_krw(value: float | None) -> str:

@@ -16,7 +16,9 @@ from app.ui.formatters import (
 
 def test_compact_and_full_krw_formatting():
     assert compact_krw(84_190_000) == "8,419만 원"
-    assert compact_krw(120_000_000) == "12,000만 원"
+    assert compact_krw(100_000_000) == "1억 원"
+    assert compact_krw(120_000_000) == "1억 2,000만 원"
+    assert compact_krw(199_145_337) == "1억 9,915만 원"
     assert compact_krw(0) == "0원"
     assert full_krw(84_190_000) == "₩84,190,000"
 
@@ -24,6 +26,7 @@ def test_compact_and_full_krw_formatting():
 def test_signed_amount_and_percentage_formatting():
     assert signed_krw(320_000) == "+32만 원"
     assert signed_krw(-4_100_000) == "-410만 원"
+    assert signed_krw(120_000_000) == "+1억 2,000만 원"
     assert signed_krw(0) == "0원"
     assert percentage(0.1234) == "12.3%"
     assert signed_percentage(0.0123) == "+1.2%"
