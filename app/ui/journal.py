@@ -4,7 +4,9 @@ from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from datetime import date
+from decimal import Decimal
 from html import escape
+from typing import Any
 
 import pandas as pd
 import streamlit as st
@@ -47,6 +49,20 @@ def _amount_text(amount: float | None, currency: str | None) -> str:
     return format_price(amount, currency)
 
 
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
 def _month_summary(events: list[JournalEvent]) -> dict[str, object]:
     current_month = date.today().isoformat()[:7]
     month_events = [event for event in events if event.event_date.startswith(current_month)]
@@ -86,7 +102,7 @@ def _render_event(event: JournalEvent) -> None:
     if tags:
         st.caption(tags)
     with st.expander("원본 상세", expanded=False):
-        st.json(asdict(event))
+        st.json(_json_safe(asdict(event)))
 
 
 def render_journal_tab(
