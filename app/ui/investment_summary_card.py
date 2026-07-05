@@ -738,18 +738,36 @@ def _render_styles() -> None:
             font-size: 0.94rem;
             font-weight: 850;
         }
-        .summary-asset-currency-split {
-            margin: -2px 0 6px;
-            color: var(--app-muted);
-            font-size: 0.82rem;
-            font-weight: 720;
-            line-height: 1.25;
-        }
         .summary-dot-rule {
-            margin: 0 0 6px;
+            margin: -2px 0 6px;
             color: var(--app-muted);
             font-size: 0.76rem;
             line-height: 1.25;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 10px;
+        }
+        .summary-dot-rule span {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+        .summary-dot-rule span:before {
+            content: "";
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .summary-dot-rule-up:before {
+            background: var(--app-profit);
+        }
+        .summary-dot-rule-down:before {
+            background: var(--app-loss);
+        }
+        .summary-dot-rule-flat:before {
+            background: var(--token-neutral-value);
         }
         .summary-empty-line {
             color: var(--app-muted);
@@ -901,12 +919,7 @@ def _render_styles() -> None:
             background: var(--app-panel-strong) !important;
             color: var(--app-heading);
             font-weight: 850;
-        }
-        .summary-section-row td {
-            display: flex;
-            align-items: center;
-            justify-content: flex-start;
-            gap: 12px;
+            display: table-cell !important;
         }
         .summary-cash-detail-row td {
             color: var(--app-muted);
@@ -1326,7 +1339,6 @@ def render_investment_summary_card(
     pnl_class = _signed_class(metrics.total_pnl_krw)
     seed = metrics.total_cost_krw if metrics.total_cost_krw > 0 else None
     seed_label = _krw(seed) if seed is not None else "평균단가 필요"
-    currency_totals = _currency_totals(metrics)
     kpi_cards = [
         _kpi_card("총자산", _krw(metrics.total_value_krw), f"주식 {percentage(stock_pct, digits=2)} · 현금 {percentage(cash_pct, digits=2)}", "cyan", "₩"),
         _kpi_card("주식 평가금액", _krw(metrics.total_position_value_krw), f"{metrics.priced_count:,}/{metrics.holdings_count:,}종목 평가", "default", "주"),
@@ -1393,13 +1405,15 @@ def render_investment_summary_card(
                 <h3>자산 비중</h3>
                 <div class="summary-asset-group">
                     <div class="summary-asset-group-head"><span>투자</span><strong>{escape(percentage(stock_pct, digits=2))}</strong></div>
-                    <div class="summary-asset-currency-split">{escape(_currency_split_text(currency_totals["investment"], metrics.total_value_krw))}</div>
-                    <div class="summary-dot-rule">종목 점 색상은 당일 상승·하락·보합 기준입니다.</div>
+                    <div class="summary-dot-rule" aria-label="종목 점 색상 기준">
+                        <span class="summary-dot-rule-up">상승</span>
+                        <span class="summary-dot-rule-down">하락</span>
+                        <span class="summary-dot-rule-flat">보합·미산정</span>
+                    </div>
                     {investment_legend_rows}
                 </div>
                 <div class="summary-asset-group summary-asset-group-cash">
                     <div class="summary-asset-group-head"><span>현금</span><strong>{escape(percentage(cash_pct, digits=2))}</strong></div>
-                    <div class="summary-asset-currency-split">{escape(_currency_split_text(currency_totals["cash"], metrics.total_value_krw))}</div>
                     {cash_legend_rows}
                 </div>
                 <div class="summary-legend-total">투자 + 현금 100%</div>
