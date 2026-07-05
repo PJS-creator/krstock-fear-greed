@@ -141,6 +141,38 @@ def _transaction_event(row: Mapping[str, Any]) -> JournalEvent:
     )
 
 
+def _settlement_event_type(transaction_type: object) -> str | None:
+    if str(transaction_type) == "buy":
+        return "buy_settlement"
+    if str(transaction_type) == "sell":
+        return "sell_settlement"
+    return None
+
+
+def _amount_key(value: object) -> float:
+    return round(abs(float(value)), 6)
+
+
+def _transaction_settlement_keys(rows: Iterable[Mapping[str, Any]]) -> set[tuple[str, str, str, float]]:
+    keys: set[tuple[str, str, str, float]] = set()
+    for row in rows:
+        event_type = _settlement_event_type(row.get("transaction_type"))
+        if event_type is None:
+            continue
+        quantity = float(row["quantity"])
+        price = float(row["unit_price"])
+        fee = float(row.get("fee") or 0.0)
+        tax = float(row.get("tax") or 0.0)
+        gross = quantity * price
+        amount = -(gross + fee + tax) if event_type == "buy_settlement" else gross - fee - tax
+        keys.add((_event_day(row["occurred_at"]), str(row["currency"]), event_type, _amount_key(amount)))
+    return keys
+
+
+def _cash_settlement_key(row: Mapping[str, Any]) -> tuple[str, str, str, float]:
+    return (_event_day(row["event_date"]), str(row["currency"]), str(row["event_type"]), _amount_key(row["amount"]))
+
+
 def _ledger_label(event_type: str) -> str:
     return {
         "opening_balance": "시작 잔고",
@@ -260,7 +292,9 @@ def build_journal_events(
     journal_notes: Iterable[Mapping[str, Any]] = (),
     newest_first: bool = True,
 ) -> list[JournalEvent]:
-    events = [_transaction_event(row) for row in normalize_transaction_rows(transactions)]
+    transaction_rows = normalize_transaction_rows(transactions)
+    transaction_settlement_keys = _transaction_settlement_keys(transaction_rows)
+    events = [_transaction_event(row) for row in transaction_rows]
     ledger_rows = normalize_cash_ledger_rows(cash_ledger)
     fx_events, fx_used = _fx_conversion_events(ledger_rows)
     events.extend(fx_events)
@@ -269,6 +303,8 @@ def build_journal_events(
         if index in fx_used:
             continue
         if event_type in {"buy_settlement", "sell_settlement"} and _clean_text(row.get("linked_transaction_id")):
+            continue
+        if event_type in {"buy_settlement", "sell_settlement"} and _cash_settlement_key(row) in transaction_settlement_keys:
             continue
         events.append(_cash_event(row))
     events.extend(_note_event(row) for row in normalize_journal_notes(journal_notes))

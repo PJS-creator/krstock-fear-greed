@@ -36,6 +36,25 @@ def test_transaction_and_linked_cash_ledger_are_single_journal_event():
     assert events[0].cash_impact == -411
 
 
+def test_transaction_and_matching_unlinked_cash_ledger_are_single_journal_event():
+    events = build_journal_events(
+        transactions=[_buy_transaction()],
+        cash_ledger=[
+            {
+                "event_date": "2026-04-13",
+                "currency": "USD",
+                "event_type": "buy_settlement",
+                "amount": "-411",
+                "memo": "QURE buy",
+            }
+        ],
+    )
+
+    assert len(events) == 1
+    assert events[0].event_type == "buy"
+    assert events[0].cash_impact == -411
+
+
 def test_independent_deposit_and_dividend_become_events():
     events = build_journal_events(
         cash_ledger=[

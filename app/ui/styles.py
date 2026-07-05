@@ -456,17 +456,25 @@ __CSS_VARS__
             right: 0;
             z-index: 30;
             width: auto !important;
-            max-width: 11rem;
+            max-width: 10rem;
         }
         .st-key-app_theme_topbar div[role="radiogroup"] {
+            display: grid !important;
+            grid-template-columns: repeat(2, 4.15rem);
             justify-content: flex-end;
             gap: 0.35rem;
         }
         .st-key-app_theme_topbar div[role="radiogroup"] label {
+            width: 4.15rem;
             min-height: 2.15rem;
             padding: 0.36rem 0.58rem;
             font-size: 0.86rem;
             box-shadow: var(--app-shadow);
+        }
+        .st-key-app_header_refresh button {
+            min-height: 2.55rem !important;
+            padding: 0.48rem 0.95rem !important;
+            font-size: 0.98rem !important;
         }
         .st-key-public_section_tabs {
             margin: 0.85rem 0 1.1rem;
@@ -611,26 +619,74 @@ __CSS_VARS__
             .st-key-app_theme_topbar {
                 top: 0.72rem;
                 right: 0.75rem;
-                max-width: 8.75rem;
+                max-width: 8.85rem;
+            }
+            .st-key-app_theme_topbar div[role="radiogroup"] {
+                grid-template-columns: repeat(2, 4.05rem);
+                gap: 0.3rem;
             }
             .st-key-app_theme_topbar div[role="radiogroup"] label {
+                width: 4.05rem;
                 min-height: 2.15rem;
-                padding: 0.34rem 0.52rem;
+                padding: 0.34rem 0.18rem;
                 font-size: 0.82rem;
+            }
+            .app-header-status {
+                gap: 0.38rem;
+                min-height: auto;
+            }
+            .app-header-status .app-badge {
+                justify-content: flex-start;
+                max-width: 100%;
+                padding: 0.28rem 0.58rem;
+                font-size: 0.78rem;
+                line-height: 1.36;
+                text-align: left;
+            }
+            .app-header-save {
+                width: 100%;
+                font-size: 0.84rem;
+            }
+            .st-key-app_header_refresh {
+                display: flex;
+                justify-content: center;
+            }
+            .st-key-app_header_refresh button {
+                width: auto !important;
+                min-width: 11.2rem;
+                max-width: 13.2rem;
+                min-height: 2.45rem !important;
+                padding: 0.42rem 0.9rem !important;
+                font-size: 0.92rem !important;
+                box-shadow: 0 8px 18px rgba(37, 99, 235, 0.2) !important;
             }
             .st-key-public_section_tabs {
                 margin: 0.7rem 0 0.95rem;
             }
             .st-key-public_section_tabs div[role="radiogroup"] {
-                grid-template-columns: repeat(6, minmax(0, 1fr));
-                gap: 0;
-                padding: 0;
+                display: flex !important;
+                grid-template-columns: none;
+                flex-wrap: nowrap;
+                justify-content: flex-start;
+                gap: 0.85rem;
+                overflow-x: auto;
+                overflow-y: hidden;
+                padding: 0 0.1rem;
+                scrollbar-width: none;
+                scroll-snap-type: x proximity;
+            }
+            .st-key-public_section_tabs div[role="radiogroup"]::-webkit-scrollbar {
+                display: none;
             }
             .st-key-public_section_tabs div[role="radiogroup"] label {
+                flex: 0 0 auto;
+                width: auto;
+                min-width: max-content;
                 min-height: 2.44rem;
                 padding: 0.34rem 0.04rem 0.54rem;
-                font-size: clamp(0.66rem, 2.55vw, 0.78rem);
+                font-size: 0.92rem;
                 letter-spacing: 0;
+                scroll-snap-align: start;
             }
             .st-key-public_input_tabs {
                 margin: 0 0 0.85rem;
@@ -641,7 +697,7 @@ __CSS_VARS__
             .st-key-public_input_tabs div[role="radiogroup"] label {
                 min-height: 2.16rem;
                 padding: 0.28rem 0.06rem 0.46rem;
-                font-size: clamp(0.72rem, 3.0vw, 0.82rem);
+                font-size: clamp(0.72rem, 2.85vw, 0.82rem);
             }
             div[data-testid="stTabs"] [role="tablist"] {
                 position: sticky;
