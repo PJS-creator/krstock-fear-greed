@@ -89,6 +89,9 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert 'div[data-testid="stMetricLabel"] p' in source
     assert 'div[data-testid="stMetric"] label' in source
     assert 'div[data-testid="stMetricValue"] *' in source
+    assert 'div[data-testid="stMetric"] [data-testid="stMetricDelta"] svg' in source
+    assert '[data-testid="stTooltipIcon"]' in source
+    assert '[data-testid="stTooltipHoverTarget"]' in source
     assert 'color: var(--app-text) !important;' in source
     assert 'div[data-testid="stDataFrame"] canvas' in source
     assert ".app-data-table-wrap" in source
@@ -102,6 +105,8 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert ".app-badge" in source
     assert ".metric-grid" in source
     assert ".app-metric-card" in source
+    assert ".app-metric-profit" in source
+    assert ".app-metric-loss" in source
     assert "justify-content: center !important;" in source
     assert ".st-key-app_theme_topbar" in source
     assert ".st-key-public_section_tabs" in source
@@ -125,9 +130,21 @@ def test_shared_metric_card_component_exists():
     journal_source = Path("app/ui/journal.py").read_text(encoding="utf-8")
 
     assert "def render_metric_card(" in source
+    assert "def render_metric_card_grid(" in source
     assert "app-metric-card" in source
+    assert "app-metric-profit" in Path("app/ui/styles.py").read_text(encoding="utf-8")
     assert "render_metric_card(" in performance_source
     assert "render_metric_card(" in journal_source
+
+
+def test_overview_components_use_shared_metric_cards_instead_of_streamlit_metric():
+    source = Path("app/ui/components.py").read_text(encoding="utf-8")
+
+    assert "st.metric(" not in source
+    assert "render_metric_card_grid(" in source
+    assert "_pnl_status(metrics.day_change_krw)" in source
+    assert "최대 상승 기여" in source
+    assert "최대 하락 기여" in source
 
 
 def test_investment_summary_preserves_heatmap_and_adds_cash_split():

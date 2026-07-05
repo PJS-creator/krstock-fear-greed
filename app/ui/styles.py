@@ -90,9 +90,9 @@ __CSS_VARS__
         div[data-testid="stMetricLabel"] *,
         div[data-testid="stMetricLabel"] svg,
         div[data-testid="stMetricLabel"] path {
-            color: var(--app-text) !important;
-            fill: var(--app-text) !important;
-            stroke: var(--app-text) !important;
+            color: var(--app-heading) !important;
+            fill: var(--app-heading) !important;
+            stroke: var(--app-heading) !important;
             font-size: 0.98rem;
             font-weight: 760;
             line-height: var(--token-line-height-normal);
@@ -103,9 +103,10 @@ __CSS_VARS__
         div[data-testid="stMetric"] label *,
         div[data-testid="stMetric"] [data-testid="stMetricDelta"],
         div[data-testid="stMetric"] [data-testid="stMetricDelta"] * {
-            color: var(--app-text) !important;
-            fill: var(--app-text) !important;
             opacity: 1 !important;
+        }
+        div[data-testid="stMetric"] [data-testid="stMetricDelta"] svg {
+            display: none !important;
         }
         div[data-testid="stMetricValue"],
         div[data-testid="stMetricValue"] * {
@@ -115,11 +116,22 @@ __CSS_VARS__
             letter-spacing: 0;
         }
         div[data-testid="stMetricDelta"] {
-            color: var(--app-text);
+            color: var(--app-primary);
             font-size: 0.98rem;
             opacity: 1 !important;
         }
         div[data-testid="stMetricDelta"] * {
+            opacity: 1 !important;
+        }
+        [data-testid="stTooltipIcon"],
+        [data-testid="stTooltipIcon"] *,
+        [data-testid="stTooltipHoverTarget"],
+        [data-testid="stTooltipHoverTarget"] *,
+        button[data-testid="stTooltipIcon"],
+        button[data-testid="stTooltipIcon"] * {
+            color: var(--app-primary) !important;
+            fill: var(--app-primary) !important;
+            stroke: var(--app-primary) !important;
             opacity: 1 !important;
         }
         .journal-event {
@@ -588,20 +600,52 @@ __CSS_VARS__
             border: 1px solid var(--token-border);
             border-left: 4px solid var(--token-border-strong);
             border-radius: var(--token-radius-md);
-            background: var(--token-surface);
+            background: linear-gradient(135deg, var(--token-surface) 0%, var(--token-surface-raised) 100%);
             box-shadow: var(--app-shadow);
             color: var(--token-text);
         }
-        .app-metric-success { border-left-color: var(--token-success); }
-        .app-metric-warning { border-left-color: var(--token-warning); }
-        .app-metric-danger { border-left-color: var(--token-danger); }
-        .app-metric-info { border-left-color: var(--token-primary); }
+        .app-metric-success {
+            border-left-color: var(--token-success);
+            background: linear-gradient(135deg, var(--token-surface) 0%, var(--token-success-soft) 100%);
+        }
+        .app-metric-warning {
+            border-left-color: var(--token-warning);
+            background: linear-gradient(135deg, var(--token-surface) 0%, var(--token-warning-soft) 100%);
+        }
+        .app-metric-danger {
+            border-left-color: var(--token-danger);
+            background: linear-gradient(135deg, var(--token-surface) 0%, var(--token-danger-soft) 100%);
+        }
+        .app-metric-info {
+            border-left-color: var(--token-primary);
+            background: linear-gradient(135deg, var(--token-surface) 0%, var(--token-info-soft) 100%);
+        }
+        .app-metric-profit {
+            border-left-color: var(--app-profit);
+            background: linear-gradient(135deg, var(--token-surface) 0%, var(--app-profit-soft) 100%);
+        }
+        .app-metric-loss {
+            border-left-color: var(--app-loss);
+            background: linear-gradient(135deg, var(--token-surface) 0%, var(--app-loss-soft) 100%);
+        }
         .app-metric-title {
             color: var(--token-text-muted);
             font-size: var(--token-font-sm);
             font-weight: 760;
             line-height: 1.25;
         }
+        .app-metric-info .app-metric-title,
+        .app-metric-info .app-metric-delta { color: var(--app-primary); }
+        .app-metric-success .app-metric-title,
+        .app-metric-success .app-metric-delta { color: var(--token-success-text); }
+        .app-metric-warning .app-metric-title,
+        .app-metric-warning .app-metric-delta { color: var(--token-warning-text); }
+        .app-metric-danger .app-metric-title,
+        .app-metric-danger .app-metric-delta { color: var(--token-danger-text); }
+        .app-metric-profit .app-metric-title,
+        .app-metric-profit .app-metric-delta { color: var(--app-profit); }
+        .app-metric-loss .app-metric-title,
+        .app-metric-loss .app-metric-delta { color: var(--app-loss); }
         .app-metric-value {
             color: var(--token-text);
             font-size: clamp(1.14rem, 1.5vw, 1.42rem);
