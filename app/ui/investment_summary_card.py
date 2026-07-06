@@ -304,8 +304,7 @@ def _portfolio_irr(metrics: PortfolioMetrics, transactions: list[dict[str, objec
     return _xirr(cashflows)
 
 
-def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 3) -> list[dict[str, Any]]:
-    tokens = get_active_theme().tokens()
+def _holding_allocation_rows(metrics: PortfolioMetrics) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     total = metrics.total_value_krw
     for item in metrics.rows:
@@ -327,7 +326,12 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 3) -> list[d
                 "currency": _currency_label(item.holding.get("currency")),
             }
         )
-    rows = sorted(rows, key=_sort_key, reverse=True)
+    return sorted(rows, key=_sort_key, reverse=True)
+
+
+def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 3) -> list[dict[str, Any]]:
+    rows = _holding_allocation_rows(metrics)
+    total = metrics.total_value_krw
     if len(rows) <= max_items:
         return rows
     kept = rows[:max_items]
@@ -338,7 +342,7 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 3) -> list[d
     other_day_change_pct = other_day_change_krw / other_previous_value if other_previous_value else None
     kept.append(
         {
-            "label": "기타",
+            "label": f"그 외 {len(other)}종목",
             "detail": f"{len(other)}개 종목 합산",
             "value_krw": other_value,
             "weight": other_value / total if total else 0.0,
@@ -1373,6 +1377,7 @@ def render_investment_summary_card(
             "먼저 입금 또는 보유종목을 입력하면 총괄현황, 자산 비중, 보유 종목 요약이 표시됩니다.",
         )
         return
+    holding_allocation_rows = _holding_allocation_rows(metrics)
     allocation_rows = _allocation_rows(metrics)
     as_of_date = _as_of_date(last_refresh)
     stock_pct = metrics.total_position_value_krw / metrics.total_value_krw if metrics.total_value_krw else 0.0
@@ -1421,7 +1426,7 @@ def render_investment_summary_card(
         )
     else:
         cash_legend_rows = "<div class='summary-empty-line'>현금 없음</div>"
-    heatmap_tiles = _heatmap_tiles(allocation_rows)
+    heatmap_tiles = _heatmap_tiles(holding_allocation_rows)
     mobile_holding_summary = _mobile_holding_summary_table(metrics)
     table_rows = "".join(_holding_table_rows(metrics, transactions=transactions, as_of_date=as_of_date))
     cash_detail = f"KRW {_krw(metrics.cash.cash_krw)} · USD ${format_number(metrics.cash.cash_usd)}"
