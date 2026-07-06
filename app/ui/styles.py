@@ -134,6 +134,55 @@ __CSS_VARS__
             stroke: var(--app-primary) !important;
             opacity: 1 !important;
         }
+        .st-key-public_login_remember_me,
+        .st-key-public_signup_remember_me {
+            margin: var(--token-space-3) 0 var(--token-space-2);
+        }
+        .st-key-public_login_remember_me label,
+        .st-key-public_signup_remember_me label {
+            min-height: var(--token-control-height-md);
+            align-items: center !important;
+            gap: var(--token-space-2) !important;
+        }
+        .st-key-public_login_remember_me label p,
+        .st-key-public_signup_remember_me label p,
+        .st-key-public_login_remember_me div[data-testid="stWidgetLabel"] *,
+        .st-key-public_signup_remember_me div[data-testid="stWidgetLabel"] * {
+            color: var(--app-heading) !important;
+            font-size: var(--token-font-base) !important;
+            font-weight: 720 !important;
+            line-height: var(--token-line-height-normal) !important;
+        }
+        .st-key-public_login_remember_me [data-testid="stTooltipIcon"],
+        .st-key-public_signup_remember_me [data-testid="stTooltipIcon"],
+        .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"],
+        .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"] {
+            width: var(--token-font-lg) !important;
+            height: var(--token-font-lg) !important;
+            min-width: var(--token-font-lg) !important;
+            min-height: var(--token-font-lg) !important;
+            display: inline-grid !important;
+            place-items: center !important;
+            border-radius: var(--token-radius-pill) !important;
+            background: var(--app-primary-soft) !important;
+            color: var(--app-primary) !important;
+            font-size: var(--token-font-sm) !important;
+            font-weight: 850 !important;
+            line-height: 1 !important;
+            vertical-align: middle !important;
+        }
+        .st-key-public_login_remember_me [data-testid="stTooltipIcon"] svg,
+        .st-key-public_signup_remember_me [data-testid="stTooltipIcon"] svg,
+        .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"] svg,
+        .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"] svg {
+            display: none !important;
+        }
+        .st-key-public_login_remember_me [data-testid="stTooltipIcon"]::after,
+        .st-key-public_signup_remember_me [data-testid="stTooltipIcon"]::after,
+        .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"]::after,
+        .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"]::after {
+            content: "?";
+        }
         .journal-event {
             margin: var(--token-space-3) 0 var(--token-space-2);
             padding: var(--token-card-padding-compact) var(--token-card-padding);
