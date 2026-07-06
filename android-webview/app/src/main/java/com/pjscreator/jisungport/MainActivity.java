@@ -11,6 +11,7 @@ import android.os.Bundle;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.webkit.CookieManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
@@ -41,6 +42,7 @@ public class MainActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
 
         FrameLayout root = new FrameLayout(this);
+        configureSystemBars(root);
         webView = new WebView(this);
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         errorView = buildErrorView();
@@ -70,6 +72,27 @@ public class MainActivity extends Activity {
         } else {
             webView.restoreState(savedInstanceState);
         }
+    }
+
+    @SuppressWarnings("deprecation")
+    private void configureSystemBars(FrameLayout root) {
+        Window window = getWindow();
+        window.setStatusBarColor(Color.rgb(11, 18, 32));
+        window.setNavigationBarColor(Color.rgb(11, 18, 32));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.setDecorFitsSystemWindows(false);
+        }
+
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(
+                    insets.getSystemWindowInsetLeft(),
+                    insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(),
+                    insets.getSystemWindowInsetBottom()
+            );
+            return insets;
+        });
+        root.post(() -> root.requestApplyInsets());
     }
 
     private LinearLayout buildErrorView() {
