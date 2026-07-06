@@ -186,7 +186,7 @@ def _heatmap_tone(change_pct: float | None) -> str:
 
 
 def _font_size_for_weight(weight: float) -> float:
-    return max(0.66, min(1.85, 0.62 + math.sqrt(max(weight, 0.0)) * 2.0))
+    return max(0.58, min(1.85, 0.58 + math.sqrt(max(weight, 0.0)) * 2.0))
 
 
 def _safe_date(value: object | None) -> date | None:
@@ -304,7 +304,7 @@ def _portfolio_irr(metrics: PortfolioMetrics, transactions: list[dict[str, objec
     return _xirr(cashflows)
 
 
-def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[dict[str, Any]]:
+def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 3) -> list[dict[str, Any]]:
     tokens = get_active_theme().tokens()
     rows: list[dict[str, Any]] = []
     total = metrics.total_value_krw
@@ -330,8 +330,8 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
     rows = sorted(rows, key=_sort_key, reverse=True)
     if len(rows) <= max_items:
         return rows
-    kept = rows[: max_items - 1]
-    other = rows[max_items - 1 :]
+    kept = rows[:max_items]
+    other = rows[max_items:]
     other_value = sum(float(row["value_krw"]) for row in other)
     other_day_change_krw = sum(float(row.get("day_change_krw") or 0.0) for row in other)
     other_previous_value = other_value - other_day_change_krw
@@ -339,7 +339,7 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 8) -> list[d
     kept.append(
         {
             "label": "기타",
-            "detail": f"{len(other)}개 항목 합산",
+            "detail": f"{len(other)}개 종목 합산",
             "value_krw": other_value,
             "weight": other_value / total if total else 0.0,
             "color": _movement_dot_color(other_day_change_pct),
@@ -485,11 +485,14 @@ def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
         font_size = _font_size_for_weight(weight)
         tile_width = float(row.get("width") or 0.0)
         tile_height = float(row.get("height") or 0.0)
-        show_text = weight >= 0.006 and tile_width >= 5 and tile_height >= 5
-        label_html = f"<div class='summary-heatmap-name'>{escape(str(row['label']))}</div>" if show_text else ""
-        change_html = f"<div class='summary-heatmap-change'>{escape(change_text)}</div>" if show_text else ""
+        is_small = weight < 0.035 or tile_width < 14 or tile_height < 14
+        tile_classes = "summary-heatmap-tile summary-heatmap-small" if is_small else "summary-heatmap-tile"
+        title = f"{row['label']} · {change_text} · 비중 {percentage(weight, digits=2)}"
+        label_html = f"<div class='summary-heatmap-name'>{escape(str(row['label']))}</div>"
+        change_html = f"<div class='summary-heatmap-change'>{escape(change_text)}</div>"
         tiles.append(
-            "<div class='summary-heatmap-tile' "
+            f"<div class='{tile_classes}' "
+            f"title='{escape(title)}' aria-label='{escape(title)}' "
             f"style='left:{row['x']:.4f}%;top:{row['y']:.4f}%;width:{row['width']:.4f}%;height:{row['height']:.4f}%;"
             f"background:{row['heat_color']};font-size:{font_size:.2f}rem;'>"
             f"{label_html}"
@@ -827,12 +830,34 @@ def _render_styles() -> None:
             text-shadow: none;
             box-shadow: inset 0 -12px 28px color-mix(in srgb, var(--token-overlay) 36%, transparent);
             transition: filter 150ms ease, transform 150ms ease, box-shadow 150ms ease;
-            will-change: filter;
+            transform-origin: center;
+            will-change: filter, transform;
         }
         .summary-heatmap-tile:hover {
             filter: brightness(1.15) saturate(1.08);
-            transform: translateZ(0);
+            transform: translateZ(0) scale(1.1);
+            z-index: 5;
+            overflow: visible;
             box-shadow: inset 0 -8px 18px color-mix(in srgb, var(--token-overlay) 22%, transparent);
+        }
+        .summary-heatmap-small {
+            padding: 2px;
+            line-height: 1.02;
+        }
+        .summary-heatmap-small .summary-heatmap-name {
+            -webkit-line-clamp: 1;
+            font-size: 0.82em;
+        }
+        .summary-heatmap-small .summary-heatmap-change {
+            margin-top: 2px;
+            font-size: 0.68em;
+        }
+        .summary-heatmap-small:hover {
+            font-size: max(0.78rem, 1em) !important;
+            transform: translateZ(0) scale(1.18);
+        }
+        .summary-heatmap-small:hover .summary-heatmap-name {
+            -webkit-line-clamp: 2;
         }
         .summary-heatmap-name {
             font-weight: 900;
