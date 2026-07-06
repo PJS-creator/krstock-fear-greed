@@ -4,6 +4,7 @@ from app.ui.investment_summary_card import (
     _allocation_rows,
     _cash_allocation_row,
     _heatmap_tiles,
+    _holding_allocation_rows,
     _holding_table_rows,
     _mobile_holding_summary_table,
     _sparkline_html,
@@ -76,13 +77,24 @@ def test_summary_asset_dots_use_daily_movement_colors():
     assert rows["MU · Micron"]["color"] == tokens["loss"]
 
 
-def test_summary_allocation_collapses_more_than_three_holdings_to_other():
+def test_summary_allocation_collapses_more_than_three_holdings_with_count_label():
     rows = _allocation_rows(_many_holding_metrics())
 
-    assert [row["label"] for row in rows] == ["Alpha", "Bravo", "Charlie", "기타"]
+    assert [row["label"] for row in rows] == ["Alpha", "Bravo", "Charlie", "그 외 2종목"]
     assert rows[-1]["detail"] == "2개 종목 합산"
     assert rows[-1]["kind"] == "other"
     assert round(rows[-1]["weight"], 6) == round((40 + 20) / (100 + 80 + 60 + 40 + 20), 6)
+
+
+def test_summary_heatmap_rows_keep_every_holding_unaggregated():
+    rows = _holding_allocation_rows(_many_holding_metrics())
+    tiles = _heatmap_tiles(rows)
+
+    assert [row["label"] for row in rows] == ["Alpha", "Bravo", "Charlie", "Delta", "Echo"]
+    assert "Delta" in tiles
+    assert "Echo" in tiles
+    assert "그 외" not in tiles
+    assert "기타" not in tiles
 
 
 def test_summary_holding_table_restores_detailed_columns():
