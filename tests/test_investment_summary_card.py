@@ -69,6 +69,13 @@ def test_summary_allocation_separates_cash_and_prefers_korean_company_name():
     assert round(sum(row["weight"] for row in rows) + cash_row["weight"], 6) == 1
 
 
+def test_summary_allocation_detail_removes_currency_badge_text_and_shows_usd_conversion():
+    rows = {row["label"]: row for row in _allocation_rows(_metrics())}
+
+    assert rows["삼성전자"]["allocation_detail"] == "평가액 800,000원"
+    assert rows["MU · Micron"]["allocation_detail"] == "달러 240$ • 환산 336,000원"
+
+
 def test_summary_asset_dots_use_daily_movement_colors():
     tokens = get_active_theme().tokens()
     rows = {row["label"]: row for row in _allocation_rows(_metrics())}
@@ -140,6 +147,15 @@ def test_mobile_holding_summary_table_includes_requested_compact_columns():
         assert f"<th>{label}</th>" in table
     assert "삼성전자" in table
     assert "Micron" in table
+    assert "summary-currency-badge" not in table
+    assert "summary-currency-usd" not in table
+    assert "summary-currency-krw" not in table
+    assert "USD" not in table
+    assert "KRW" not in table
+    assert "$120" in table
+    assert "$120.00" not in table
+    assert "35.1%" in table
+    assert "35.15%" not in table
     assert "summary-mobile-holding-list" not in table
     assert "summary-mobile-holding-cell" not in table
     assert "매입금액" not in table
