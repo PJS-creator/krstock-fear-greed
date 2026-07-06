@@ -46,7 +46,8 @@ def test_remembered_session_rejects_short_secret_and_tampered_token():
         now=1000,
     )
 
-    tampered = token[:-2] + ("A" if token[-2] != "A" else "B") + token[-1]
+    tamper_index = len(token) // 2
+    tampered = token[:tamper_index] + ("A" if token[tamper_index] != "A" else "B") + token[tamper_index + 1 :]
     with pytest.raises(SessionPersistenceError, match="invalid"):
         decode_remembered_session(tampered, secret=SECRET, now=1001)
 
