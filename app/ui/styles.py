@@ -134,6 +134,35 @@ __CSS_VARS__
             stroke: var(--app-primary) !important;
             opacity: 1 !important;
         }
+        div[data-testid="stCheckbox"] label {
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: var(--token-space-1) !important;
+        }
+        div[data-testid="stCheckbox"] input[type="checkbox"] {
+            accent-color: var(--app-primary);
+        }
+        div[data-testid="stCheckbox"] label > div:first-child {
+            width: var(--token-font-lg) !important;
+            height: var(--token-font-lg) !important;
+            min-width: var(--token-font-lg) !important;
+            min-height: var(--token-font-lg) !important;
+            margin: 0 !important;
+            border: 1px solid var(--app-border-strong) !important;
+            border-radius: var(--token-radius-sm) !important;
+            background: var(--app-input-bg) !important;
+            box-shadow: none !important;
+        }
+        div[data-testid="stCheckbox"] label:has(input:checked) > div:first-child {
+            border-color: var(--app-primary) !important;
+            background: var(--app-primary) !important;
+        }
+        div[data-testid="stCheckbox"] label > div:first-child svg,
+        div[data-testid="stCheckbox"] label > div:first-child path {
+            color: var(--app-primary-text) !important;
+            fill: var(--app-primary-text) !important;
+            stroke: var(--app-primary-text) !important;
+        }
         .st-key-public_login_remember_me,
         .st-key-public_signup_remember_me {
             margin: var(--token-space-3) 0 var(--token-space-2);
@@ -161,7 +190,9 @@ __CSS_VARS__
             margin: 0 !important;
         }
         .st-key-public_login_remember_me button[data-testid="stTooltipIcon"],
-        .st-key-public_signup_remember_me button[data-testid="stTooltipIcon"] {
+        .st-key-public_signup_remember_me button[data-testid="stTooltipIcon"],
+        .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"],
+        .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"] {
             position: relative !important;
             width: var(--token-font-lg) !important;
             height: var(--token-font-lg) !important;
@@ -179,11 +210,17 @@ __CSS_VARS__
             vertical-align: middle !important;
         }
         .st-key-public_login_remember_me button[data-testid="stTooltipIcon"] svg,
-        .st-key-public_signup_remember_me button[data-testid="stTooltipIcon"] svg {
+        .st-key-public_signup_remember_me button[data-testid="stTooltipIcon"] svg,
+        .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"] svg,
+        .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"] svg {
             display: none !important;
         }
         .st-key-public_login_remember_me button[data-testid="stTooltipIcon"]::after,
         .st-key-public_signup_remember_me button[data-testid="stTooltipIcon"]::after {
+            content: none !important;
+        }
+        .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"]::after,
+        .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"]::after {
             position: absolute;
             inset: 0;
             display: grid;
@@ -191,10 +228,6 @@ __CSS_VARS__
             content: "?";
             line-height: 1;
             transform: translateX(0);
-        }
-        .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"]::after,
-        .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"]::after {
-            content: none !important;
         }
         .journal-event {
             margin: var(--token-space-3) 0 var(--token-space-2);

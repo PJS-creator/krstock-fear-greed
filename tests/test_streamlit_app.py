@@ -116,9 +116,13 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert "white-space: nowrap !important;" in source
     assert ".st-key-public_section_tabs" in source
     assert ".st-key-public_input_tabs" in source
+    assert 'div[data-testid="stCheckbox"] label > div:first-child' in source
+    assert "background: var(--app-input-bg) !important;" in source
+    assert "border: 1px solid var(--app-border-strong) !important;" in source
+    assert "label:has(input:checked) > div:first-child" in source
     assert ".st-key-public_login_remember_me" in source
     assert ".st-key-public_signup_remember_me" in source
-    assert 'button[data-testid="stTooltipIcon"]::after' in source
+    assert '[data-testid="stTooltipHoverTarget"]::after' in source
     assert 'content: "?";' in source
     assert "content: none !important;" in source
     assert "gap: var(--token-space-1) !important;" in source
