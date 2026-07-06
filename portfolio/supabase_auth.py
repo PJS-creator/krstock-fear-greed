@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from portfolio.storage.supabase_store import SupabaseStorageConfig
 
@@ -44,6 +45,17 @@ def validate_password(value: object | None) -> str:
     if len(password) < PASSWORD_MIN_LENGTH:
         raise SupabaseAuthValidationError(f"비밀번호는 {PASSWORD_MIN_LENGTH}자 이상으로 입력하세요.")
     return password
+
+
+def normalize_redirect_url(value: object | None) -> str | None:
+    text = str(value or "").strip()
+    if not text or text.lower() == "null":
+        return None
+    parsed = urlsplit(text)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    path = parsed.path or "/"
+    return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
 def _field(source: Any, name: str) -> Any:
@@ -96,11 +108,15 @@ class SupabaseAuthStore:
             raise SupabaseAuthError("로그인 세션을 만들 수 없습니다.")
         return account
 
-    def sign_up(self, email: object | None, password: object | None) -> SupabaseSignupResult:
+    def sign_up(self, email: object | None, password: object | None, *, email_redirect_to: object | None = None) -> SupabaseSignupResult:
         clean_email = normalize_email(email)
         clean_password = validate_password(password)
+        payload: dict[str, object] = {"email": clean_email, "password": clean_password}
+        redirect_url = normalize_redirect_url(email_redirect_to)
+        if redirect_url is not None:
+            payload["options"] = {"email_redirect_to": redirect_url}
         try:
-            response = self._client.auth.sign_up({"email": clean_email, "password": clean_password})
+            response = self._client.auth.sign_up(payload)
         except Exception as exc:
             raise SupabaseAuthError("회원가입을 완료할 수 없습니다.") from exc
         account = account_from_auth_response(response)

@@ -462,9 +462,9 @@ APP_THEMES = {
             primary_shadow="0 10px 24px rgba(59, 130, 246, 0.20)",
             summary_card_bg="linear-gradient(135deg, #0B1220 0%, #0F172A 56%, #111827 100%)",
             summary_panel_bg="linear-gradient(180deg, rgba(23, 32, 51, 0.94), rgba(15, 23, 42, 0.94))",
-            summary_heatmap_bg="#0B1220",
-            summary_heatmap_border="#020617",
-            summary_heatmap_tile_border="#020617",
+            summary_heatmap_bg="#0F172A",
+            summary_heatmap_border="#263244",
+            summary_heatmap_tile_border="#1E293B",
         ),
     ),
 }

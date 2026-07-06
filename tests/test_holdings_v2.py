@@ -1,5 +1,6 @@
 import pytest
 
+from app.ui.holdings import _non_empty_quick_rows, _quick_frame
 from portfolio.holdings import (
     QUOTE_STATUS_FAILED,
     QUOTE_STATUS_STALE,
@@ -196,3 +197,11 @@ def test_quote_failure_keeps_last_price_as_stale_and_missing_price_as_failed():
     assert stale_statuses[0].status == QUOTE_STATUS_STALE
     assert failed_rows[0]["current_price"] is None
     assert failed_statuses[0].status == QUOTE_STATUS_FAILED
+
+
+def test_quick_holdings_editor_preserves_draft_rows():
+    frame = _quick_frame([{"ticker_or_name": "삼성전자", "quantity": 200, "avg_price": 70000}])
+
+    assert frame.to_dict("records") == [{"ticker_or_name": "삼성전자", "quantity": 200, "avg_price": 70000}]
+    assert _non_empty_quick_rows(frame.to_dict("records")) == [{"ticker_or_name": "삼성전자", "quantity": 200, "avg_price": 70000}]
+    assert _non_empty_quick_rows([{"ticker_or_name": "", "quantity": None, "avg_price": None}]) == []

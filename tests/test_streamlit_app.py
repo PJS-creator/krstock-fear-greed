@@ -112,6 +112,8 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert ".app-metric-profit .app-metric-title" not in source
     assert "justify-content: center !important;" in source
     assert ".st-key-app_theme_topbar" in source
+    assert "grid-template-columns: repeat(2, 4.45rem);" in source
+    assert "white-space: nowrap !important;" in source
     assert ".st-key-public_section_tabs" in source
     assert ".st-key-public_input_tabs" in source
     assert "grid-template-columns: repeat(6, minmax(0, 1fr));" in source
@@ -125,6 +127,15 @@ def test_theme_selector_does_not_set_widget_key_default_from_session_state():
 
     assert "st.session_state[APP_THEME_CHOICE_KEY] =" not in source
     assert 'radio_kwargs["index"] = None' in source
+
+
+def test_public_signup_uses_public_redirect_url_for_email_confirmation():
+    source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+
+    assert "def _public_auth_redirect_url()" in source
+    assert "PUBLIC_APP_URL" in source
+    assert "email_redirect_to=_public_auth_redirect_url()" in source
+    assert "def _render_public_auth_callback_notice()" in source
 
 
 def test_shared_metric_card_component_exists():
@@ -242,6 +253,23 @@ def test_public_onboarding_renders_for_empty_authenticated_portfolio():
     text = _app_text(at)
     for label in ("처음 시작하기", "샘플 포트폴리오로 둘러보기", "현재 보유종목만 빠르게 입력", "거래/현금 CSV 업로드"):
         assert label in text
+
+
+def test_public_onboarding_holdings_mode_keeps_quick_editor_visible():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["onboarding_mode"] = "holdings"
+    at.session_state["quick_holdings_draft_rows"] = [{"ticker_or_name": "삼성전자", "quantity": 200, "avg_price": 70000}]
+    at.run(timeout=20)
+
+    assert not at.exception
+    text = _app_text(at)
+    assert "빠른 입력" in text
+    assert "종목명 또는 티커" in text
+    assert at.session_state["quick_holdings_draft_rows"][0]["quantity"] == 200
 
 
 def test_public_holdings_transaction_input_renders_only_when_selected():
