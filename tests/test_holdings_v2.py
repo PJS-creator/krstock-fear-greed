@@ -1,6 +1,6 @@
 import pytest
 
-from app.ui.holdings import _non_empty_quick_rows, _quick_frame
+from app.ui.holdings import _append_quick_draft_row, _non_empty_quick_rows, _quick_draft_row, _quick_frame
 from portfolio.holdings import (
     QUOTE_STATUS_FAILED,
     QUOTE_STATUS_STALE,
@@ -205,3 +205,26 @@ def test_quick_holdings_editor_preserves_draft_rows():
     assert frame.to_dict("records") == [{"ticker_or_name": "삼성전자", "quantity": 200, "avg_price": 70000}]
     assert _non_empty_quick_rows(frame.to_dict("records")) == [{"ticker_or_name": "삼성전자", "quantity": 200, "avg_price": 70000}]
     assert _non_empty_quick_rows([{"ticker_or_name": "", "quantity": None, "avg_price": None}]) == []
+
+
+def test_quick_holdings_form_builds_valid_draft_rows():
+    assert _quick_draft_row(" 삼성전자 ", 200, 70000) == {"ticker_or_name": "삼성전자", "quantity": 200.0, "avg_price": 70000.0}
+    assert _quick_draft_row("QURE", 1000, 0) == {"ticker_or_name": "QURE", "quantity": 1000.0, "avg_price": None}
+
+
+def test_quick_holdings_form_rejects_invalid_draft_rows():
+    with pytest.raises(ValueError, match="종목명 또는 티커"):
+        _quick_draft_row("", 1, 10)
+    with pytest.raises(ValueError, match="수량은 0보다"):
+        _quick_draft_row("QURE", 0, 10)
+    with pytest.raises(ValueError, match="평균 매입단가"):
+        _quick_draft_row("QURE", 1, -1)
+
+
+def test_quick_holdings_form_appends_without_losing_existing_rows():
+    rows = [{"ticker_or_name": "삼성전자", "quantity": 200, "avg_price": 70000}]
+
+    assert _append_quick_draft_row(rows, "QURE", 1000, 41) == [
+        {"ticker_or_name": "삼성전자", "quantity": 200, "avg_price": 70000},
+        {"ticker_or_name": "QURE", "quantity": 1000.0, "avg_price": 41.0},
+    ]
