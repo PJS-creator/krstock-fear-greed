@@ -140,9 +140,15 @@ __CSS_VARS__
         }
         .st-key-public_login_remember_me label,
         .st-key-public_signup_remember_me label {
-            min-height: var(--token-control-height-md);
+            min-height: var(--token-control-height-sm);
+            display: inline-flex !important;
             align-items: center !important;
-            gap: var(--token-space-2) !important;
+            gap: var(--token-space-1) !important;
+        }
+        .st-key-public_login_remember_me label > div,
+        .st-key-public_signup_remember_me label > div {
+            margin: 0 !important;
+            padding: 0 !important;
         }
         .st-key-public_login_remember_me label p,
         .st-key-public_signup_remember_me label p,
@@ -151,12 +157,12 @@ __CSS_VARS__
             color: var(--app-heading) !important;
             font-size: var(--token-font-base) !important;
             font-weight: 720 !important;
-            line-height: var(--token-line-height-normal) !important;
+            line-height: 1 !important;
+            margin: 0 !important;
         }
-        .st-key-public_login_remember_me [data-testid="stTooltipIcon"],
-        .st-key-public_signup_remember_me [data-testid="stTooltipIcon"],
-        .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"],
-        .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"] {
+        .st-key-public_login_remember_me button[data-testid="stTooltipIcon"],
+        .st-key-public_signup_remember_me button[data-testid="stTooltipIcon"] {
+            position: relative !important;
             width: var(--token-font-lg) !important;
             height: var(--token-font-lg) !important;
             min-width: var(--token-font-lg) !important;
@@ -169,19 +175,26 @@ __CSS_VARS__
             font-size: var(--token-font-sm) !important;
             font-weight: 850 !important;
             line-height: 1 !important;
+            padding: 0 !important;
             vertical-align: middle !important;
         }
-        .st-key-public_login_remember_me [data-testid="stTooltipIcon"] svg,
-        .st-key-public_signup_remember_me [data-testid="stTooltipIcon"] svg,
-        .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"] svg,
-        .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"] svg {
+        .st-key-public_login_remember_me button[data-testid="stTooltipIcon"] svg,
+        .st-key-public_signup_remember_me button[data-testid="stTooltipIcon"] svg {
             display: none !important;
         }
-        .st-key-public_login_remember_me [data-testid="stTooltipIcon"]::after,
-        .st-key-public_signup_remember_me [data-testid="stTooltipIcon"]::after,
+        .st-key-public_login_remember_me button[data-testid="stTooltipIcon"]::after,
+        .st-key-public_signup_remember_me button[data-testid="stTooltipIcon"]::after {
+            position: absolute;
+            inset: 0;
+            display: grid;
+            place-items: center;
+            content: "?";
+            line-height: 1;
+            transform: translateX(0);
+        }
         .st-key-public_login_remember_me [data-testid="stTooltipHoverTarget"]::after,
         .st-key-public_signup_remember_me [data-testid="stTooltipHoverTarget"]::after {
-            content: "?";
+            content: none !important;
         }
         .journal-event {
             margin: var(--token-space-3) 0 var(--token-space-2);
