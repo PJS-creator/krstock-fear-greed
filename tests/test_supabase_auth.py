@@ -77,3 +77,34 @@ def test_supabase_signup_passes_email_redirect_option():
         "password": "strong-password",
         "options": {"email_redirect_to": "https://jisungport.streamlit.app/"},
     }
+
+
+def test_supabase_auth_restore_session_uses_saved_tokens():
+    class FakeAuth:
+        def __init__(self):
+            self.tokens = None
+
+        def set_session(self, access_token, refresh_token):
+            self.tokens = (access_token, refresh_token)
+            return {
+                "session": {
+                    "access_token": "new-access-token",
+                    "refresh_token": "new-refresh-token",
+                    "user": {"id": "auth-user-id", "email": "user@example.com"},
+                }
+            }
+
+    class FakeClient:
+        def __init__(self):
+            self.auth = FakeAuth()
+
+    store = SupabaseAuthStore.__new__(SupabaseAuthStore)
+    store._client = FakeClient()
+
+    account = store.restore_session("old-access-token", "old-refresh-token")
+
+    assert store._client.auth.tokens == ("old-access-token", "old-refresh-token")
+    assert account.owner_id == "auth-user-id"
+    assert account.account_id == "user@example.com"
+    assert account.access_token == "new-access-token"
+    assert account.refresh_token == "new-refresh-token"
