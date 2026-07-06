@@ -141,6 +141,7 @@ def test_public_signup_uses_public_redirect_url_for_email_confirmation():
 def test_public_login_remember_me_restores_encrypted_session_cookie():
     source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
     persistence_source = Path("portfolio/session_persistence.py").read_text(encoding="utf-8")
+    auth_persistence_source = Path("app/ui/auth_persistence.py").read_text(encoding="utf-8")
     requirements_source = Path("app/requirements.txt").read_text(encoding="utf-8")
 
     assert '"로그인 유지"' in source
@@ -152,6 +153,8 @@ def test_public_login_remember_me_restores_encrypted_session_cookie():
     assert "restore_session" in Path("portfolio/supabase_auth.py").read_text(encoding="utf-8")
     assert "Fernet" in persistence_source
     assert "refresh_token" in persistence_source
+    assert "@st.cache_resource" not in auth_persistence_source
+    assert "@st.cache_data" not in auth_persistence_source
     assert "extra-streamlit-components" in requirements_source
 
 

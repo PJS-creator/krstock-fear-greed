@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Protocol
 
-import streamlit as st
-
 from portfolio.session_persistence import DEFAULT_REMEMBER_DAYS, SESSION_COOKIE_NAME
+
+_COOKIE_MANAGER_UNSET = object()
+_COOKIE_MANAGER: object = _COOKIE_MANAGER_UNSET
 
 
 class CookieManagerLike(Protocol):
@@ -19,13 +20,17 @@ class CookieManagerLike(Protocol):
         ...
 
 
-@st.cache_resource(show_spinner=False)
 def get_cookie_manager() -> CookieManagerLike | None:
+    global _COOKIE_MANAGER
+    if _COOKIE_MANAGER is not _COOKIE_MANAGER_UNSET:
+        return _COOKIE_MANAGER  # type: ignore[return-value]
     try:
         import extra_streamlit_components as stx
     except ImportError:
+        _COOKIE_MANAGER = None
         return None
-    return stx.CookieManager()
+    _COOKIE_MANAGER = stx.CookieManager()
+    return _COOKIE_MANAGER  # type: ignore[return-value]
 
 
 def remember_cookie_expires_at(*, remember_days: int = DEFAULT_REMEMBER_DAYS) -> datetime:
