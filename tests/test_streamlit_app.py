@@ -116,6 +116,9 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert "white-space: nowrap !important;" in source
     assert ".st-key-public_section_tabs" in source
     assert ".st-key-public_input_tabs" in source
+    assert ".st-key-public_login_remember_me" in source
+    assert ".st-key-public_signup_remember_me" in source
+    assert 'content: "?";' in source
     assert "grid-template-columns: repeat(6, minmax(0, 1fr));" in source
     assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in source
     assert "border-bottom: 1px solid var(--app-border);" in source
@@ -146,6 +149,8 @@ def test_public_login_remember_me_restores_encrypted_session_cookie():
 
     assert '"로그인 유지"' in source
     assert '"가입 후 로그인 유지"' in source
+    assert 'key="public_login_remember_me"' in source
+    assert 'key="public_signup_remember_me"' in source
     assert "AUTH_SESSION_SECRET" in source
     assert "decode_remembered_session" in source
     assert "encode_remembered_session" in source

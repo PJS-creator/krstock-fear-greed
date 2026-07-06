@@ -665,6 +665,7 @@ def _render_public_auth_gate(storage_config) -> None:
             remember_login = st.checkbox(
                 "로그인 유지",
                 value=False,
+                key="public_login_remember_me",
                 disabled=not remember_available,
                 help=f"이 브라우저에 암호화된 세션을 저장하고 최대 {DEFAULT_REMEMBER_DAYS}일 동안 자동 로그인을 시도합니다.",
             )
@@ -687,6 +688,7 @@ def _render_public_auth_gate(storage_config) -> None:
             remember_signup = st.checkbox(
                 "가입 후 로그인 유지",
                 value=False,
+                key="public_signup_remember_me",
                 disabled=not remember_available,
                 help=f"회원가입 직후 세션이 발급되는 경우 이 브라우저에 암호화된 세션을 저장합니다.",
             )
