@@ -42,6 +42,21 @@ def _metrics():
     )
 
 
+def _many_holding_metrics():
+    return build_portfolio_metrics(
+        [
+            {"market": "KR", "ticker": "000001", "display_name": "Alpha", "quantity": 1, "avg_price": 80, "current_price": 100, "previous_close": 95},
+            {"market": "KR", "ticker": "000002", "display_name": "Bravo", "quantity": 1, "avg_price": 70, "current_price": 80, "previous_close": 82},
+            {"market": "KR", "ticker": "000003", "display_name": "Charlie", "quantity": 1, "avg_price": 55, "current_price": 60, "previous_close": 60},
+            {"market": "KR", "ticker": "000004", "display_name": "Delta", "quantity": 1, "avg_price": 35, "current_price": 40, "previous_close": 38},
+            {"market": "KR", "ticker": "000005", "display_name": "Echo", "quantity": 1, "avg_price": 15, "current_price": 20, "previous_close": 21},
+        ],
+        cash_krw=0,
+        cash_usd=0,
+        usd_krw=1400,
+    )
+
+
 def test_summary_allocation_separates_cash_and_prefers_korean_company_name():
     rows = _allocation_rows(_metrics())
     cash_row = _cash_allocation_row(_metrics())
@@ -59,6 +74,15 @@ def test_summary_asset_dots_use_daily_movement_colors():
 
     assert rows["삼성전자"]["color"] == tokens["profit"]
     assert rows["MU · Micron"]["color"] == tokens["loss"]
+
+
+def test_summary_allocation_collapses_more_than_three_holdings_to_other():
+    rows = _allocation_rows(_many_holding_metrics())
+
+    assert [row["label"] for row in rows] == ["Alpha", "Bravo", "Charlie", "기타"]
+    assert rows[-1]["detail"] == "2개 종목 합산"
+    assert rows[-1]["kind"] == "other"
+    assert round(rows[-1]["weight"], 6) == round((40 + 20) / (100 + 80 + 60 + 40 + 20), 6)
 
 
 def test_summary_holding_table_restores_detailed_columns():
@@ -151,6 +175,8 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert ".summary-heatmap-card {\n            padding: 18px;\n            min-height: 360px;" in html
     assert ".summary-heatmap-tile:hover" in html
     assert "filter: brightness(1.15) saturate(1.08);" in html
+    assert "transform: translateZ(0) scale(1.1);" in html
+    assert "summary-heatmap-small:hover" in html
     assert "color-mix(in srgb, var(--token-overlay) 36%, transparent)" in html
     for col_class in (
         "summary-col-name",
@@ -178,6 +204,32 @@ def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_excl
     assert "삼성전자" in tiles
     assert "+1.3%" in tiles
     assert "현금" not in tiles
+
+
+def test_summary_heatmap_small_tiles_keep_labels_and_hover_affordance():
+    tiles = _heatmap_tiles(
+        [
+            {
+                "label": "Large",
+                "value_krw": 999,
+                "weight": 0.999,
+                "heat_color": "#E11D48",
+                "day_change_pct": 0.01,
+            },
+            {
+                "label": "Tiny",
+                "value_krw": 1,
+                "weight": 0.001,
+                "heat_color": "#0284C7",
+                "day_change_pct": -0.012,
+            },
+        ]
+    )
+
+    assert "Tiny" in tiles
+    assert "-1.2%" in tiles
+    assert "summary-heatmap-small" in tiles
+    assert "비중 0.10%" in tiles
 
 
 def test_summary_heatmap_empty_state_is_safe():
