@@ -172,7 +172,16 @@ def render_onboarding(*, portfolio_snapshot: dict[str, object]) -> None:
                 request_app_rerun()
         return
 
+    mode = st.session_state.get(ONBOARDING_MODE_KEY)
+    if mode == "holdings":
+        render_holdings_editor()
+        return
+    if mode == "csv":
+        render_data_portability_tools(portfolio_snapshot=portfolio_snapshot)
+        return
+
     if state == AppDataState.READY:
+        st.session_state[ONBOARDING_MODE_KEY] = ""
         return
     if state == AppDataState.PARTIAL_DATA:
         if st.session_state.get(ONBOARDING_DISMISSED_KEY):
@@ -218,9 +227,3 @@ def render_onboarding(*, portfolio_snapshot: dict[str, object]) -> None:
     if st.button("나중에 하기", key="dismiss_onboarding", type="secondary"):
         st.session_state[ONBOARDING_DISMISSED_KEY] = True
         request_app_rerun()
-
-    mode = st.session_state.get(ONBOARDING_MODE_KEY)
-    if mode == "holdings":
-        render_holdings_editor()
-    elif mode == "csv":
-        render_data_portability_tools(portfolio_snapshot=portfolio_snapshot)

@@ -677,20 +677,28 @@ __CSS_VARS__
             right: 0;
             z-index: 30;
             width: auto !important;
-            max-width: 10rem;
+            max-width: 9.6rem;
         }
         .st-key-app_theme_topbar div[role="radiogroup"] {
             display: grid !important;
-            grid-template-columns: repeat(2, 4rem);
+            grid-template-columns: repeat(2, 4.45rem);
             justify-content: flex-end;
             gap: var(--token-space-2);
         }
         .st-key-app_theme_topbar div[role="radiogroup"] label {
-            width: 4rem;
+            width: 4.45rem;
             min-height: var(--token-button-height-sm);
             padding: 0 var(--token-space-2);
             font-size: var(--token-font-sm);
             box-shadow: var(--app-shadow);
+            white-space: nowrap;
+            line-height: 1;
+        }
+        .st-key-app_theme_topbar div[role="radiogroup"] label > div,
+        .st-key-app_theme_topbar div[role="radiogroup"] label p {
+            white-space: nowrap !important;
+            word-break: keep-all !important;
+            line-height: 1 !important;
         }
         .st-key-app_header_refresh button {
             width: 190px !important;
@@ -851,16 +859,16 @@ __CSS_VARS__
             .st-key-app_theme_topbar {
                 top: 0.72rem;
                 right: 0.75rem;
-                max-width: 8.85rem;
+                max-width: 9.1rem;
             }
             .st-key-app_theme_topbar div[role="radiogroup"] {
-                grid-template-columns: repeat(2, 4.05rem);
+                grid-template-columns: repeat(2, 4.35rem);
                 gap: 0.3rem;
             }
             .st-key-app_theme_topbar div[role="radiogroup"] label {
-                width: 4.05rem;
+                width: 4.35rem;
                 min-height: 2.15rem;
-                padding: 0.34rem 0.18rem;
+                padding: 0.34rem 0.2rem;
                 font-size: 0.82rem;
             }
             .app-header-status {

@@ -148,6 +148,10 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "<th>IRR</th>" in html
     assert "table-layout: fixed;" in html
     assert "font-size: clamp(0.68rem, 0.63vw, 0.79rem);" in html
+    assert ".summary-heatmap-card {\n            padding: 18px;\n            min-height: 360px;" in html
+    assert ".summary-heatmap-tile:hover" in html
+    assert "filter: brightness(1.15) saturate(1.08);" in html
+    assert "color-mix(in srgb, var(--token-overlay) 36%, transparent)" in html
     for col_class in (
         "summary-col-name",
         "summary-col-qty",
@@ -176,11 +180,26 @@ def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_excl
     assert "현금" not in tiles
 
 
+def test_summary_heatmap_empty_state_is_safe():
+    tiles = _heatmap_tiles([])
+
+    assert "summary-heatmap-empty" in tiles
+    assert "보유자산 없음" in tiles
+
+
 def test_light_theme_separates_heatmap_tile_borders_from_outer_border():
     variables = get_app_theme("light").css_variables()
 
     assert variables["summary-heatmap-border"] != variables["summary-heatmap-tile-border"]
     assert "255, 255, 255" in variables["summary-heatmap-tile-border"]
+
+
+def test_dark_theme_heatmap_border_is_not_pure_black():
+    variables = get_app_theme("dark").css_variables()
+
+    assert variables["summary-heatmap-bg"] == "#0F172A"
+    assert variables["summary-heatmap-border"] == "#263244"
+    assert variables["summary-heatmap-tile-border"] == "#1E293B"
 
 
 def test_summary_sparkline_uses_intraday_prices_and_handles_missing_data():
