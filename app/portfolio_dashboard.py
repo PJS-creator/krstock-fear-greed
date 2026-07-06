@@ -428,6 +428,41 @@ def _build_public_auth_store(storage_config) -> SupabaseAuthStore | None:
     return SupabaseAuthStore(storage_config)
 
 
+def _secret_text(name: str) -> str:
+    try:
+        return str(st.secrets.get(name, "") or "").strip()
+    except Exception:
+        return ""
+
+
+def _public_auth_redirect_url() -> str | None:
+    for key in ("PUBLIC_APP_URL", "STREAMLIT_APP_URL", "APP_URL"):
+        value = _secret_text(key)
+        if value and value.lower() != "null":
+            return value
+    context_url = str(getattr(getattr(st, "context", None), "url", "") or "").strip()
+    return context_url if context_url and context_url.lower() != "null" else None
+
+
+def _query_param_text(name: str) -> str:
+    try:
+        value = st.query_params.get(name)
+    except Exception:
+        return ""
+    if isinstance(value, list):
+        value = value[0] if value else ""
+    return str(value or "").strip()
+
+
+def _render_public_auth_callback_notice() -> None:
+    error_text = _query_param_text("error_description") or _query_param_text("error")
+    if error_text:
+        st.warning("이메일 확인 링크 처리 중 문제가 발생했습니다. 이미 인증된 계정이면 아래 로그인 탭에서 이메일과 비밀번호로 로그인하세요.")
+        return
+    if _query_param_text("code") or _query_param_text("access_token") or _query_param_text("type") in {"signup", "recovery", "magiclink"}:
+        st.info("이메일 확인이 완료되었거나 처리 중입니다. 가입한 이메일과 비밀번호로 로그인하세요.")
+
+
 def _apply_pending_portfolio_state() -> None:
     pending_state = st.session_state.pop(PENDING_PORTFOLIO_STATE_KEY, None)
     if not isinstance(pending_state, dict):
@@ -545,6 +580,7 @@ def _render_public_auth_gate(storage_config) -> None:
         st.error("로그인 설정이 필요합니다. Streamlit Secrets에 SUPABASE_URL과 SUPABASE_PUBLISHABLE_KEY 또는 SUPABASE_ANON_KEY를 입력하세요.")
         st.stop()
 
+    _render_public_auth_callback_notice()
     login_tab, signup_tab = st.tabs(["로그인", "회원가입"])
     with login_tab:
         with st.form("public_login_form"):
@@ -571,7 +607,7 @@ def _render_public_auth_gate(storage_config) -> None:
                 st.error("비밀번호 확인이 일치하지 않습니다.")
             else:
                 try:
-                    result = auth_store.sign_up(email, password)
+                    result = auth_store.sign_up(email, password, email_redirect_to=_public_auth_redirect_url())
                 except (SupabaseAuthValidationError, SupabaseAuthError) as exc:
                     st.error(str(exc))
                 else:

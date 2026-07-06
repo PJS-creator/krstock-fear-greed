@@ -23,6 +23,7 @@ from .theme import DIMENSIONS
 
 QUICK_EDITOR_COLUMNS = ["ticker_or_name", "quantity", "avg_price"]
 QUICK_PREVIEW_STATE_KEY = "quick_holdings_preview_rows"
+QUICK_DRAFT_STATE_KEY = "quick_holdings_draft_rows"
 MARKET_LABELS = {"전체": None, "미국": "US", "국내": "KR"}
 STATUS_FILTERS = {
     "전체": None,
@@ -107,7 +108,7 @@ def _quick_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     return pd.DataFrame(
         [
             {
-                "ticker_or_name": row.get("display_name") or row.get("ticker") or row.get("symbol"),
+                "ticker_or_name": row.get("ticker_or_name") or row.get("display_name") or row.get("ticker") or row.get("symbol"),
                 "quantity": row.get("quantity"),
                 "avg_price": row.get("avg_price"),
             }
@@ -115,6 +116,14 @@ def _quick_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
         ],
         columns=QUICK_EDITOR_COLUMNS,
     )
+
+
+def _non_empty_quick_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    draft_rows: list[dict[str, object]] = []
+    for row in rows:
+        if any(str(row.get(column) or "").strip() for column in QUICK_EDITOR_COLUMNS):
+            draft_rows.append({column: row.get(column) for column in QUICK_EDITOR_COLUMNS})
+    return draft_rows
 
 
 def _advanced_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
@@ -146,6 +155,8 @@ def _preview_frame(records: list[dict[str, object]]) -> pd.DataFrame:
 def _apply_quick_records(records: list[dict[str, object]], existing_rows: list[dict[str, object]], *, duplicate_policy: str) -> None:
     st.session_state.holdings_rows = merge_quick_rows_with_existing(records, existing_rows, duplicate_policy=duplicate_policy)
     st.session_state.pop(QUICK_PREVIEW_STATE_KEY, None)
+    st.session_state.pop(QUICK_DRAFT_STATE_KEY, None)
+    st.session_state["onboarding_mode"] = ""
     st.session_state.holdings_message = "입력값을 적용했습니다. 가격 새로고침 버튼을 눌러 최근 제공 가격을 갱신하세요."
     request_app_rerun()
 
@@ -194,8 +205,10 @@ def render_holdings_editor() -> None:
     st.subheader("빠른 입력")
     st.caption("종목명 또는 티커와 수량만 입력해도 됩니다. 평균단가는 선택 입력이며, 입력하면 평가이익과 수익률을 계산합니다.")
     rows = st.session_state.get("holdings_rows", [])
+    draft_rows = st.session_state.get(QUICK_DRAFT_STATE_KEY, [])
+    base_rows = rows or draft_rows
     quick_frame = st.data_editor(
-        _quick_frame(rows),
+        _quick_frame(base_rows),
         key="quick_holdings_editor",
         num_rows="dynamic",
         width="stretch",
@@ -205,6 +218,7 @@ def render_holdings_editor() -> None:
             "avg_price": st.column_config.NumberColumn("평균 매입단가", min_value=0.0, step=0.01, format="%,.2f", help="국내 종목은 원화, 미국 종목은 달러 기준입니다."),
         },
     )
+    st.session_state[QUICK_DRAFT_STATE_KEY] = _non_empty_quick_rows(quick_frame.to_dict("records"))
     duplicate_policy = st.radio("동일 종목 입력 처리", ["새 입력값으로 교체", "기존 수량에 합산"], horizontal=True, key="quick_duplicate_policy")
     if st.button("입력 미리보기", type="primary"):
         _build_preview(quick_frame.to_dict("records"))

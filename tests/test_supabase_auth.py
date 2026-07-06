@@ -2,9 +2,11 @@ import pytest
 
 from portfolio.supabase_auth import (
     SupabaseAuthError,
+    SupabaseAuthStore,
     SupabaseAuthValidationError,
     account_from_auth_response,
     normalize_email,
+    normalize_redirect_url,
     validate_password,
 )
 
@@ -43,3 +45,35 @@ def test_supabase_auth_validates_email_and_password():
         normalize_email("bad-email")
     with pytest.raises(SupabaseAuthValidationError):
         validate_password("short")
+
+
+def test_supabase_auth_normalizes_email_redirect_url():
+    assert normalize_redirect_url("https://jisungport.streamlit.app/?code=abc#token") == "https://jisungport.streamlit.app/"
+    assert normalize_redirect_url("null") is None
+    assert normalize_redirect_url("") is None
+
+
+def test_supabase_signup_passes_email_redirect_option():
+    class FakeAuth:
+        def __init__(self):
+            self.payload = None
+
+        def sign_up(self, payload):
+            self.payload = payload
+            return {"user": {"id": "auth-user-id", "email": "user@example.com"}}
+
+    class FakeClient:
+        def __init__(self):
+            self.auth = FakeAuth()
+
+    store = SupabaseAuthStore.__new__(SupabaseAuthStore)
+    store._client = FakeClient()
+
+    result = store.sign_up("User@Example.COM", "strong-password", email_redirect_to="https://jisungport.streamlit.app/?x=1")
+
+    assert result.confirmation_required
+    assert store._client.auth.payload == {
+        "email": "user@example.com",
+        "password": "strong-password",
+        "options": {"email_redirect_to": "https://jisungport.streamlit.app/"},
+    }

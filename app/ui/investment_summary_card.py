@@ -12,7 +12,7 @@ from portfolio.transactions import normalize_transaction_rows
 
 from .components import render_empty_state
 from .formatters import KST, format_kst, format_number, format_price, instrument_label, percentage, signed_krw, signed_percentage
-from .theme import get_active_theme
+from .theme import SEMANTIC_COLORS, get_active_theme
 
 
 def _krw(value: float | None) -> str:
@@ -178,10 +178,11 @@ def _heatmap_tone(change_pct: float | None) -> str:
     tokens = get_active_theme().tokens()
     if change_pct is None or abs(change_pct) < 1e-12:
         return tokens["neutral_value"]
-    intensity = min(abs(change_pct) / 0.045, 1.0)
+    intensity = 0.42 + min(abs(change_pct) / 0.035, 1.0) * 0.58
+    base = tokens["surface_raised"]
     if change_pct > 0:
-        return _mix_hex(tokens["profit_text"], tokens["profit"], intensity)
-    return _mix_hex(tokens["loss_text"], tokens["loss"], intensity)
+        return _mix_hex(base, tokens["profit"], intensity)
+    return _mix_hex(base, tokens["loss"], intensity)
 
 
 def _font_size_for_weight(weight: float) -> float:
@@ -777,7 +778,7 @@ def _render_styles() -> None:
         .summary-legend-total { border-top: 1px solid var(--app-border); margin-top: 12px; padding-top: 14px; color: var(--app-positive); text-align: center; font-size: 1.18rem; font-weight: 850; }
         .summary-heatmap-card {
             padding: 18px;
-            min-height: 430px;
+            min-height: 360px;
             display: flex;
             flex-direction: column;
         }
@@ -803,7 +804,7 @@ def _render_styles() -> None:
         .summary-heatmap-area {
             position: relative;
             flex: 1;
-            min-height: 360px;
+            min-height: 300px;
             width: 100%;
             background: var(--summary-heatmap-bg);
             border: 1px solid var(--summary-heatmap-border);
@@ -824,7 +825,14 @@ def _render_styles() -> None:
             padding: 4px;
             overflow: hidden;
             text-shadow: none;
-            box-shadow: inset 0 -24px 58px var(--token-overlay);
+            box-shadow: inset 0 -12px 28px color-mix(in srgb, var(--token-overlay) 36%, transparent);
+            transition: filter 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+            will-change: filter;
+        }
+        .summary-heatmap-tile:hover {
+            filter: brightness(1.15) saturate(1.08);
+            transform: translateZ(0);
+            box-shadow: inset 0 -8px 18px color-mix(in srgb, var(--token-overlay) 22%, transparent);
         }
         .summary-heatmap-name {
             font-weight: 900;
@@ -1037,8 +1045,8 @@ def _render_styles() -> None:
         .summary-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; color: var(--app-muted); font-size: 0.9rem; }
         @media (max-width: 980px) {
             .summary-top, .summary-main, .summary-split-grid, .summary-kpi-grid { grid-template-columns: 1fr; }
-            .summary-heatmap-card { min-height: 360px; }
-            .summary-heatmap-area { min-height: 300px; }
+            .summary-heatmap-card { min-height: 320px; }
+            .summary-heatmap-area { min-height: 260px; }
         }
         @media (max-width: 720px) {
             .summary-card {
@@ -1082,14 +1090,14 @@ def _render_styles() -> None:
                 padding: 7px 0;
             }
             .summary-heatmap-card {
-                min-height: 280px;
+                min-height: 260px;
             }
             .summary-heatmap-head {
                 align-items: flex-start;
                 flex-direction: column;
             }
             .summary-heatmap-area {
-                min-height: 240px;
+                min-height: 210px;
             }
             .summary-heatmap-tile {
                 padding: 4px;
