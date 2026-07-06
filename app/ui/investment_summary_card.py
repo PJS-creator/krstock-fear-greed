@@ -107,6 +107,34 @@ def _currency_badge(value: object) -> str:
     return f"<span class='summary-currency-badge summary-currency-{label.lower()}'>{escape(label)}</span>"
 
 
+def _holding_native_value(holding: dict[str, Any]) -> float | None:
+    current_price = holding.get("current_price")
+    if current_price is None:
+        return None
+    return float(current_price) * float(holding.get("quantity") or 0.0)
+
+
+def _holding_allocation_detail(holding: dict[str, Any], value_krw: float) -> str:
+    currency = _currency_label(holding.get("currency"))
+    native_value = _holding_native_value(holding)
+    if currency == "USD" and native_value is not None:
+        return f"달러 {format_number(native_value, digits=1, trim=True)}$ • 환산 {_krw(value_krw)}"
+    if currency == "KRW":
+        return f"평가액 {_krw(value_krw)}"
+    return f"환산 {_krw(value_krw)}"
+
+
+def _mobile_price(value: object, currency: object) -> str:
+    if value is None:
+        return "-"
+    currency_label = _currency_label(currency)
+    if currency_label == "KRW":
+        return f"₩{format_number(float(value), digits=0)}"
+    if currency_label == "USD":
+        return f"${format_number(float(value), digits=1, trim=True)}"
+    return format_number(float(value), digits=1, trim=True)
+
+
 def _price_change_text(holding: dict[str, Any]) -> str:
     change = _holding_day_change_price(holding)
     pct = None
@@ -324,6 +352,7 @@ def _holding_allocation_rows(metrics: PortfolioMetrics) -> list[dict[str, Any]]:
                 "day_change_krw": item.day_change_krw,
                 "kind": "holding",
                 "currency": _currency_label(item.holding.get("currency")),
+                "allocation_detail": _holding_allocation_detail(item.holding, float(value)),
             }
         )
     return sorted(rows, key=_sort_key, reverse=True)
@@ -352,6 +381,7 @@ def _allocation_rows(metrics: PortfolioMetrics, *, max_items: int = 3) -> list[d
             "day_change_krw": other_day_change_krw,
             "kind": "other",
             "currency": "-",
+            "allocation_detail": f"{len(other)}개 종목 합산 • 환산 {_krw(other_value)}",
         }
     )
     return kept
@@ -611,19 +641,18 @@ def _mobile_holding_summary_table(metrics: PortfolioMetrics) -> str:
         holding = item.holding
         label = instrument_label(holding)
         color = _movement_dot_color(_holding_day_change_price(holding))
-        currency = _currency_label(holding.get("currency"))
-        quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
-        avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
-        current_price = format_price(holding.get("current_price"), holding.get("currency"))
+        quantity = f"{format_number(float(holding.get('quantity') or 0), digits=1, trim=True)}주"
+        avg_price = _mobile_price(holding.get("avg_price"), holding.get("currency"))
+        current_price = _mobile_price(holding.get("current_price"), holding.get("currency"))
         rows.append(
             "<tr>"
             "<td>"
-            f"<div class='summary-mobile-summary-name'><span class='summary-name-dot' style='background:{color}'></span><strong>{escape(label)}</strong>{_currency_badge(currency)}</div>"
+            f"<div class='summary-mobile-summary-name'><span class='summary-name-dot' style='background:{color}'></span><strong>{escape(label)}</strong></div>"
             "</td>"
             f"<td>{escape(quantity)}</td>"
-            f"<td>{escape(avg_price)}</td>"
-            f"<td>{escape(current_price)}</td>"
-            f"<td class='summary-mobile-summary-weight'>{escape(percentage(item.weight, digits=2))}</td>"
+            f"<td class='summary-mobile-tight'>{escape(avg_price)}</td>"
+            f"<td class='summary-mobile-tight'>{escape(current_price)}</td>"
+            f"<td class='summary-mobile-summary-weight'>{escape(percentage(item.weight, digits=1))}</td>"
             "</tr>"
         )
     if not rows:
@@ -1175,10 +1204,13 @@ def _render_styles() -> None:
             .summary-mobile-holding-table th,
             .summary-mobile-holding-table td {
                 border-bottom: 1px solid var(--app-border);
-                padding: 8px 4px;
+                padding: 8px 3px;
                 text-align: right;
                 vertical-align: middle;
-                overflow-wrap: anywhere;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                overflow-wrap: normal;
             }
             .summary-mobile-holding-table th {
                 color: var(--app-muted);
@@ -1228,11 +1260,18 @@ def _render_styles() -> None:
                 min-width: 0;
                 font-size: 0.76rem;
                 line-height: 1.18;
-                overflow-wrap: anywhere;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .summary-mobile-tight {
+                font-size: clamp(0.58rem, 2.35vw, 0.7rem);
+                letter-spacing: -0.01em;
             }
             .summary-mobile-summary-weight {
                 color: var(--app-positive);
                 font-weight: 850;
+                font-size: clamp(0.58rem, 2.35vw, 0.7rem);
             }
             .summary-table-wrap {
                 margin-top: 12px;
@@ -1401,8 +1440,8 @@ def render_investment_summary_card(
         "<div class='summary-legend-row'>"
         f"<span class='summary-dot' style='background:{row['color']}'></span>"
         "<span class='summary-legend-name'>"
-        f"<span class='summary-legend-title'>{escape(str(row['label']))}{_currency_badge(row.get('currency'))}</span>"
-        f"<small>{escape(_krw(float(row['value_krw'])))} · {escape(str(row.get('currency') or '-'))}</small>"
+        f"<span class='summary-legend-title'>{escape(str(row['label']))}</span>"
+        f"<small>{escape(str(row.get('allocation_detail') or _krw(float(row['value_krw']))))}</small>"
         "</span>"
         f"<span class='summary-legend-pct'>{escape(percentage(float(row['weight']), digits=2))}</span>"
         "</div>"
@@ -1417,7 +1456,7 @@ def render_investment_summary_card(
             "<div class='summary-legend-row summary-cash-row'>"
             f"<span class='summary-dot' style='background:{row['color']}'></span>"
             "<span class='summary-legend-name'>"
-            f"<span class='summary-legend-title'>{escape(str(row['label']))}{_currency_badge(row.get('currency'))}</span>"
+            f"<span class='summary-legend-title'>{escape(str(row['label']))}</span>"
             f"<small>{escape(str(row['detail']))}</small>"
             "</span>"
             f"<span class='summary-legend-pct'>{escape(percentage(float(row['weight']), digits=2))}</span>"
