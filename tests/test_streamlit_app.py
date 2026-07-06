@@ -268,8 +268,13 @@ def test_public_onboarding_holdings_mode_keeps_quick_editor_visible():
     assert not at.exception
     text = _app_text(at)
     assert "빠른 입력" in text
-    assert "종목명 또는 티커" in text
     assert at.session_state["quick_holdings_draft_rows"][0]["quantity"] == 200
+    source = Path("app/ui/holdings.py").read_text(encoding="utf-8")
+    assert 'st.form("quick_holding_add_form"' in source
+    assert '"종목명 또는 티커"' in source
+    assert '"행 추가"' in source
+    assert 'st.expander("표 형태로 한 번에 편집"' in source
+    assert 'key="quick_holdings_table_editor"' in source
 
 
 def test_public_holdings_transaction_input_renders_only_when_selected():

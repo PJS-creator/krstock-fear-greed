@@ -126,6 +126,33 @@ def _non_empty_quick_rows(rows: list[dict[str, object]]) -> list[dict[str, objec
     return draft_rows
 
 
+def _quick_draft_row(ticker_or_name: object, quantity: object, avg_price: object = None) -> dict[str, object]:
+    ticker_text = str(ticker_or_name or "").strip()
+    if not ticker_text:
+        raise ValueError("종목명 또는 티커를 입력하세요.")
+    try:
+        quantity_value = float(quantity or 0.0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("수량은 숫자로 입력하세요.") from exc
+    if quantity_value <= 0:
+        raise ValueError("수량은 0보다 커야 합니다.")
+    try:
+        avg_price_value = float(avg_price or 0.0)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("평균 매입단가는 숫자로 입력하세요.") from exc
+    if avg_price_value < 0:
+        raise ValueError("평균 매입단가는 0 이상이어야 합니다.")
+    return {
+        "ticker_or_name": ticker_text,
+        "quantity": quantity_value,
+        "avg_price": avg_price_value if avg_price_value > 0 else None,
+    }
+
+
+def _append_quick_draft_row(rows: list[dict[str, object]], ticker_or_name: object, quantity: object, avg_price: object = None) -> list[dict[str, object]]:
+    return _non_empty_quick_rows([*rows, _quick_draft_row(ticker_or_name, quantity, avg_price)])
+
+
 def _advanced_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
     frame = pd.DataFrame(rows, columns=HOLDING_COLUMNS)
     for column in ADVANCED_TEXT_COLUMNS:
@@ -203,25 +230,45 @@ def _render_quality_summary(preview_rows: list[dict[str, object]]) -> None:
 
 def render_holdings_editor() -> None:
     st.subheader("빠른 입력")
-    st.caption("종목명 또는 티커와 수량만 입력해도 됩니다. 평균단가는 선택 입력이며, 입력하면 평가이익과 수익률을 계산합니다.")
+    st.caption("한 종목씩 입력한 뒤 행 추가를 누르세요. 평균단가는 선택 입력이며, 입력하면 평가이익과 수익률을 계산합니다.")
     rows = st.session_state.get("holdings_rows", [])
     draft_rows = st.session_state.get(QUICK_DRAFT_STATE_KEY, [])
-    base_rows = rows or draft_rows
-    quick_frame = st.data_editor(
-        _quick_frame(base_rows),
-        key="quick_holdings_editor",
-        num_rows="dynamic",
-        width="stretch",
-        column_config={
-            "ticker_or_name": st.column_config.TextColumn("종목명 또는 티커", required=True, help="예: 삼성전자, 005930, MU, QURE"),
-            "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, required=True, format="%,.4f"),
-            "avg_price": st.column_config.NumberColumn("평균 매입단가", min_value=0.0, step=0.01, format="%,.2f", help="국내 종목은 원화, 미국 종목은 달러 기준입니다."),
-        },
-    )
-    st.session_state[QUICK_DRAFT_STATE_KEY] = _non_empty_quick_rows(quick_frame.to_dict("records"))
+    with st.form("quick_holding_add_form", clear_on_submit=True):
+        col1, col2, col3, col4 = st.columns([2.2, 1.1, 1.3, 0.9], vertical_alignment="bottom")
+        ticker_or_name = col1.text_input("종목명 또는 티커", placeholder="예: 삼성전자, 005930, MU, QURE", help="국내 종목명, 종목코드, 미국 티커를 입력할 수 있습니다.")
+        quantity = col2.number_input("수량", min_value=0.0, step=0.0001, format="%.4f", help="현재 보유 중인 수량을 입력합니다.")
+        avg_price = col3.number_input("평균 매입단가", min_value=0.0, step=0.01, format="%.2f", help="선택 입력입니다. 0이면 평균단가 미입력으로 처리합니다.")
+        submitted = col4.form_submit_button("행 추가", type="primary", use_container_width=True)
+    if submitted:
+        try:
+            st.session_state[QUICK_DRAFT_STATE_KEY] = _append_quick_draft_row(draft_rows, ticker_or_name, quantity, avg_price)
+            st.session_state.pop(QUICK_PREVIEW_STATE_KEY, None)
+            request_app_rerun()
+        except ValueError as exc:
+            st.error(str(exc))
+
+    draft_rows = st.session_state.get(QUICK_DRAFT_STATE_KEY, [])
+    if draft_rows:
+        st.caption("입력 목록")
+        st.dataframe(
+            _quick_frame(draft_rows),
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "ticker_or_name": st.column_config.TextColumn("종목명 또는 티커"),
+                "quantity": st.column_config.NumberColumn("수량", format="%,.4f"),
+                "avg_price": st.column_config.NumberColumn("평균 매입단가", format="%,.2f"),
+            },
+        )
+        if st.button("입력 목록 초기화", type="secondary"):
+            st.session_state.pop(QUICK_DRAFT_STATE_KEY, None)
+            st.session_state.pop(QUICK_PREVIEW_STATE_KEY, None)
+            request_app_rerun()
+
     duplicate_policy = st.radio("동일 종목 입력 처리", ["새 입력값으로 교체", "기존 수량에 합산"], horizontal=True, key="quick_duplicate_policy")
-    if st.button("입력 미리보기", type="primary"):
-        _build_preview(quick_frame.to_dict("records"))
+    preview_source_rows = list(st.session_state.get(QUICK_DRAFT_STATE_KEY, []))
+    if st.button("입력 미리보기", type="primary", disabled=not preview_source_rows):
+        _build_preview(preview_source_rows)
 
     preview_rows = list(st.session_state.get(QUICK_PREVIEW_STATE_KEY, []))
     if preview_rows:
@@ -269,6 +316,24 @@ def render_holdings_editor() -> None:
         uploaded = st.file_uploader("간편 CSV 업로드", type=["csv"], key="quick_simple_csv_upload")
         if uploaded is not None and st.button("CSV 미리보기"):
             _build_preview(csv_to_rows(uploaded.getvalue()))
+
+    with st.expander("표 형태로 한 번에 편집", expanded=False):
+        st.caption("브라우저에서 표 숫자 입력이 불안정하면 위의 행 추가 입력을 사용하세요.")
+        table_frame = st.data_editor(
+            _quick_frame(st.session_state.get(QUICK_DRAFT_STATE_KEY, [])),
+            key="quick_holdings_table_editor",
+            num_rows="dynamic",
+            width="stretch",
+            column_config={
+                "ticker_or_name": st.column_config.TextColumn("종목명 또는 티커", required=True),
+                "quantity": st.column_config.NumberColumn("수량", min_value=0.0, step=0.0001, required=True, format="%,.4f"),
+                "avg_price": st.column_config.NumberColumn("평균 매입단가", min_value=0.0, step=0.01, format="%,.2f"),
+            },
+        )
+        if st.button("표 입력 목록 반영"):
+            st.session_state[QUICK_DRAFT_STATE_KEY] = _non_empty_quick_rows(table_frame.to_dict("records"))
+            st.session_state.pop(QUICK_PREVIEW_STATE_KEY, None)
+            request_app_rerun()
 
     message = st.session_state.pop("holdings_message", None)
     if message:
