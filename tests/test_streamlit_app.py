@@ -118,7 +118,10 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert ".st-key-public_input_tabs" in source
     assert ".st-key-public_login_remember_me" in source
     assert ".st-key-public_signup_remember_me" in source
+    assert 'button[data-testid="stTooltipIcon"]::after' in source
     assert 'content: "?";' in source
+    assert "content: none !important;" in source
+    assert "gap: var(--token-space-1) !important;" in source
     assert "grid-template-columns: repeat(6, minmax(0, 1fr));" in source
     assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in source
     assert "border-bottom: 1px solid var(--app-border);" in source
