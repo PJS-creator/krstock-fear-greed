@@ -8,6 +8,8 @@
 - [ ] 공개 앱 Secrets에는 `SUPABASE_PUBLISHABLE_KEY` 또는 `SUPABASE_ANON_KEY`만 설정한다.
 - [ ] 공개 앱 Secrets에는 `SUPABASE_SERVICE_ROLE_KEY`를 넣지 않는다.
 - [ ] 공개 앱 Secrets에는 `PUBLIC_USER_AUTH = true`를 설정한다.
+- [ ] 로그인 유지 기능을 켜려면 공개 앱 Secrets에 `AUTH_SESSION_SECRET`을 설정한다.
+- [ ] `AUTH_SESSION_SECRET`은 32자 이상의 임의 문자열로 만들고, Supabase publishable/anon/service role key나 앱 비밀번호를 재사용하지 않는다.
 - [ ] `.env`, API key, Supabase secret key, SQLite `.db`, 캐시 파일은 GitHub에 커밋하지 않는다.
 
 ## 앱 코드 원칙
@@ -17,6 +19,8 @@
 - [ ] 공개 앱에서는 사용자가 `owner_id` 또는 `portfolio_name`을 직접 바꾸는 UI를 제공하지 않는다.
 - [ ] 공개 앱의 포트폴리오 이름은 `main`으로 고정한다.
 - [ ] 공개 앱에서는 service role client를 생성하거나 사용자 요청 처리에 사용하지 않는다.
+- [ ] 로그인 유지 쿠키에는 암호화된 Supabase Auth access/refresh token만 저장하고, `AUTH_SESSION_SECRET` 없이 복호화할 수 없어야 한다.
+- [ ] 로그아웃하면 로그인 유지 쿠키도 함께 삭제되어야 한다.
 - [ ] `Manage app`은 Streamlit Cloud 운영 권한 메뉴이므로 일반 사용자에게 Streamlit workspace 권한을 부여하지 않는다.
 - [ ] 주요 화면 렌더링 오류는 사용자 데이터나 secret 값을 노출하지 않고 일반 오류 안내와 로그용 오류 ID만 표시한다.
 

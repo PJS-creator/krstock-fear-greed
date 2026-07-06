@@ -38,6 +38,7 @@ def _stop_if_unsupported_python_runtime() -> None:
 
 _stop_if_unsupported_python_runtime()
 
+from app.ui.auth_persistence import delete_remember_cookie, get_cookie_manager, get_remember_cookie, set_remember_cookie
 from app.ui.components import render_app_header, render_price_update_log, safe_render_section
 from app.ui.data_portability import render_data_portability_tools
 from app.ui.formatters import format_kst, format_number, format_price, full_krw
@@ -107,6 +108,7 @@ from portfolio.supabase_auth import (
     SupabaseAuthStore,
     SupabaseAuthValidationError,
 )
+from portfolio.session_persistence import DEFAULT_REMEMBER_DAYS, SessionPersistenceError, decode_remembered_session, encode_remembered_session
 
 AUTHENTICATED_KEY = "is_authenticated"
 ACCOUNT_ID_KEY = "authenticated_account_id"
@@ -138,6 +140,7 @@ CASH_LEDGER_STATUS_KEY = "cash_ledger_status_message"
 ALLOW_NEGATIVE_CASH_KEY = "allow_negative_cash_balance"
 PUBLIC_AUTH_ENV_KEY = "PORTFOLIO_PUBLIC_AUTH"
 PUBLIC_AUTH_SECRET_KEY = "PUBLIC_USER_AUTH"
+AUTH_SESSION_SECRET_KEY = "AUTH_SESSION_SECRET"
 UNPROTECTED_WARNING = "공개 앱에서 저장소와 직접 입력 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 PUBLIC_PORTFOLIO_NAME = "main"
 APP_THEME_CHOICE_KEY = "app_theme_choice"
@@ -356,7 +359,8 @@ def _authenticate_public_account(account: SupabaseAuthAccount) -> None:
     st.session_state[AUTH_REFRESH_TOKEN_KEY] = account.refresh_token
 
 
-def _logout() -> None:
+def _logout(cookie_manager=None) -> None:
+    delete_remember_cookie(cookie_manager)
     st.session_state[AUTHENTICATED_KEY] = False
     for key in (
         ACCOUNT_ID_KEY,
@@ -433,6 +437,71 @@ def _secret_text(name: str) -> str:
         return str(st.secrets.get(name, "") or "").strip()
     except Exception:
         return ""
+
+
+def _auth_session_secret() -> str:
+    return _secret_text(AUTH_SESSION_SECRET_KEY)
+
+
+def _remember_login_available(cookie_manager) -> bool:
+    return cookie_manager is not None and bool(_auth_session_secret())
+
+
+def _forget_public_auth_session(cookie_manager) -> None:
+    delete_remember_cookie(cookie_manager)
+
+
+def _remember_public_auth_session(account: SupabaseAuthAccount, cookie_manager, *, remember: bool) -> None:
+    if not remember:
+        _forget_public_auth_session(cookie_manager)
+        return
+    if cookie_manager is None:
+        st.session_state[ACCOUNT_STATUS_KEY] = "로그인은 완료됐지만 로그인 유지 쿠키 기능을 사용할 수 없습니다."
+        return
+    try:
+        token = encode_remembered_session(
+            account_id=account.account_id,
+            owner_id=account.owner_id,
+            access_token=account.access_token,
+            refresh_token=account.refresh_token,
+            secret=_auth_session_secret(),
+            remember_days=DEFAULT_REMEMBER_DAYS,
+        )
+        if set_remember_cookie(cookie_manager, token, remember_days=DEFAULT_REMEMBER_DAYS):
+            st.session_state[ACCOUNT_STATUS_KEY] = f"로그인 유지가 설정되었습니다. 이 브라우저에서 최대 {DEFAULT_REMEMBER_DAYS}일 동안 자동 로그인을 시도합니다."
+    except SessionPersistenceError as exc:
+        st.session_state[ACCOUNT_STATUS_KEY] = f"로그인은 완료됐지만 로그인 유지를 설정할 수 없습니다: {exc}"
+
+
+def _restore_public_auth_session(storage_config) -> bool:
+    if _is_authenticated():
+        return True
+    cookie_manager = get_cookie_manager()
+    token = get_remember_cookie(cookie_manager)
+    if not token:
+        return False
+    try:
+        remembered = decode_remembered_session(token, secret=_auth_session_secret())
+    except SessionPersistenceError:
+        _forget_public_auth_session(cookie_manager)
+        st.session_state[ACCOUNT_STATUS_KEY] = "저장된 로그인 세션이 만료되었거나 유효하지 않아 다시 로그인해야 합니다."
+        return False
+    auth_store = _build_public_auth_store(storage_config)
+    if auth_store is None:
+        return False
+    try:
+        account = auth_store.restore_session(remembered.access_token, remembered.refresh_token)
+    except SupabaseAuthError:
+        _forget_public_auth_session(cookie_manager)
+        st.session_state[ACCOUNT_STATUS_KEY] = "저장된 로그인 세션을 복원할 수 없어 다시 로그인해야 합니다."
+        return False
+    if account.owner_id != remembered.owner_id:
+        _forget_public_auth_session(cookie_manager)
+        st.session_state[ACCOUNT_STATUS_KEY] = "저장된 로그인 세션의 사용자 정보가 일치하지 않아 다시 로그인해야 합니다."
+        return False
+    _authenticate_public_account(account)
+    _remember_public_auth_session(account, cookie_manager, remember=True)
+    return True
 
 
 def _public_auth_redirect_url() -> str | None:
@@ -571,6 +640,8 @@ def _render_login_form(config: AppSecurityConfig) -> None:
 def _render_public_auth_gate(storage_config) -> None:
     _render_theme_selector()
     st.title("포트폴리오 대시보드")
+    cookie_manager = get_cookie_manager()
+    remember_available = _remember_login_available(cookie_manager)
     try:
         auth_store = _build_public_auth_store(storage_config)
     except SupabaseAuthError as exc:
@@ -581,11 +652,22 @@ def _render_public_auth_gate(storage_config) -> None:
         st.stop()
 
     _render_public_auth_callback_notice()
+    account_message = st.session_state.pop(ACCOUNT_STATUS_KEY, None)
+    if account_message:
+        st.info(account_message)
+    if not remember_available:
+        st.caption("로그인 유지를 사용하려면 Streamlit Secrets에 AUTH_SESSION_SECRET을 추가하고 앱을 재배포하세요.")
     login_tab, signup_tab = st.tabs(["로그인", "회원가입"])
     with login_tab:
         with st.form("public_login_form"):
             email = st.text_input("이메일", key="public_login_email")
             password = st.text_input("비밀번호", type="password", key="public_login_password")
+            remember_login = st.checkbox(
+                "로그인 유지",
+                value=False,
+                disabled=not remember_available,
+                help=f"이 브라우저에 암호화된 세션을 저장하고 최대 {DEFAULT_REMEMBER_DAYS}일 동안 자동 로그인을 시도합니다.",
+            )
             submitted = st.form_submit_button("로그인", type="primary")
         if submitted:
             try:
@@ -594,6 +676,7 @@ def _render_public_auth_gate(storage_config) -> None:
                 st.error(str(exc))
             else:
                 _authenticate_public_account(account)
+                _remember_public_auth_session(account, cookie_manager, remember=remember_login)
                 request_app_rerun()
 
     with signup_tab:
@@ -601,6 +684,12 @@ def _render_public_auth_gate(storage_config) -> None:
             email = st.text_input("이메일", key="public_signup_email")
             password = st.text_input("비밀번호", type="password", key="public_signup_password")
             password_confirm = st.text_input("비밀번호 확인", type="password", key="public_signup_password_confirm")
+            remember_signup = st.checkbox(
+                "가입 후 로그인 유지",
+                value=False,
+                disabled=not remember_available,
+                help=f"회원가입 직후 세션이 발급되는 경우 이 브라우저에 암호화된 세션을 저장합니다.",
+            )
             submitted = st.form_submit_button("회원가입", type="primary")
         if submitted:
             if password != password_confirm:
@@ -613,6 +702,7 @@ def _render_public_auth_gate(storage_config) -> None:
                 else:
                     if result.account is not None:
                         _authenticate_public_account(result.account)
+                        _remember_public_auth_session(result.account, cookie_manager, remember=remember_signup)
                         request_app_rerun()
                     if result.confirmation_required:
                         st.success("회원가입 요청을 보냈습니다. Supabase Auth 설정에서 이메일 확인이 켜져 있으면 메일 확인 후 로그인하세요.")
@@ -626,7 +716,7 @@ def _render_security_status(config: AppSecurityConfig, *, public_auth_enabled: b
             account_id = st.session_state.get(ACCOUNT_ID_KEY) or "account"
             st.caption(f"상태: 로그인됨 · {account_id}")
             if st.button("로그아웃", icon=":material/logout:"):
-                _logout()
+                _logout(get_cookie_manager())
                 request_app_rerun()
             return
         if not config.has_password:
@@ -1655,6 +1745,9 @@ if public_auth_enabled:
 _initialize_session_state(public_auth_enabled=public_auth_enabled)
 security_config = _read_security_config()
 storage_config = _read_storage_config(public_auth_enabled=public_auth_enabled)
+if public_auth_enabled and not _is_authenticated():
+    if _restore_public_auth_session(storage_config):
+        storage_config = _read_storage_config(public_auth_enabled=True)
 if public_auth_enabled and not _is_authenticated():
     _render_public_auth_gate(storage_config)
 if not public_auth_enabled and should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):

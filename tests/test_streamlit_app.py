@@ -138,6 +138,23 @@ def test_public_signup_uses_public_redirect_url_for_email_confirmation():
     assert "def _render_public_auth_callback_notice()" in source
 
 
+def test_public_login_remember_me_restores_encrypted_session_cookie():
+    source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+    persistence_source = Path("portfolio/session_persistence.py").read_text(encoding="utf-8")
+    requirements_source = Path("app/requirements.txt").read_text(encoding="utf-8")
+
+    assert '"로그인 유지"' in source
+    assert '"가입 후 로그인 유지"' in source
+    assert "AUTH_SESSION_SECRET" in source
+    assert "decode_remembered_session" in source
+    assert "encode_remembered_session" in source
+    assert "_restore_public_auth_session(storage_config)" in source
+    assert "restore_session" in Path("portfolio/supabase_auth.py").read_text(encoding="utf-8")
+    assert "Fernet" in persistence_source
+    assert "refresh_token" in persistence_source
+    assert "extra-streamlit-components" in requirements_source
+
+
 def test_shared_metric_card_component_exists():
     source = Path("app/ui/components.py").read_text(encoding="utf-8")
     performance_source = Path("app/ui/performance.py").read_text(encoding="utf-8")

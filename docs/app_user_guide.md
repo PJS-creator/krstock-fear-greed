@@ -53,6 +53,8 @@
 2. **회원가입** 탭에서 이메일과 비밀번호로 계정을 만듭니다.
 3. Supabase Auth 이메일 확인이 켜져 있으면 이메일 인증을 완료합니다.
 4. **로그인** 탭에서 같은 이메일과 비밀번호로 로그인합니다.
+   - 개인 기기라면 **로그인 유지**를 체크할 수 있습니다. 이 경우 같은 브라우저에서 최대 30일 동안 자동 로그인을 시도합니다.
+   - 공용 PC나 다른 사람과 함께 쓰는 기기에서는 체크하지 마세요. 로그아웃하면 저장된 로그인 유지 세션도 삭제됩니다.
 5. 첫 로그인 후 보이는 **처음 시작하기** 화면에서 시작 방식을 선택합니다.
 6. 샘플로 둘러보거나, 현재 보유종목만 빠르게 입력하거나, 거래/현금 CSV를 업로드합니다.
 7. 실제 데이터를 입력할 때는 먼저 **사용자입력 > 현금·입출금·환율**에서 KRW 또는 USD 입금을 기록합니다.
@@ -332,9 +334,12 @@ Streamlit Cloud Secrets에는 아래 값을 사용합니다.
 SUPABASE_URL = "https://your-project.supabase.co"
 SUPABASE_PUBLISHABLE_KEY = "your-publishable-key"
 PUBLIC_USER_AUTH = true
+AUTH_SESSION_SECRET = "32자 이상의 임의 문자열"
 ```
 
 `SUPABASE_PUBLISHABLE_KEY` 대신 `SUPABASE_ANON_KEY`를 사용할 수 있습니다. 공개 앱에는 `SUPABASE_SERVICE_ROLE_KEY`를 넣지 않습니다.
+
+`AUTH_SESSION_SECRET`은 로그인 유지 쿠키를 암호화하는 앱 전용 비밀값입니다. Supabase key나 앱 비밀번호를 재사용하지 말고 32자 이상으로 새로 만드세요. 이 값이 없으면 로그인 유지 체크박스는 비활성화됩니다.
 
 배포 전 Supabase SQL Editor에서 `docs/supabase_migration_v2_auth_rls.sql`의 SQL 전체 내용을 복사해 실행합니다. SQL Editor에는 파일 경로가 아니라 SQL 내용을 붙여넣어야 합니다.
 

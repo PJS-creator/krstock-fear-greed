@@ -108,6 +108,20 @@ class SupabaseAuthStore:
             raise SupabaseAuthError("로그인 세션을 만들 수 없습니다.")
         return account
 
+    def restore_session(self, access_token: object | None, refresh_token: object | None) -> SupabaseAuthAccount:
+        clean_access_token = str(access_token or "").strip()
+        clean_refresh_token = str(refresh_token or "").strip()
+        if not clean_access_token or not clean_refresh_token:
+            raise SupabaseAuthError("저장된 로그인 세션 정보가 없습니다.")
+        try:
+            response = self._client.auth.set_session(clean_access_token, clean_refresh_token)
+        except Exception as exc:
+            raise SupabaseAuthError("저장된 로그인 세션을 복원할 수 없습니다.") from exc
+        account = account_from_auth_response(response)
+        if account is None:
+            raise SupabaseAuthError("저장된 로그인 세션이 만료되었습니다.")
+        return account
+
     def sign_up(self, email: object | None, password: object | None, *, email_redirect_to: object | None = None) -> SupabaseSignupResult:
         clean_email = normalize_email(email)
         clean_password = validate_password(password)
