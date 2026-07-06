@@ -4,3 +4,7 @@ __pycache__/
 .env
 .env.*
 data/*.db
+android-webview/.gradle/
+android-webview/local.properties
+android-webview/**/build/
+*.apk
