@@ -574,8 +574,10 @@ def _market_index_cell(row: MarketIndexQuote | Mapping[str, Any]) -> str:
     return (
         f"<div class='summary-index-cell' title='{escape(' · '.join(title_parts))}'>"
         f"<span class='summary-index-name'>{escape(label)}</span>"
+        "<span class='summary-index-quote'>"
         f"<span class='summary-index-value'>{escape(_market_index_value(value))}</span>"
         f"<span class='summary-index-change {change_class}'>({escape(change_text)})</span>"
+        "</span>"
         "</div>"
     )
 
@@ -982,25 +984,37 @@ def _render_styles() -> None:
         }
         .summary-index-cell {
             min-width: 0;
-            display: inline-flex;
-            align-items: baseline;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
             justify-content: center;
-            gap: 4px;
-            padding: 6px 7px;
+            gap: 3px;
+            padding: 7px 7px;
             border: 1px solid var(--app-border);
             border-radius: 6px;
             background: var(--app-surface);
             color: var(--app-text);
-            font-size: 0.76rem;
+            font-size: 0.74rem;
             line-height: 1.2;
-            white-space: nowrap;
+            text-align: center;
             font-variant-numeric: tabular-nums;
         }
         .summary-index-name {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
+            max-width: 100%;
+            color: var(--app-muted);
             font-weight: 820;
+            line-height: 1.14;
+            white-space: normal;
+            word-break: keep-all;
+        }
+        .summary-index-quote {
+            display: inline-flex;
+            align-items: baseline;
+            justify-content: center;
+            gap: 1px;
+            min-width: 0;
+            max-width: 100%;
+            white-space: nowrap;
         }
         .summary-index-value {
             color: var(--app-heading);
@@ -1324,13 +1338,12 @@ def _render_styles() -> None:
             }
             .summary-index-cell {
                 flex: 0 0 auto;
-                min-width: 108px;
-                justify-content: flex-start;
-                padding: 6px 7px;
-                font-size: 0.72rem;
+                min-width: 96px;
+                padding: 7px 6px;
+                font-size: 0.7rem;
             }
             .summary-index-change {
-                font-size: 0.68rem;
+                font-size: 0.66rem;
             }
             .summary-mobile-holdings {
                 display: block;
