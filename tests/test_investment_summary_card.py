@@ -246,6 +246,7 @@ def test_market_index_strip_renders_requested_compact_row():
     html = _market_index_strip(rows)
 
     assert "summary-index-strip" in html
+    assert "summary-index-quote" in html
     assert "코스피" in html
     assert "7,200" in html
     assert "(+0.8%)" in html
