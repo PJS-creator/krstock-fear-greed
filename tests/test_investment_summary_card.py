@@ -1,11 +1,11 @@
 from portfolio.holdings import build_portfolio_metrics
-
 from app.ui.investment_summary_card import (
     _allocation_rows,
     _cash_allocation_row,
     _heatmap_tiles,
     _holding_allocation_rows,
     _holding_table_rows,
+    _market_index_strip,
     _mobile_holding_summary_table,
     _sparkline_html,
     render_investment_summary_card,
@@ -205,6 +205,8 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "filter: brightness(1.15) saturate(1.08);" in html
     assert "transform: translateZ(0) scale(1.1);" in html
     assert "summary-heatmap-small:hover" in html
+    assert "summary-index-strip" in html
+    assert "주요 지수변동" in html
     assert "color-mix(in srgb, var(--token-overlay) 36%, transparent)" in html
     for col_class in (
         "summary-col-name",
@@ -221,6 +223,35 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     ):
         assert col_class in html
     assert ".summary-table-wrap {\n                display: none;" not in html
+
+
+def test_market_index_strip_renders_requested_compact_row():
+    rows = [
+        {
+            "label": "코스피",
+            "symbol": "^KS11",
+            "value": 7200.0,
+            "change_pct": 0.008,
+            "status": "updated",
+        },
+        {
+            "label": "미국 바이오",
+            "symbol": "SPSIBI",
+            "value": None,
+            "change_pct": None,
+            "status": "failed",
+            "error_message": "network",
+        },
+    ]
+    html = _market_index_strip(rows)
+
+    assert "summary-index-strip" in html
+    assert "코스피" in html
+    assert "7,200" in html
+    assert "(+0.8%)" in html
+    assert "미국 바이오" in html
+    assert "(조회 실패)" in html
+    assert "network" in html
 
 
 def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_exclude_cash():
