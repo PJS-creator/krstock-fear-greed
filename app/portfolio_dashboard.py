@@ -74,6 +74,7 @@ from portfolio.auth import (
 from portfolio.history import build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
+from portfolio.market_indices import fetch_market_indices
 from portfolio.cash_ledger import (
     calculate_cash_balances,
     create_balance_adjustment_entries,
@@ -829,6 +830,12 @@ def _build_stores(storage_config):
     except (PortfolioStoreError, HistoricalScheduleStoreError, RuntimeError) as exc:
         st.sidebar.warning(f"Supabase 저장소를 초기화할 수 없습니다: {exc}")
         return None, None, None, None
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _cached_market_indices(refresh_key: str | None) -> list:
+    del refresh_key
+    return fetch_market_indices()
 
 
 def _resolve_owner_id(storage_config) -> str | None:
@@ -1672,11 +1679,13 @@ def _render_status_messages() -> None:
 
 
 def _render_summary_card_section(metrics) -> None:
+    last_refresh = metrics.last_price_refresh_at or st.session_state.last_price_refresh_at
     render_investment_summary_card(
         metrics,
         portfolio_name=_current_portfolio_name(),
-        last_refresh=metrics.last_price_refresh_at or st.session_state.last_price_refresh_at,
+        last_refresh=last_refresh,
         transactions=list(st.session_state.get("portfolio_transactions", [])),
+        market_indices=_cached_market_indices(str(last_refresh or "")),
     )
 
 

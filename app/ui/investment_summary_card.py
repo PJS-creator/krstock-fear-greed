@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from datetime import date, datetime
 from html import escape
 from typing import Any
@@ -8,6 +9,7 @@ from typing import Any
 import streamlit as st
 
 from portfolio.holdings import PortfolioMetrics
+from portfolio.market_indices import MarketIndexQuote
 from portfolio.transactions import normalize_transaction_rows
 
 from .components import render_empty_state
@@ -539,6 +541,59 @@ def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
     )
 
 
+def _market_index_value(value: object) -> str:
+    if value is None:
+        return "미조회"
+    return format_number(float(value), digits=2, trim=True)
+
+
+def _market_index_attr(row: MarketIndexQuote | Mapping[str, Any], key: str) -> Any:
+    if isinstance(row, Mapping):
+        return row.get(key)
+    return getattr(row, key, None)
+
+
+def _market_index_cell(row: MarketIndexQuote | Mapping[str, Any]) -> str:
+    label = str(_market_index_attr(row, "label") or "-")
+    symbol = str(_market_index_attr(row, "symbol") or "")
+    value = _market_index_attr(row, "value")
+    status = str(_market_index_attr(row, "status") or "")
+    change_pct = _market_index_attr(row, "change_pct")
+    error_message = _market_index_attr(row, "error_message")
+    if status == "updated" and value is not None:
+        change_class = _signed_class(float(change_pct or 0.0))
+        change_text = signed_percentage(float(change_pct or 0.0))
+    else:
+        change_class = "summary-neutral"
+        change_text = "조회 실패"
+    title_parts = [label]
+    if symbol:
+        title_parts.append(symbol)
+    if error_message:
+        title_parts.append(str(error_message))
+    return (
+        f"<div class='summary-index-cell' title='{escape(' · '.join(title_parts))}'>"
+        f"<span class='summary-index-name'>{escape(label)}</span>"
+        f"<span class='summary-index-value'>{escape(_market_index_value(value))}</span>"
+        f"<span class='summary-index-change {change_class}'>({escape(change_text)})</span>"
+        "</div>"
+    )
+
+
+def _market_index_strip(rows: list[MarketIndexQuote | Mapping[str, Any]] | None) -> str:
+    index_rows = list(rows or [])
+    if not index_rows:
+        cells = "<div class='summary-index-empty'>주요 지수 데이터 미조회</div>"
+    else:
+        cells = "".join(_market_index_cell(row) for row in index_rows)
+    return (
+        "<div class='summary-index-strip' aria-label='주요 지수변동'>"
+        "<div class='summary-index-title'>주요 지수변동</div>"
+        f"<div class='summary-index-cells'>{cells}</div>"
+        "</div>"
+    )
+
+
 def _coverage_label(metrics: PortfolioMetrics) -> str:
     if metrics.total_position_value_krw <= 0:
         return "보유 종목 없음"
@@ -906,6 +961,59 @@ def _render_styles() -> None:
         }
         .summary-heatmap-change { font-size: 0.82em; margin-top: 6px; font-weight: 760; font-variant-numeric: tabular-nums; }
         .summary-heatmap-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--app-muted); }
+        .summary-index-strip {
+            margin-top: 12px;
+            padding: 10px 12px;
+            border: 1px solid var(--app-border);
+            border-radius: 7px;
+            background: var(--summary-panel-bg);
+        }
+        .summary-index-title {
+            margin-bottom: 7px;
+            color: var(--app-muted);
+            font-size: 0.82rem;
+            font-weight: 850;
+        }
+        .summary-index-cells {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 6px;
+            align-items: stretch;
+        }
+        .summary-index-cell {
+            min-width: 0;
+            display: inline-flex;
+            align-items: baseline;
+            justify-content: center;
+            gap: 4px;
+            padding: 6px 7px;
+            border: 1px solid var(--app-border);
+            border-radius: 6px;
+            background: var(--app-surface);
+            color: var(--app-text);
+            font-size: 0.76rem;
+            line-height: 1.2;
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+        .summary-index-name {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-weight: 820;
+        }
+        .summary-index-value {
+            color: var(--app-heading);
+            font-weight: 850;
+        }
+        .summary-index-change {
+            font-size: 0.72rem;
+            font-weight: 820;
+        }
+        .summary-index-empty {
+            color: var(--app-muted);
+            font-size: 0.82rem;
+        }
         .summary-mobile-holdings { display: none; }
         .summary-table-wrap { margin-top: 16px; overflow: hidden; }
         .summary-table-wrap h3 { padding: 16px 20px; margin: 0; border-bottom: 1px solid var(--app-border); }
@@ -1195,6 +1303,35 @@ def _render_styles() -> None:
                 font-size: 0.76em;
                 margin-top: 4px;
             }
+            .summary-index-strip {
+                margin-top: 9px;
+                padding: 8px;
+            }
+            .summary-index-title {
+                margin-bottom: 6px;
+                font-size: 0.76rem;
+            }
+            .summary-index-cells {
+                display: flex;
+                flex-wrap: nowrap;
+                gap: 6px;
+                overflow-x: auto;
+                scrollbar-width: none;
+                -webkit-overflow-scrolling: touch;
+            }
+            .summary-index-cells::-webkit-scrollbar {
+                display: none;
+            }
+            .summary-index-cell {
+                flex: 0 0 auto;
+                min-width: 108px;
+                justify-content: flex-start;
+                padding: 6px 7px;
+                font-size: 0.72rem;
+            }
+            .summary-index-change {
+                font-size: 0.68rem;
+            }
             .summary-mobile-holdings {
                 display: block;
                 margin-top: 12px;
@@ -1428,6 +1565,7 @@ def render_investment_summary_card(
     portfolio_name: str,
     last_refresh: object = None,
     transactions: list[dict[str, Any]] | None = None,
+    market_indices: list[MarketIndexQuote | Mapping[str, Any]] | None = None,
 ) -> None:
     _render_styles()
     if metrics.holdings_count == 0 and metrics.cash_total_krw <= 0:
@@ -1486,6 +1624,7 @@ def render_investment_summary_card(
     else:
         cash_legend_rows = "<div class='summary-empty-line'>현금 없음</div>"
     heatmap_tiles = _heatmap_tiles(holding_allocation_rows)
+    market_index_strip = _market_index_strip(market_indices)
     mobile_holding_summary = _mobile_holding_summary_table(metrics)
     table_rows = "".join(_holding_table_rows(metrics, transactions=transactions, as_of_date=as_of_date))
     cash_detail = f"KRW {_krw(metrics.cash.cash_krw)} · USD ${format_number(metrics.cash.cash_usd)}"
@@ -1530,6 +1669,7 @@ def render_investment_summary_card(
                     <div class="summary-heatmap-legend"><span class="up">상승</span><span class="down">하락</span></div>
                 </div>
                 <div class="summary-heatmap-area">{heatmap_tiles}</div>
+                {market_index_strip}
             </div>
         </div>
         <div class="summary-split-grid">
