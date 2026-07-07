@@ -29,6 +29,7 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST_CODE = 1001;
+    private static final int SYSTEM_BAR_COLOR = Color.rgb(11, 18, 32);
 
     private WebView webView;
     private ProgressBar progressBar;
@@ -38,6 +39,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        configureSystemBars();
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
 
         FrameLayout root = new FrameLayout(this);
@@ -69,6 +71,19 @@ public class MainActivity extends Activity {
             webView.loadUrl(BuildConfig.WEBVIEW_URL);
         } else {
             webView.restoreState(savedInstanceState);
+        }
+    }
+
+    private void configureSystemBars() {
+        getWindow().setStatusBarColor(SYSTEM_BAR_COLOR);
+        getWindow().setNavigationBarColor(SYSTEM_BAR_COLOR);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            int flags = getWindow().getDecorView().getSystemUiVisibility();
+            flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                flags &= ~View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+            }
+            getWindow().getDecorView().setSystemUiVisibility(flags);
         }
     }
 
