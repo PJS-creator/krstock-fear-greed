@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from html import escape
 import logging
 import os
 from pathlib import Path
@@ -141,6 +142,7 @@ ALLOW_NEGATIVE_CASH_KEY = "allow_negative_cash_balance"
 PUBLIC_AUTH_ENV_KEY = "PORTFOLIO_PUBLIC_AUTH"
 PUBLIC_AUTH_SECRET_KEY = "PUBLIC_USER_AUTH"
 AUTH_SESSION_SECRET_KEY = "AUTH_SESSION_SECRET"
+PUBLIC_LOGOUT_QUERY_KEY = "app_logout"
 UNPROTECTED_WARNING = "공개 앱에서 저장소와 직접 입력 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 PUBLIC_PORTFOLIO_NAME = "main"
 APP_THEME_CHOICE_KEY = "app_theme_choice"
@@ -532,6 +534,18 @@ def _render_public_auth_callback_notice() -> None:
         st.info("이메일 확인이 완료되었거나 처리 중입니다. 가입한 이메일과 비밀번호로 로그인하세요.")
 
 
+def _handle_public_logout_query() -> None:
+    if _query_param_text(PUBLIC_LOGOUT_QUERY_KEY) != "1":
+        return
+    _logout(get_cookie_manager())
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+    request_app_rerun()
+    st.stop()
+
+
 def _apply_pending_portfolio_state() -> None:
     pending_state = st.session_state.pop(PENDING_PORTFOLIO_STATE_KEY, None)
     if not isinstance(pending_state, dict):
@@ -732,6 +746,73 @@ def _render_security_status(config: AppSecurityConfig, *, public_auth_enabled: b
                 request_app_rerun()
         else:
             st.caption("직접 입력 기능은 비밀번호가 필요합니다.")
+
+
+def _render_mobile_public_auth_status(*, public_auth_enabled: bool = False) -> None:
+    if not public_auth_enabled or not _is_authenticated():
+        return
+    account_id = str(st.session_state.get(ACCOUNT_ID_KEY) or "account")
+    account_label = escape(account_id)
+    st.markdown(
+        f"""
+        <style>
+        .mobile-public-auth-status {{
+            display: none;
+        }}
+        @media (max-width: 720px) {{
+            .mobile-public-auth-status {{
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                margin: 6px 0 10px;
+                padding: 8px 10px;
+                border: 1px solid var(--app-border);
+                border-radius: 8px;
+                background: var(--app-panel);
+                color: var(--app-text);
+                box-shadow: var(--app-shadow-sm);
+            }}
+            .mobile-public-auth-account {{
+                min-width: 0;
+                display: flex;
+                align-items: baseline;
+                gap: 6px;
+                font-size: 0.78rem;
+                color: var(--app-muted);
+            }}
+            .mobile-public-auth-account strong {{
+                min-width: 0;
+                color: var(--app-heading);
+                font-size: 0.82rem;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }}
+            .mobile-public-auth-logout {{
+                flex: 0 0 auto;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 30px;
+                padding: 0 10px;
+                border-radius: 7px;
+                border: 1px solid var(--app-border);
+                background: var(--app-surface-alt);
+                color: var(--app-text) !important;
+                font-size: 0.78rem;
+                font-weight: 800;
+                text-decoration: none !important;
+            }}
+        }}
+        </style>
+        <div class="mobile-public-auth-status">
+            <div class="mobile-public-auth-account"><span>로그인</span><strong>{account_label}</strong></div>
+            <a class="mobile-public-auth-logout" href="?{PUBLIC_LOGOUT_QUERY_KEY}=1" target="_self">로그아웃</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 @st.cache_resource(show_spinner=False)
@@ -1754,6 +1835,8 @@ if public_auth_enabled and not _is_authenticated():
     _render_public_auth_gate(storage_config)
 if not public_auth_enabled and should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
+if public_auth_enabled:
+    _handle_public_logout_query()
 
 portfolio_store, history_store, historical_schedule_store, target_allocation_store = _build_stores(storage_config)
 owner_id = _resolve_owner_id(storage_config)
@@ -1768,6 +1851,7 @@ metrics = _current_metrics()
 if public_auth_enabled:
     _auto_save_public_portfolio(owner_id, portfolio_store, target_allocation_store, history_store, metrics)
 _render_header(security_config, owner_id, portfolio_store, target_allocation_store, history_store, metrics, public_auth_enabled=public_auth_enabled)
+_render_mobile_public_auth_status(public_auth_enabled=public_auth_enabled)
 _render_status_messages()
 
 if public_auth_enabled:

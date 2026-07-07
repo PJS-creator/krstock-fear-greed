@@ -1040,10 +1040,30 @@ def _render_styles() -> None:
             padding: 16px 18px;
             box-shadow: var(--app-shadow-sm);
         }
+        .summary-split-heading {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            max-width: 100%;
+        }
         .summary-split-label {
             color: var(--app-muted);
             font-size: 0.92rem;
             font-weight: 760;
+        }
+        .summary-split-pct {
+            display: inline-flex;
+            align-items: center;
+            min-height: 20px;
+            padding: 0 7px;
+            border-radius: 999px;
+            color: var(--app-heading);
+            background: var(--app-surface-alt);
+            border: 1px solid var(--app-border);
+            font-size: 0.78rem;
+            font-weight: 850;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
         }
         .summary-split-value {
             color: var(--app-heading);
@@ -1148,14 +1168,14 @@ def _render_styles() -> None:
                 padding: 7px 0;
             }
             .summary-heatmap-card {
-                min-height: 260px;
+                min-height: 282px;
             }
             .summary-heatmap-head {
                 align-items: flex-start;
                 flex-direction: column;
             }
             .summary-heatmap-area {
-                min-height: 210px;
+                min-height: 232px;
             }
             .summary-heatmap-tile {
                 padding: 4px;
@@ -1514,14 +1534,14 @@ def render_investment_summary_card(
         </div>
         <div class="summary-split-grid">
             <div class="summary-split-card">
-                <div class="summary-split-label">투자자산</div>
+                <div class="summary-split-heading"><div class="summary-split-label">투자자산</div><span class="summary-split-pct">{escape(percentage(stock_pct, digits=1))}</span></div>
                 <div class="summary-split-value">{escape(_krw(metrics.total_position_value_krw))}</div>
-                <div class="summary-split-sub">주식 평가금액 · 총자산 대비 {escape(percentage(stock_pct, digits=2))}</div>
+                <div class="summary-split-sub">주식 평가금액</div>
             </div>
             <div class="summary-split-card">
-                <div class="summary-split-label">현금</div>
+                <div class="summary-split-heading"><div class="summary-split-label">현금</div><span class="summary-split-pct">{escape(percentage(cash_pct, digits=1))}</span></div>
                 <div class="summary-split-value">{escape(_krw(metrics.cash_total_krw))}</div>
-                <div class="summary-split-sub">{escape(cash_detail)} · 총자산 대비 {escape(percentage(cash_pct, digits=2))}</div>
+                <div class="summary-split-sub">{escape(cash_detail)}</div>
             </div>
         </div>
         {mobile_holding_summary}

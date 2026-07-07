@@ -163,6 +163,9 @@ def test_public_login_remember_me_restores_encrypted_session_cookie():
     assert "encode_remembered_session" in source
     assert "_restore_public_auth_session(storage_config)" in source
     assert "restore_session" in Path("portfolio/supabase_auth.py").read_text(encoding="utf-8")
+    assert "mobile-public-auth-status" in source
+    assert "app_logout" in source
+    assert "def _handle_public_logout_query()" in source
     assert "Fernet" in persistence_source
     assert "refresh_token" in persistence_source
     assert "@st.cache_resource" not in auth_persistence_source
@@ -200,6 +203,9 @@ def test_investment_summary_preserves_heatmap_and_adds_cash_split():
     assert "summary-heatmap-area" in source
     assert "summary-table-wrap" in source
     assert "summary-split-grid" in source
+    assert "summary-split-heading" in source
+    assert "summary-split-pct" in source
+    assert "주식 평가금액 · 총자산 대비" not in source
     assert "투자자산" in source
     assert "현금" in source
 
