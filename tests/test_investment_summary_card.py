@@ -118,19 +118,24 @@ def test_summary_holding_table_restores_detailed_columns():
     assert "삼성전자" in html_rows
     assert "summary-section-investment" in html_rows
     assert "summary-section-cash" in html_rows
-    assert "<tr class='summary-section-row summary-section-investment'><td colspan='11'><span>투자</span></td></tr>" in html_rows
-    assert "<tr class='summary-section-row summary-section-cash'><td colspan='11'><span>현금</span></td></tr>" in html_rows
+    assert "<tr class='summary-section-row summary-section-investment'><td colspan='8'><span>투자</span></td></tr>" in html_rows
+    assert "<tr class='summary-section-row summary-section-cash'><td colspan='8'><span>현금</span></td></tr>" in html_rows
     assert "summary-currency-krw" in html_rows
     assert "summary-currency-usd" in html_rows
     assert "summary-name-inner" in html_rows
     assert "원화 현금" in html_rows
     assert "달러 현금" in html_rows
+    assert "summary-price-group" in html_rows
+    assert "summary-price-cell" in html_rows
     assert "₩72,300" in html_rows
-    assert "₩723,000" in html_rows
+    assert "723,000원" in html_rows
     assert "$100.00" in html_rows
     assert "$120.00" in html_rows
+    assert "280,000원" in html_rows
     assert "800,000" in html_rows
     assert "-$5.00 (-4.0%)" in html_rows
+    assert "summary-current-price summary-down" in html_rows
+    assert "summary-pnl-stack" in html_rows
     assert "%" in html_rows
     assert "합계 (주식 평가금액 + 현금)" in html_rows
     assert "당일 흐름" not in html_rows
@@ -194,12 +199,19 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "원화 현금" in html
     assert "달러 현금" in html
     assert "main · 총자산 기준" not in html
-    assert "<th>평균단가</th>" in html
-    assert "<th>매입금액</th>" in html
+    assert "summary-price-heading" in html
+    assert "<strong>평균단가</strong><span>(매입금액)</span>" in html
+    assert "<strong>현재가</strong><span>(평가금액)</span>" in html
     assert "<th class=\"summary-sparkline-th\">당일 흐름</th>" in html
+    assert "summary-pnl-heading" in html
+    assert "<strong>누적수익률</strong>" in html
+    assert "<span>(평가손익)</span>" in html
     assert "<th>IRR</th>" in html
     assert "table-layout: fixed;" in html
     assert "font-size: clamp(0.68rem, 0.63vw, 0.79rem);" in html
+    assert "border: 0;" in html
+    assert ".summary-current-price.summary-up" in html
+    assert ".summary-pnl-delta" in html
     assert ".summary-heatmap-card {\n            padding: 18px;\n            min-height: 360px;" in html
     assert ".summary-heatmap-tile:hover" in html
     assert "filter: brightness(1.15) saturate(1.08);" in html
@@ -213,14 +225,11 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     for col_class in (
         "summary-col-name",
         "summary-col-qty",
-        "summary-col-avg",
-        "summary-col-cost",
-        "summary-col-price",
+        "summary-col-price-group",
         "summary-col-spark",
         "summary-col-day",
         "summary-col-pnl",
         "summary-col-irr",
-        "summary-col-value",
         "summary-col-weight",
     ):
         assert col_class in html

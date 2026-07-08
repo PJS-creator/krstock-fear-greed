@@ -152,6 +152,52 @@ def _badge_html(value: float | None, text: str) -> str:
     return f"<span class='summary-badge {_signed_class(value)}'>{escape(text)}</span>"
 
 
+def _plain_metric_html(value: float | None, text: str) -> str:
+    return f"<span class='summary-plain-metric {_signed_class(value)}'>{escape(text)}</span>"
+
+
+def _signed_krw_delta_html(value: float | None) -> str:
+    if value is None:
+        return "<span class='summary-pnl-delta summary-neutral'>-</span>"
+    if value == 0:
+        return f"<span class='summary-pnl-delta summary-neutral'>{escape(_krw(0.0))}</span>"
+    icon = "▲" if value > 0 else "▼"
+    return f"<span class='summary-pnl-delta {_signed_class(value)}'>{icon} {escape(_krw(abs(value)))}</span>"
+
+
+def _price_amount_group_html(
+    *,
+    avg_price: str,
+    purchase_amount_krw: str,
+    current_price: str,
+    market_value_krw: str,
+    current_tone: str,
+) -> str:
+    return (
+        "<div class='summary-price-group'>"
+        "<div class='summary-price-stack'>"
+        f"<span class='summary-price-main'>{escape(avg_price)}</span>"
+        f"<span class='summary-price-sub'>{escape(purchase_amount_krw)}</span>"
+        "</div>"
+        "<div class='summary-price-stack'>"
+        f"<span class='summary-price-main summary-current-price {current_tone}'>{escape(current_price)}</span>"
+        f"<span class='summary-price-sub summary-market-value'>{escape(market_value_krw)}</span>"
+        "</div>"
+        "</div>"
+    )
+
+
+def _pnl_stack_html(total_pnl_pct: float | None, total_pnl_krw: float | None) -> str:
+    pct_text = signed_percentage(total_pnl_pct) if total_pnl_pct is not None else "-"
+    tone = _signed_class(total_pnl_pct if total_pnl_pct is not None else total_pnl_krw)
+    return (
+        f"<div class='summary-pnl-stack {tone}'>"
+        f"<span class='summary-pnl-rate'>{escape(pct_text)}</span>"
+        f"{_signed_krw_delta_html(total_pnl_krw)}"
+        "</div>"
+    )
+
+
 def _intraday_price_values(holding: dict[str, Any]) -> list[float]:
     raw_values = holding.get("intraday_prices") or []
     if not isinstance(raw_values, (list, tuple)):
@@ -615,7 +661,7 @@ def _holding_table_rows(
     if metrics.rows:
         rows.append(
             "<tr class='summary-section-row summary-section-investment'>"
-            "<td colspan='11'>"
+            "<td colspan='8'>"
             "<span>투자</span>"
             "</td>"
             "</tr>"
@@ -627,12 +673,10 @@ def _holding_table_rows(
         currency = _currency_label(holding.get("currency"))
         quantity = f"{format_number(float(holding.get('quantity') or 0), digits=4, trim=True)}주"
         avg_price = format_price(holding.get("avg_price"), holding.get("currency"))
-        purchase_amount = "-"
-        if holding.get("avg_price") is not None:
-            purchase_amount = format_price(float(holding.get("avg_price") or 0.0) * float(holding.get("quantity") or 0.0), holding.get("currency"))
+        purchase_amount = _krw(item.cost_basis_krw) if item.cost_basis_krw is not None else "-"
         current_price = format_price(holding.get("current_price"), holding.get("currency"))
+        market_value = _krw(item.market_value_krw)
         day_change = _price_change_text(holding)
-        pnl_pct = signed_percentage(item.total_pnl_pct) if item.total_pnl_pct is not None else "-"
         day_change_class = _signed_class(_holding_day_change_price(holding))
         day_change_value = _holding_day_change_price(holding)
         irr = _holding_irr(holding, normalized_transactions, as_of_date=irr_date)
@@ -641,21 +685,20 @@ def _holding_table_rows(
             "<tr>"
             f"<td class='summary-name'><span class='summary-name-inner'><span class='summary-name-dot' style='background:{color}'></span><span class='summary-name-text'>{label}</span>{_currency_badge(currency)}</span></td>"
             f"<td>{escape(quantity)}</td>"
-            f"<td>{escape(avg_price)}</td>"
-            f"<td>{escape(purchase_amount)}</td>"
-            f"<td>{escape(current_price)}</td>"
+            "<td class='summary-price-cell'>"
+            f"{_price_amount_group_html(avg_price=avg_price, purchase_amount_krw=purchase_amount, current_price=current_price, market_value_krw=market_value, current_tone=day_change_class)}"
+            "</td>"
             f"<td class='summary-sparkline-cell'>{_sparkline_html(holding)}</td>"
             f"<td class='{day_change_class}'>{_badge_html(day_change_value, day_change)}</td>"
-            f"<td>{_badge_html(item.total_pnl_pct, pnl_pct)}</td>"
-            f"<td>{_badge_html(irr, irr_text)}</td>"
-            f"<td>{escape(_krw(item.market_value_krw))}</td>"
+            f"<td>{_pnl_stack_html(item.total_pnl_pct, item.total_pnl_krw)}</td>"
+            f"<td>{_plain_metric_html(irr, irr_text)}</td>"
             f"<td>{escape(percentage(item.weight, digits=2))}</td>"
             "</tr>"
         )
     if metrics.cash_total_krw > 0:
         rows.append(
             "<tr class='summary-section-row summary-section-cash'>"
-            "<td colspan='11'>"
+            "<td colspan='8'>"
             "<span>현금</span>"
             "</td>"
             "</tr>"
@@ -668,10 +711,10 @@ def _holding_table_rows(
                 "<tr class='summary-cash-detail-row'>"
                 f"<td class='summary-name'><span class='summary-name-inner'><span class='summary-name-dot' style='background:{cash_row['color']}'></span><span class='summary-name-text'>{escape(str(cash_row['label']))}</span>{_currency_badge(currency)}</span></td>"
                 f"<td>{escape(quantity)}</td>"
-                "<td>-</td><td>-</td>"
-                f"<td>{escape(current_price)}</td>"
+                "<td class='summary-price-cell'>"
+                f"{_price_amount_group_html(avg_price='-', purchase_amount_krw='-', current_price=current_price, market_value_krw=_krw(float(cash_row['value_krw'])), current_tone='summary-neutral')}"
+                "</td>"
                 "<td>-</td><td>-</td><td>-</td><td>-</td>"
-                f"<td>{escape(_krw(float(cash_row['value_krw'])))}</td>"
                 f"<td>{escape(percentage(float(cash_row['weight']), digits=2))}</td>"
                 "</tr>"
             )
@@ -679,14 +722,15 @@ def _holding_table_rows(
     total_day_text = f"{_signed_text(metrics.day_change_krw, signed_krw)} ({_signed_text(metrics.day_change_pct, signed_percentage)})"
     rows.append(
         "<tr class='summary-total-row'>"
-        "<td>합계 (주식 평가금액 + 현금)</td><td>-</td><td>-</td>"
-        f"<td>{escape(_krw(metrics.total_cost_krw) if metrics.total_cost_krw else '-')}</td>"
-        "<td>-</td>"
+        "<td>합계 (주식 평가금액 + 현금)</td><td>-</td>"
+        "<td class='summary-price-cell'>"
+        f"{_price_amount_group_html(avg_price='-', purchase_amount_krw=_krw(metrics.total_cost_krw) if metrics.total_cost_krw else '-', current_price='-', market_value_krw=_krw(metrics.total_value_krw), current_tone='summary-neutral')}"
+        "</td>"
         "<td>-</td>"
         f"<td>{_badge_html(metrics.day_change_krw, total_day_text)}</td>"
-        f"<td>{_badge_html(metrics.total_pnl_pct, _signed_text(metrics.total_pnl_pct, signed_percentage))}</td>"
-        f"<td>{_badge_html(portfolio_irr, signed_percentage(portfolio_irr) if portfolio_irr is not None else '-')}</td>"
-        f"<td>{escape(_krw(metrics.total_value_krw))}</td><td>100.00%</td>"
+        f"<td>{_pnl_stack_html(metrics.total_pnl_pct, metrics.total_pnl_krw)}</td>"
+        f"<td>{_plain_metric_html(portfolio_irr, signed_percentage(portfolio_irr) if portfolio_irr is not None else '-')}</td>"
+        "<td>100.00%</td>"
         "</tr>"
     )
     return rows
@@ -1053,17 +1097,93 @@ def _render_styles() -> None:
         .summary-table th { color: var(--app-muted); font-weight: 760; background: var(--app-table-header); }
         .summary-table tbody tr:not(.summary-total-row):hover td { background: var(--app-table-hover); }
         .summary-table th:first-child, .summary-table td:first-child { text-align: left; }
-        .summary-col-name { width: 13.5%; }
-        .summary-col-qty { width: 7%; }
-        .summary-col-avg { width: 8.3%; }
-        .summary-col-cost { width: 8.7%; }
-        .summary-col-price { width: 8.2%; }
-        .summary-col-spark { width: 8.2%; }
-        .summary-col-day { width: 11.2%; }
-        .summary-col-pnl { width: 8%; }
+        .summary-col-name { width: 16%; }
+        .summary-col-qty { width: 7.5%; }
+        .summary-col-price-group { width: 29%; }
+        .summary-col-spark { width: 8.5%; }
+        .summary-col-day { width: 10.5%; }
+        .summary-col-pnl { width: 12.5%; }
         .summary-col-irr { width: 7.5%; }
-        .summary-col-value { width: 11%; }
-        .summary-col-weight { width: 8.4%; }
+        .summary-col-weight { width: 8.5%; }
+        .summary-price-heading {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            align-items: center;
+            text-align: center;
+            line-height: 1.2;
+        }
+        .summary-price-heading strong {
+            display: block;
+            color: var(--app-muted);
+            font-size: 1em;
+        }
+        .summary-price-heading span {
+            display: block;
+            margin-top: 4px;
+            color: var(--app-muted);
+            font-size: 0.86em;
+            font-weight: 650;
+        }
+        .summary-pnl-heading {
+            display: grid;
+            gap: 4px;
+            justify-items: center;
+            line-height: 1.2;
+        }
+        .summary-pnl-heading strong {
+            color: var(--app-muted);
+            font-weight: 760;
+        }
+        .summary-pnl-heading span {
+            color: var(--app-muted);
+            font-size: 0.86em;
+            font-weight: 650;
+        }
+        .summary-price-cell {
+            white-space: normal !important;
+            overflow: visible !important;
+            text-overflow: clip !important;
+        }
+        .summary-price-group {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            align-items: center;
+            text-align: center;
+            min-width: 0;
+        }
+        .summary-price-stack {
+            min-width: 0;
+            display: grid;
+            gap: 4px;
+            align-content: center;
+        }
+        .summary-price-main {
+            color: var(--app-heading);
+            font-size: 1.08em;
+            font-weight: 860;
+            line-height: 1.15;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .summary-current-price.summary-up { color: var(--summary-up-text); }
+        .summary-current-price.summary-down { color: var(--summary-down-text); }
+        .summary-current-price.summary-neutral { color: var(--app-heading); }
+        .summary-price-sub {
+            color: var(--app-muted);
+            font-size: 0.92em;
+            font-weight: 650;
+            line-height: 1.18;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .summary-market-value {
+            color: var(--app-text);
+            font-weight: 760;
+        }
         .summary-name {
             min-width: 0;
         }
@@ -1211,12 +1331,40 @@ def _render_styles() -> None:
             font-weight: 820;
             line-height: 1.12;
             white-space: nowrap;
-            border: 1px solid var(--app-border);
+            border: 0;
             font-size: 0.92em;
         }
-        .summary-badge.summary-up { color: var(--summary-up-text); background: var(--summary-up-bg); border-color: var(--summary-up-border); }
-        .summary-badge.summary-down { color: var(--summary-down-text); background: var(--summary-down-bg); border-color: var(--summary-down-border); }
+        .summary-badge.summary-up { color: var(--summary-up-text); background: var(--summary-up-bg); }
+        .summary-badge.summary-down { color: var(--summary-down-text); background: var(--summary-down-bg); }
         .summary-badge.summary-neutral { color: var(--app-text); background: var(--summary-neutral-badge-bg); }
+        .summary-plain-metric {
+            display: inline-block;
+            color: var(--app-muted);
+            font-weight: 850;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+        .summary-plain-metric.summary-up { color: var(--summary-up-text); }
+        .summary-plain-metric.summary-down { color: var(--summary-down-text); }
+        .summary-pnl-stack {
+            display: inline-grid;
+            gap: 4px;
+            justify-items: center;
+            align-content: center;
+            line-height: 1.18;
+            white-space: nowrap;
+        }
+        .summary-pnl-stack.summary-up { color: var(--summary-up-text); }
+        .summary-pnl-stack.summary-down { color: var(--summary-down-text); }
+        .summary-pnl-stack.summary-neutral { color: var(--app-muted); }
+        .summary-pnl-rate {
+            font-size: 1.06em;
+            font-weight: 900;
+        }
+        .summary-pnl-delta {
+            font-size: 0.9em;
+            font-weight: 780;
+        }
         .summary-total-row td { color: var(--app-heading); font-weight: 800; background: var(--app-panel-strong); }
         .summary-kpi-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
         .summary-kpi { padding: 17px 18px; min-height: 112px; display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 12px; align-items: start; }
@@ -1515,15 +1663,22 @@ def _render_styles() -> None:
             }
             .summary-table td:nth-child(1):before { display: none; }
             .summary-table td:nth-child(2):before { content: "수량"; }
-            .summary-table td:nth-child(3):before { content: "평균단가"; }
-            .summary-table td:nth-child(4):before { content: "매입금액"; }
-            .summary-table td:nth-child(5):before { content: "현재가"; }
-            .summary-table td:nth-child(6):before { content: "당일 흐름"; }
-            .summary-table td:nth-child(7):before { content: "전일 대비"; }
-            .summary-table td:nth-child(8):before { content: "평가 수익률"; }
-            .summary-table td:nth-child(9):before { content: "IRR"; }
-            .summary-table td:nth-child(10):before { content: "평가액"; }
-            .summary-table td:nth-child(11):before { content: "자산 비중"; }
+            .summary-table td:nth-child(3):before { content: "단가·금액"; }
+            .summary-table td:nth-child(4):before { content: "당일 흐름"; }
+            .summary-table td:nth-child(5):before { content: "전일 대비"; }
+            .summary-table td:nth-child(6):before { content: "누적수익률"; }
+            .summary-table td:nth-child(7):before { content: "IRR"; }
+            .summary-table td:nth-child(8):before { content: "자산 비중"; }
+            .summary-table td.summary-price-cell {
+                display: grid;
+                gap: 8px;
+            }
+            .summary-table td.summary-price-cell:before {
+                justify-self: start;
+            }
+            .summary-table td.summary-price-cell .summary-price-group {
+                width: 100%;
+            }
             .summary-name {
                 min-width: 0;
             }
@@ -1709,28 +1864,32 @@ def render_investment_summary_card(
                     <colgroup>
                         <col class="summary-col-name" />
                         <col class="summary-col-qty" />
-                        <col class="summary-col-avg" />
-                        <col class="summary-col-cost" />
-                        <col class="summary-col-price" />
+                        <col class="summary-col-price-group" />
                         <col class="summary-col-spark" />
                         <col class="summary-col-day" />
                         <col class="summary-col-pnl" />
                         <col class="summary-col-irr" />
-                        <col class="summary-col-value" />
                         <col class="summary-col-weight" />
                     </colgroup>
                     <thead>
                         <tr>
                             <th>종목명</th>
                             <th>보유 수량</th>
-                            <th>평균단가</th>
-                            <th>매입금액</th>
-                            <th>현재가</th>
+                            <th>
+                                <div class="summary-price-heading">
+                                    <div><strong>평균단가</strong><span>(매입금액)</span></div>
+                                    <div><strong>현재가</strong><span>(평가금액)</span></div>
+                                </div>
+                            </th>
                             <th class="summary-sparkline-th">당일 흐름</th>
                             <th>전일대비</th>
-                            <th>수익률</th>
+                            <th>
+                                <div class="summary-pnl-heading">
+                                    <strong>누적수익률</strong>
+                                    <span>(평가손익)</span>
+                                </div>
+                            </th>
                             <th>IRR</th>
-                            <th>평가금액</th>
                             <th>비중</th>
                         </tr>
                     </thead>
