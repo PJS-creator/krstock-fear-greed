@@ -207,6 +207,8 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "summary-heatmap-small:hover" in html
     assert "summary-index-strip" in html
     assert "주요 지수변동" in html
+    assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in html
+    assert "overflow-x: hidden;" in html
     assert "color-mix(in srgb, var(--token-overlay) 36%, transparent)" in html
     for col_class in (
         "summary-col-name",
