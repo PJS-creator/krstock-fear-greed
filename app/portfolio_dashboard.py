@@ -1680,11 +1680,16 @@ def _render_data_source_info() -> None:
 
 
 def _render_auto_refresh_controls() -> None:
-    enabled = st.checkbox(
+    st.checkbox(
         "1분 자동갱신",
         key=AUTO_PRICE_REFRESH_ENABLED_KEY,
         help="앱이 열린 동안에만 60초마다 가격·환율 갱신을 시도합니다. 입력 작업 중이거나 직전 갱신 후 60초가 지나지 않으면 건너뜁니다.",
     )
+    _render_auto_refresh_status_lines()
+
+
+def _render_auto_refresh_status_lines() -> None:
+    enabled = bool(st.session_state.get(AUTO_PRICE_REFRESH_ENABLED_KEY))
     if not enabled:
         st.caption("자동갱신 꺼짐 · 필요할 때 상단 버튼으로 수동 갱신합니다.")
         return
@@ -1696,6 +1701,11 @@ def _render_auto_refresh_controls() -> None:
     result = str(st.session_state.get(AUTO_PRICE_REFRESH_LAST_RESULT_KEY) or "").strip()
     if result:
         st.caption(result)
+
+
+def _render_sidebar_auto_refresh_status() -> None:
+    st.caption("자동갱신은 상단의 1분 자동갱신에서 켜거나 끌 수 있습니다.")
+    _render_auto_refresh_status_lines()
 
 
 def _auto_refresh_due(now: float) -> bool:
@@ -1815,7 +1825,7 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
             with st.expander("데이터 정보", expanded=False):
                 _render_data_source_info()
             with st.expander("가격 조회 옵션", expanded=False):
-                _render_auto_refresh_controls()
+                _render_sidebar_auto_refresh_status()
                 st.caption("현재가 갱신은 보유 중인 모든 종목과 USD/KRW 환율을 캐시 없이 다시 조회합니다.")
                 st.caption("실패 종목 재시도 버튼은 실패한 종목만 다시 조회합니다.")
             return
@@ -1848,7 +1858,7 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
         with st.expander("데이터 정보", expanded=False):
             _render_data_source_info()
         with st.expander("가격 조회 옵션", expanded=False):
-            _render_auto_refresh_controls()
+            _render_sidebar_auto_refresh_status()
             st.caption("현재가 갱신은 보유 중인 모든 종목과 USD/KRW 환율을 캐시 없이 다시 조회합니다.")
             st.caption("실패 종목 재시도 버튼은 실패한 종목만 다시 조회합니다.")
 
@@ -1872,6 +1882,7 @@ def _render_header(config: AppSecurityConfig, owner_id, store, target_allocation
         show_retry=bool(summary.failed),
         show_save=not public_auth_enabled,
     )
+    _render_auto_refresh_controls()
     if actions["refresh"]:
         _run_price_refresh(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)
     if actions["retry"]:

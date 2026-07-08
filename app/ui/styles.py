@@ -803,6 +803,27 @@ __CSS_VARS__
             padding: 0 var(--token-space-4) !important;
             font-size: var(--token-font-md) !important;
         }
+        .st-key-auto_price_refresh_enabled {
+            width: fit-content !important;
+            max-width: 100%;
+            margin: calc(-1 * var(--token-space-2)) 0 var(--token-space-1);
+        }
+        .st-key-auto_price_refresh_enabled label {
+            min-height: var(--token-button-height-sm);
+            padding: 0 var(--token-space-3);
+            border: 1px solid var(--app-border);
+            border-radius: var(--token-radius-pill);
+            background: var(--app-surface-raised);
+            box-shadow: var(--app-shadow);
+        }
+        .st-key-auto_price_refresh_enabled label p,
+        .st-key-auto_price_refresh_enabled div[data-testid="stWidgetLabel"] * {
+            color: var(--app-heading) !important;
+            font-size: var(--token-font-sm) !important;
+            font-weight: 820 !important;
+            line-height: 1 !important;
+            white-space: nowrap !important;
+        }
         .st-key-public_section_tabs {
             margin: var(--token-space-5) 0 var(--token-space-6);
         }
@@ -999,6 +1020,14 @@ __CSS_VARS__
                 padding: 0 var(--token-space-4) !important;
                 font-size: var(--token-font-base) !important;
                 box-shadow: var(--app-primary-shadow) !important;
+            }
+            .st-key-auto_price_refresh_enabled {
+                margin-top: var(--token-space-2);
+                margin-bottom: var(--token-space-2);
+            }
+            .st-key-auto_price_refresh_enabled label {
+                min-height: 2.15rem;
+                padding: 0 var(--token-space-3);
             }
             .st-key-public_section_tabs {
                 margin: 0.7rem 0 0.95rem;
