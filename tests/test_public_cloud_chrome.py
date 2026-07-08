@@ -23,8 +23,12 @@ def test_public_cloud_chrome_guard_hides_streamlit_controls():
         'data-testid*="manage-app"',
         'href*="streamlit.io/cloud"',
         'data-testid="appCreatorAvatar"',
+        'data-testid*="appCreator"',
         'class*="viewerBadge"',
         'class*="profileContainer"',
+        'class*="creatorAvatar"',
+        'iframe[title*="CookieManager"]',
+        'iframe[src*="extra_streamlit_components"]',
     ):
         assert selector in source
 
@@ -44,3 +48,19 @@ def test_public_dashboard_applies_chrome_guard_only_in_public_mode():
 
     assert "from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles" in source
     assert "if public_auth_enabled:\n    inject_public_cloud_chrome_guard()" in source
+
+
+def test_android_webview_keeps_system_bars_readable_and_hides_floating_chrome():
+    source = Path("android-webview/app/src/main/java/com/pjscreator/jisungport/MainActivity.java").read_text(encoding="utf-8")
+    style = Path("android-webview/app/src/main/res/values/styles.xml").read_text(encoding="utf-8")
+
+    assert "root.setBackgroundColor(SYSTEM_BAR_COLOR)" in source
+    assert "window.getDecorView().setBackgroundColor(SYSTEM_BAR_COLOR)" in source
+    assert "setStatusBarContrastEnforced(false)" in source
+    assert "WEBVIEW_CHROME_CLEANUP_JS" in source
+    assert "hideBottomChrome" in source
+    assert "MutationObserver(hideBottomChrome)" in source
+    assert "iframe[title*=\\\"CookieManager\\\"]" in source
+    assert "evaluateJavascript(WEBVIEW_CHROME_CLEANUP_JS, null)" in source
+    assert "<item name=\"android:windowBackground\">#0B1220</item>" in style
+    assert "<item name=\"android:enforceStatusBarContrast\">false</item>" in style
