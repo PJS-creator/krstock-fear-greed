@@ -401,6 +401,22 @@ def test_current_refresh_button_forces_all_quotes_and_fx_refresh():
     assert '"가격 새로고침 대상"' not in source
 
 
+def test_auto_quote_refresh_uses_one_minute_toggle_and_cooldown():
+    source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+
+    assert 'AUTO_PRICE_REFRESH_INTERVAL_SECONDS = 60' in source
+    assert 'AUTO_PRICE_REFRESH_COOLDOWN_SECONDS = 55' in source
+    assert '"auto_price_refresh_enabled"' in source
+    assert 'st.checkbox(\n        "1분 자동갱신"' in source
+    assert '@st.fragment(run_every=f"{AUTO_PRICE_REFRESH_INTERVAL_SECONDS}s")' in source
+    assert '"auto_price_refresh"' in source
+    assert "show_progress=False" in source
+    assert "quiet=True" in source
+    assert "KIS 설정" in source
+    assert "최근 주식 조회 출처" in source
+    assert "한국투자 Open API" in source
+
+
 def test_public_header_refresh_does_not_call_fx_api_without_assets(monkeypatch):
     def fail_urlopen(*args, **kwargs):
         raise AssertionError("no external FX request expected for empty portfolio")
