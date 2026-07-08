@@ -84,8 +84,10 @@ from portfolio.cash_ledger import (
     serialize_cash_ledger_rows,
 )
 from portfolio.pricing import (
+    FallbackQuoteProvider,
     TTLFxCache,
     TTLQuoteCache,
+    build_kis_quote_provider,
     build_korea_quote_provider,
     build_public_fx_provider,
     build_yfinance_fx_provider,
@@ -440,6 +442,29 @@ def _secret_text(name: str) -> str:
         return str(st.secrets.get(name, "") or "").strip()
     except Exception:
         return ""
+
+
+def _secret_text_any(*names: str) -> str:
+    for name in names:
+        value = _secret_text(name)
+        if value:
+            return value
+    return ""
+
+
+@st.cache_resource(show_spinner=False)
+def _build_optional_kis_quote_provider(app_key: str, app_secret: str, env: str):
+    return build_kis_quote_provider(app_key, app_secret, env=env or "real")
+
+
+def _read_kis_quote_provider():
+    enabled = _secret_text_any("KIS_API_ENABLED", "KOREA_INVESTMENT_API_ENABLED")
+    if enabled and not _truthy(enabled):
+        return None
+    app_key = _secret_text_any("KIS_APP_KEY", "KIS_APPKEY", "KOREA_INVESTMENT_APP_KEY")
+    app_secret = _secret_text_any("KIS_APP_SECRET", "KIS_APPSECRET", "KOREA_INVESTMENT_APP_SECRET")
+    env = _secret_text_any("KIS_ENV", "KOREA_INVESTMENT_ENV") or "real"
+    return _build_optional_kis_quote_provider(app_key, app_secret, env)
 
 
 def _auth_session_secret() -> str:
@@ -978,8 +1003,9 @@ def _refresh_price_rows(
     include_intraday: bool = False,
     on_progress=None,
 ) -> bool:
-    us_provider = build_yfinance_provider()
-    korea_provider = build_korea_quote_provider()
+    kis_provider = _read_kis_quote_provider()
+    us_provider = FallbackQuoteProvider([kis_provider, build_yfinance_provider()]) if kis_provider else build_yfinance_provider()
+    korea_provider = FallbackQuoteProvider([kis_provider, build_korea_quote_provider()]) if kis_provider else build_korea_quote_provider()
     intraday_provider = build_yfinance_intraday_provider() if include_intraday else None
     all_rows = list(st.session_state.holdings_rows)
     target_rows = list(select_price_refresh_rows(all_rows, mode))

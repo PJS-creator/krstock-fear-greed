@@ -6,8 +6,16 @@ from .alpha_vantage import (
     parse_alpha_vantage_currency_exchange_response,
     parse_alpha_vantage_global_quote_response,
 )
-from .base import FxProvider, IntradayPriceProvider, PriceProvider, PriceProviderError, ProviderFxRate, ProviderIntradayPrices, ProviderQuote
+from .base import FallbackQuoteProvider, FxProvider, IntradayPriceProvider, PriceProvider, PriceProviderError, ProviderFxRate, ProviderIntradayPrices, ProviderQuote
 from .cache import TTLFxCache, TTLQuoteCache
+from .kis import (
+    KoreaInvestmentQuoteProvider,
+    build_kis_quote_provider,
+    normalize_kis_us_symbol,
+    parse_kis_domestic_quote_response,
+    parse_kis_overseas_quote_response,
+    parse_kis_token_response,
+)
 from .korea import (
     FinanceDataReaderKoreaQuoteProvider,
     build_korea_quote_provider,
@@ -51,7 +59,9 @@ __all__ = [
     "FxProvider",
     "FxUpdateStatus",
     "FallbackFxProvider",
+    "FallbackQuoteProvider",
     "IntradayPriceProvider",
+    "KoreaInvestmentQuoteProvider",
     "OpenErApiFxProvider",
     "PriceProvider",
     "PriceProviderError",
@@ -66,6 +76,7 @@ __all__ = [
     "YFinanceIntradayPriceProvider",
     "YFinanceQuoteProvider",
     "build_alpha_vantage_provider",
+    "build_kis_quote_provider",
     "build_korea_quote_provider",
     "build_open_er_api_fx_provider",
     "build_public_fx_provider",
@@ -78,10 +89,14 @@ __all__ = [
     "is_korea_update_target",
     "is_us_quote_target",
     "normalize_korea_symbol",
+    "normalize_kis_us_symbol",
     "normalize_yfinance_symbol",
     "parse_alpha_vantage_currency_exchange_response",
     "parse_alpha_vantage_global_quote_response",
     "parse_finance_data_reader_price_frame",
+    "parse_kis_domestic_quote_response",
+    "parse_kis_overseas_quote_response",
+    "parse_kis_token_response",
     "parse_open_er_api_usd_krw_response",
     "parse_yahoo_chart_usd_krw_response",
     "parse_yfinance_history_frame",
