@@ -61,7 +61,14 @@ from app.ui.overview import render_overview
 from app.ui.rebalancing import render_rebalancing
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
 from app.ui.status import quote_status_label
-from app.ui.stability import begin_ui_action, finish_ui_action, render_action_guard_notice, request_app_rerun, reset_stale_ui_action_guard
+from app.ui.stability import (
+    begin_ui_action,
+    finish_ui_action,
+    render_action_guard_notice,
+    request_app_rerun,
+    reset_stale_ui_action_guard,
+    state_flag_is_stale,
+)
 from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles
 from app.ui.theme import APP_THEME_KEY, DEFAULT_THEME_MODE, THEME_MODE_ALIAS_KEY, normalize_theme_mode
 from app.ui.transactions import render_transaction_cashflow, render_transaction_editor
@@ -123,6 +130,7 @@ OWNER_ID_KEY = "authenticated_owner_id"
 DEFAULT_PORTFOLIO_KEY = "authenticated_default_portfolio"
 AUTH_ACCESS_TOKEN_KEY = "authenticated_access_token"
 AUTH_REFRESH_TOKEN_KEY = "authenticated_refresh_token"
+AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY = "authenticated_session_refresh_last_attempt_at"
 PORTFOLIO_NAME_KEY = "portfolio_name"
 PORTFOLIO_NAME_INPUT_KEY = "portfolio_name_input"
 PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
@@ -133,11 +141,14 @@ MARK_CLEAN_KEY = "mark_portfolio_clean"
 SAVE_STATUS_KEY = "portfolio_save_status_message"
 PRICE_REFRESH_MODE_KEY = "price_refresh_mode"
 PRICE_REFRESH_IN_PROGRESS_KEY = "price_refresh_in_progress"
+PRICE_REFRESH_STARTED_AT_KEY = "price_refresh_started_at"
+PRICE_REFRESH_STALE_SECONDS = 180.0
 AUTO_PRICE_REFRESH_ENABLED_KEY = "auto_price_refresh_enabled"
 AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY = "auto_price_refresh_last_attempt_at"
 AUTO_PRICE_REFRESH_LAST_RESULT_KEY = "auto_price_refresh_last_result"
 AUTO_PRICE_REFRESH_INTERVAL_SECONDS = 60
 AUTO_PRICE_REFRESH_COOLDOWN_SECONDS = 55
+PUBLIC_AUTH_SESSION_REFRESH_INTERVAL_SECONDS = 45 * 60
 AUTO_LOAD_ATTEMPTED_KEY = "account_auto_load_attempted"
 AUTO_PRICE_REFRESHED_KEY = "account_auto_price_refreshed"
 ACCOUNT_STATUS_KEY = "account_status_message"
@@ -359,7 +370,16 @@ def _authenticate_account(account: AccountConfig) -> None:
     _reset_current_portfolio_state(account.default_portfolio)
 
 
-def _authenticate_public_account(account: SupabaseAuthAccount) -> None:
+def _authenticate_public_account(account: SupabaseAuthAccount, *, reset_portfolio_state: bool = True) -> None:
+    if not reset_portfolio_state:
+        st.session_state[AUTHENTICATED_KEY] = True
+        st.session_state[ACCOUNT_ID_KEY] = account.account_id
+        st.session_state[OWNER_ID_KEY] = account.owner_id
+        st.session_state[DEFAULT_PORTFOLIO_KEY] = PUBLIC_PORTFOLIO_NAME
+        st.session_state[AUTH_ACCESS_TOKEN_KEY] = account.access_token
+        st.session_state[AUTH_REFRESH_TOKEN_KEY] = account.refresh_token
+        st.session_state[AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY] = time.time()
+        return
     _authenticate_account(
         AccountConfig(
             account_id=account.account_id,
@@ -370,6 +390,7 @@ def _authenticate_public_account(account: SupabaseAuthAccount) -> None:
     )
     st.session_state[AUTH_ACCESS_TOKEN_KEY] = account.access_token
     st.session_state[AUTH_REFRESH_TOKEN_KEY] = account.refresh_token
+    st.session_state[AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY] = time.time()
 
 
 def _logout(cookie_manager=None) -> None:
@@ -381,11 +402,13 @@ def _logout(cookie_manager=None) -> None:
         DEFAULT_PORTFOLIO_KEY,
         AUTH_ACCESS_TOKEN_KEY,
         AUTH_REFRESH_TOKEN_KEY,
+        AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY,
         AUTO_LOAD_ATTEMPTED_KEY,
         AUTO_PRICE_REFRESHED_KEY,
         AUTO_PRICE_REFRESH_ENABLED_KEY,
         AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY,
         AUTO_PRICE_REFRESH_LAST_RESULT_KEY,
+        PRICE_REFRESH_STARTED_AT_KEY,
         PUBLIC_SAVE_STATUS_KEY,
     ):
         st.session_state.pop(key, None)
@@ -574,6 +597,40 @@ def _restore_public_auth_session(storage_config) -> bool:
     return True
 
 
+def _public_auth_session_refresh_due(now: float) -> bool:
+    last_attempt = float(st.session_state.get(AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY) or 0.0)
+    return now - last_attempt >= PUBLIC_AUTH_SESSION_REFRESH_INTERVAL_SECONDS
+
+
+def _refresh_public_auth_session_if_due(storage_config) -> bool:
+    if not _is_authenticated():
+        return False
+    access_token = str(st.session_state.get(AUTH_ACCESS_TOKEN_KEY) or "").strip()
+    refresh_token = str(st.session_state.get(AUTH_REFRESH_TOKEN_KEY) or "").strip()
+    if not access_token or not refresh_token:
+        return False
+    now = time.time()
+    if not _public_auth_session_refresh_due(now):
+        return False
+    st.session_state[AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY] = now
+    auth_store = _build_public_auth_store(storage_config)
+    if auth_store is None:
+        return False
+    try:
+        account = auth_store.restore_session(access_token, refresh_token)
+    except SupabaseAuthError:
+        st.session_state[ACCOUNT_STATUS_KEY] = "로그인 세션 갱신에 실패했습니다. 화면이 계속 응답하지 않으면 새로고침 후 다시 로그인하세요."
+        return False
+    if account.owner_id != st.session_state.get(OWNER_ID_KEY):
+        st.session_state[ACCOUNT_STATUS_KEY] = "로그인 세션 사용자 정보가 달라 다시 로그인해야 합니다."
+        return False
+    _authenticate_public_account(account, reset_portfolio_state=False)
+    cookie_manager = get_cookie_manager()
+    if get_remember_cookie(cookie_manager):
+        _remember_public_auth_session(account, cookie_manager, remember=True)
+    return True
+
+
 def _public_auth_redirect_url() -> str | None:
     for key in ("PUBLIC_APP_URL", "STREAMLIT_APP_URL", "APP_URL"):
         value = _secret_text(key)
@@ -649,6 +706,20 @@ def _apply_pending_portfolio_state() -> None:
         st.session_state[MARK_CLEAN_KEY] = True
 
 
+def _reset_stale_price_refresh_state(*, now: float | None = None) -> None:
+    current_time = time.time() if now is None else now
+    if not state_flag_is_stale(
+        st.session_state.get(PRICE_REFRESH_IN_PROGRESS_KEY),
+        st.session_state.get(PRICE_REFRESH_STARTED_AT_KEY),
+        now=current_time,
+        stale_seconds=PRICE_REFRESH_STALE_SECONDS,
+    ):
+        return
+    st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = False
+    st.session_state.pop(PRICE_REFRESH_STARTED_AT_KEY, None)
+    st.session_state[ACCOUNT_STATUS_KEY] = "응답이 오래 없던 가격·환율 갱신 상태를 자동으로 복구했습니다. 필요하면 다시 갱신하세요."
+
+
 def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     reset_stale_ui_action_guard()
     st.session_state.setdefault(AUTHENTICATED_KEY, False)
@@ -680,6 +751,8 @@ def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     st.session_state.setdefault("last_price_refresh_at", None)
     st.session_state.setdefault(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
     st.session_state.setdefault(PRICE_REFRESH_IN_PROGRESS_KEY, False)
+    st.session_state.setdefault(PRICE_REFRESH_STARTED_AT_KEY, 0.0)
+    _reset_stale_price_refresh_state()
     st.session_state.setdefault(AUTO_PRICE_REFRESH_ENABLED_KEY, False)
     st.session_state.setdefault(AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY, 0.0)
     st.session_state.setdefault(AUTO_PRICE_REFRESH_LAST_RESULT_KEY, "")
@@ -1143,6 +1216,7 @@ def _run_price_refresh(
     if not begin_ui_action("price_refresh", payload={"mode": mode, "refresh_fx": refresh_fx}, cooldown_seconds=2.0):
         return
     st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = True
+    st.session_state[PRICE_REFRESH_STARTED_AT_KEY] = time.time()
     should_rerun = False
     with st.spinner("가격·환율 갱신 중..."):
         try:
@@ -1159,6 +1233,7 @@ def _run_price_refresh(
             st.session_state[ACCOUNT_STATUS_KEY] = f"가격·환율 갱신 실패: {exc}. 기존 값을 유지했습니다."
         finally:
             st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = False
+            st.session_state.pop(PRICE_REFRESH_STARTED_AT_KEY, None)
             finish_ui_action(success=True)
     if should_rerun:
         request_app_rerun()
@@ -1743,6 +1818,7 @@ def _maybe_run_periodic_price_refresh(
         st.session_state[AUTO_PRICE_REFRESH_LAST_RESULT_KEY] = "자동갱신 대기 · 다른 작업 처리 중"
         return
     st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = True
+    st.session_state[PRICE_REFRESH_STARTED_AT_KEY] = time.time()
     should_rerun = False
     try:
         should_rerun = _refresh_prices(
@@ -1766,6 +1842,7 @@ def _maybe_run_periodic_price_refresh(
         st.session_state[AUTO_PRICE_REFRESH_LAST_RESULT_KEY] = f"자동갱신 실패 · {exc}"
     finally:
         st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = False
+        st.session_state.pop(PRICE_REFRESH_STARTED_AT_KEY, None)
         finish_ui_action(success=True)
     if should_rerun:
         request_app_rerun()
@@ -2073,6 +2150,9 @@ security_config = _read_security_config()
 storage_config = _read_storage_config(public_auth_enabled=public_auth_enabled)
 if public_auth_enabled and not _is_authenticated():
     if _restore_public_auth_session(storage_config):
+        storage_config = _read_storage_config(public_auth_enabled=True)
+if public_auth_enabled and _is_authenticated():
+    if _refresh_public_auth_session_if_due(storage_config):
         storage_config = _read_storage_config(public_auth_enabled=True)
 if public_auth_enabled and not _is_authenticated():
     _render_public_auth_gate(storage_config)

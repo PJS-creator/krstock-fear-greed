@@ -407,3 +407,23 @@ Decision for current stabilization:
 - `target_allocations` table integration now exists, but live Supabase RLS behavior still needs A/B account manual QA in the deployed project.
 - `historical_reconstruction.py`의 세부 editor와 대량 조회 흐름은 별도 UX/performance pass가 필요하다.
 - 실제 Streamlit Cloud의 브라우저/권한별 `Manage app` 노출은 앱 코드가 아니라 workspace 권한과 로그인 상태에 따라 달라지므로 수동 QA가 필요하다.
+
+## Long Session Stability Follow-up
+
+Observed risk:
+
+- 사용자가 앱을 오래 열어 둔 뒤 돌아오면 Supabase access token이 낡아질 수 있다.
+- 가격·환율 갱신 도중 네트워크/API 호출이 오래 걸리거나 브라우저 세션이 중단되면 `price_refresh_in_progress`가 계속 남아 버튼이 반응하지 않는 것처럼 보일 수 있다.
+- 기존 action guard는 오래 남은 `running` 상태를 정리하지만, 가격 갱신 전용 진행 플래그는 별도 자동 복구가 필요했다.
+
+Implemented stabilization:
+
+- `price_refresh_started_at`을 기록하고 180초 이상 남은 가격·환율 갱신 진행 상태는 다음 rerun 때 자동 해제한다.
+- 공개 앱 로그인 세션은 45분마다 Supabase refresh token으로 조용히 갱신한다.
+- 세션 갱신은 포트폴리오 자동 로드 플래그나 현재 입력값을 초기화하지 않고 auth token만 교체한다.
+- 장시간 방치 후 복구되면 사용자에게 “가격·환율 갱신 상태를 자동으로 복구”했다는 안내를 표시한다.
+
+Manual QA:
+
+- 가격 갱신 중 네트워크를 끊거나 브라우저를 장시간 방치한 뒤 돌아왔을 때 갱신 버튼이 다시 눌리는지 확인한다.
+- 로그인 유지 상태에서 1시간 이상 방치 후 저장/가격 갱신/탭 이동이 정상 동작하는지 확인한다.
