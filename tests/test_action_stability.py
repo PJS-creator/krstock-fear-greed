@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from app.ui.stability import action_is_globally_cooling_down, action_is_recent, build_action_signature
+from app.ui.stability import action_is_globally_cooling_down, action_is_recent, build_action_signature, state_flag_is_stale
 
 
 def test_action_signature_is_stable_for_equivalent_payloads():
@@ -24,6 +24,13 @@ def test_action_global_cooldown_blocks_back_to_back_different_buttons_briefly():
 
     assert action_is_globally_cooling_down(guard, now=100.2, cooldown_seconds=0.35)
     assert not action_is_globally_cooling_down(guard, now=100.5, cooldown_seconds=0.35)
+
+
+def test_state_flag_stale_detects_stuck_long_running_state():
+    assert not state_flag_is_stale(False, 1.0, now=500.0, stale_seconds=180.0)
+    assert not state_flag_is_stale(True, 400.0, now=500.0, stale_seconds=180.0)
+    assert state_flag_is_stale(True, 100.0, now=500.0, stale_seconds=180.0)
+    assert state_flag_is_stale(True, None, now=500.0, stale_seconds=180.0)
 
 
 def test_streamlit_rerun_is_centralized_through_stability_helper():

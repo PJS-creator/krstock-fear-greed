@@ -492,6 +492,33 @@ def test_public_header_refresh_failure_keeps_app_shell(monkeypatch):
     assert at.session_state["price_refresh_in_progress"] is False
 
 
+def test_stale_price_refresh_state_is_cleared_on_next_run():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo@example.com"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.session_state["price_refresh_in_progress"] = True
+    at.session_state["price_refresh_started_at"] = 1.0
+    at.run(timeout=20)
+
+    assert not at.exception
+    assert at.session_state["price_refresh_in_progress"] is False
+    assert "price_refresh_started_at" not in at.session_state
+    assert "가격·환율 갱신 상태를 자동으로 복구" in _app_text(at)
+
+
+def test_public_auth_session_refresh_is_throttled_and_token_only():
+    source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+
+    assert "PUBLIC_AUTH_SESSION_REFRESH_INTERVAL_SECONDS = 45 * 60" in source
+    assert "def _refresh_public_auth_session_if_due(storage_config)" in source
+    assert "_authenticate_public_account(account, reset_portfolio_state=False)" in source
+    assert "authenticated_session_refresh_last_attempt_at" in source
+    assert "storage_config = _read_storage_config(public_auth_enabled=True)" in source
+    assert "reset_portfolio_state: bool = True" in source
+
+
 def test_public_auto_load_success_messages_are_not_shown_as_top_alerts():
     source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
 

@@ -56,6 +56,24 @@ def reset_stale_ui_action_guard(*, now: float | None = None, stale_seconds: floa
         st.session_state[ACTION_GUARD_KEY] = guard
 
 
+def state_flag_is_stale(
+    is_running: object,
+    started_at: object,
+    *,
+    now: float,
+    stale_seconds: float,
+) -> bool:
+    if not is_running:
+        return False
+    try:
+        start = float(started_at)
+    except (TypeError, ValueError):
+        return True
+    if start <= 0:
+        return True
+    return now - start > stale_seconds
+
+
 def begin_ui_action(
     action_key: str,
     *,
