@@ -12,6 +12,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowInsetsController;
 import android.webkit.CookieManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
@@ -31,6 +32,52 @@ import android.widget.Toast;
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST_CODE = 1001;
     private static final int SYSTEM_BAR_COLOR = Color.rgb(11, 18, 32);
+    private static final String WEBVIEW_CHROME_CLEANUP_JS =
+            "(function(){"
+                    + "var id='jisungport-webview-chrome-cleanup';"
+                    + "if(!document.getElementById(id)){"
+                    + "var style=document.createElement('style');"
+                    + "style.id=id;"
+                    + "style.textContent='"
+                    + "#MainMenu,header[data-testid=\"stHeader\"],div[data-testid=\"stToolbar\"],div[data-testid=\"stDecoration\"],"
+                    + "div[data-testid=\"stStatusWidget\"],div[data-testid=\"collapsedControl\"],"
+                    + "a[href*=\"share.streamlit.io\"],a[href*=\"streamlit.io/cloud\"],"
+                    + "button[title*=\"Deploy\"],button[title*=\"Share\"],button[title*=\"Edit\"],button[title*=\"GitHub\"],button[title*=\"Manage\"],"
+                    + "button[aria-label*=\"Deploy\"],button[aria-label*=\"Share\"],button[aria-label*=\"Edit\"],button[aria-label*=\"GitHub\"],button[aria-label*=\"Manage\"],"
+                    + "a[title*=\"Manage\"],a[aria-label*=\"Manage\"],"
+                    + "[data-testid=\"appCreatorAvatar\"],[data-testid*=\"manage-app\"],[data-testid*=\"ManageApp\"],[data-testid*=\"stDeployButton\"],"
+                    + "[class*=\"viewerBadge\"],[class*=\"profileContainer\"],[class*=\"profilePreview\"],[class*=\"appCreator\"],"
+                    + "iframe[title*=\"CookieManager\"],iframe[src*=\"extra_streamlit_components\"],iframe[src*=\"CookieManager\"]"
+                    + "{display:none!important;visibility:hidden!important;pointer-events:none!important;}' ;"
+                    + "document.head.appendChild(style);"
+                    + "}"
+                    + "function hideBottomChrome(){"
+                    + "var nodes=document.querySelectorAll('iframe,button,a,div[role=\"button\"],div,section');"
+                    + "for(var i=0;i<nodes.length;i++){"
+                    + "var el=nodes[i];"
+                    + "var cs=window.getComputedStyle(el);"
+                    + "if(cs.position!=='fixed'){continue;}"
+                    + "var r=el.getBoundingClientRect();"
+                    + "if(r.width<=0||r.height<=0){continue;}"
+                    + "var nearRight=r.right>window.innerWidth-132;"
+                    + "var nearBottom=r.bottom>window.innerHeight-132;"
+                    + "var compact=r.width<=180&&r.height<=140;"
+                    + "if(nearRight&&nearBottom&&compact){"
+                    + "el.style.setProperty('display','none','important');"
+                    + "el.style.setProperty('visibility','hidden','important');"
+                    + "el.style.setProperty('pointer-events','none','important');"
+                    + "}"
+                    + "}"
+                    + "}"
+                    + "hideBottomChrome();"
+                    + "if(!window.__jisungPortChromeCleanupObserver){"
+                    + "window.__jisungPortChromeCleanupObserver=new MutationObserver(hideBottomChrome);"
+                    + "window.__jisungPortChromeCleanupObserver.observe(document.documentElement,{childList:true,subtree:true});"
+                    + "}"
+                    + "setTimeout(hideBottomChrome,500);"
+                    + "setTimeout(hideBottomChrome,1500);"
+                    + "setTimeout(hideBottomChrome,3000);"
+                    + "})();";
 
     private WebView webView;
     private ProgressBar progressBar;
@@ -43,6 +90,7 @@ public class MainActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
 
         FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(SYSTEM_BAR_COLOR);
         configureSystemBars(root);
         webView = new WebView(this);
         progressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -78,8 +126,13 @@ public class MainActivity extends Activity {
     @SuppressWarnings("deprecation")
     private void configureSystemBars(FrameLayout root) {
         Window window = getWindow();
+        window.getDecorView().setBackgroundColor(SYSTEM_BAR_COLOR);
         window.setStatusBarColor(SYSTEM_BAR_COLOR);
         window.setNavigationBarColor(SYSTEM_BAR_COLOR);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.setStatusBarContrastEnforced(false);
+            window.setNavigationBarContrastEnforced(false);
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             int flags = window.getDecorView().getSystemUiVisibility();
             flags &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
@@ -90,6 +143,14 @@ public class MainActivity extends Activity {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.setDecorFitsSystemWindows(false);
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsAppearance(
+                        0,
+                        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                                | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                );
+            }
         }
 
         root.setOnApplyWindowInsetsListener((view, insets) -> {
@@ -171,6 +232,7 @@ public class MainActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 CookieManager.getInstance().flush();
+                injectWebViewChromeCleanup(view);
             }
 
             @Override
@@ -243,6 +305,10 @@ public class MainActivity extends Activity {
         webView.setVisibility(View.GONE);
         errorView.setVisibility(View.VISIBLE);
         progressBar.setVisibility(View.GONE);
+    }
+
+    private void injectWebViewChromeCleanup(WebView view) {
+        view.evaluateJavascript(WEBVIEW_CHROME_CLEANUP_JS, null);
     }
 
     @Override

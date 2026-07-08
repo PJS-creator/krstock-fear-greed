@@ -3,8 +3,11 @@
     <style name="Theme.JisungPort" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
+        <item name="android:windowBackground">#0B1220</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:statusBarColor">#0B1220</item>
         <item name="android:navigationBarColor">#0B1220</item>
+        <item name="android:enforceStatusBarContrast">false</item>
+        <item name="android:enforceNavigationBarContrast">false</item>
     </style>
 </resources>

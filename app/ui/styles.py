@@ -1190,9 +1190,19 @@ def inject_public_cloud_chrome_guard() -> None:
         [data-testid*="manage-app"],
         [data-testid*="ManageApp"],
         [data-testid*="stDeployButton"],
+        [data-testid*="appCreator"],
+        [data-testid*="AppCreator"],
+        [data-testid*="profile"],
+        [data-testid*="Profile"],
         [class*="viewerBadge"],
         [class*="profileContainer"],
         [class*="profilePreview"],
+        [class*="appCreator"],
+        [class*="creatorAvatar"],
+        [class*="deployButton"],
+        iframe[title*="CookieManager"],
+        iframe[src*="CookieManager"],
+        iframe[src*="extra_streamlit_components"],
         [data-testid*="stToolbarActionButton"] {
             display: none !important;
             visibility: hidden !important;
