@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections import Counter
 from datetime import date
 from html import escape
 import logging
 import os
 from pathlib import Path
 import sys
+import time
 
 
 def _ensure_project_root_on_path() -> None:
@@ -58,6 +60,7 @@ from app.ui.manage import (
 from app.ui.overview import render_overview
 from app.ui.rebalancing import render_rebalancing
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
+from app.ui.status import quote_status_label
 from app.ui.stability import begin_ui_action, finish_ui_action, render_action_guard_notice, request_app_rerun, reset_stale_ui_action_guard
 from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles
 from app.ui.theme import APP_THEME_KEY, DEFAULT_THEME_MODE, THEME_MODE_ALIAS_KEY, normalize_theme_mode
@@ -130,6 +133,11 @@ MARK_CLEAN_KEY = "mark_portfolio_clean"
 SAVE_STATUS_KEY = "portfolio_save_status_message"
 PRICE_REFRESH_MODE_KEY = "price_refresh_mode"
 PRICE_REFRESH_IN_PROGRESS_KEY = "price_refresh_in_progress"
+AUTO_PRICE_REFRESH_ENABLED_KEY = "auto_price_refresh_enabled"
+AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY = "auto_price_refresh_last_attempt_at"
+AUTO_PRICE_REFRESH_LAST_RESULT_KEY = "auto_price_refresh_last_result"
+AUTO_PRICE_REFRESH_INTERVAL_SECONDS = 60
+AUTO_PRICE_REFRESH_COOLDOWN_SECONDS = 55
 AUTO_LOAD_ATTEMPTED_KEY = "account_auto_load_attempted"
 AUTO_PRICE_REFRESHED_KEY = "account_auto_price_refreshed"
 ACCOUNT_STATUS_KEY = "account_status_message"
@@ -375,6 +383,9 @@ def _logout(cookie_manager=None) -> None:
         AUTH_REFRESH_TOKEN_KEY,
         AUTO_LOAD_ATTEMPTED_KEY,
         AUTO_PRICE_REFRESHED_KEY,
+        AUTO_PRICE_REFRESH_ENABLED_KEY,
+        AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY,
+        AUTO_PRICE_REFRESH_LAST_RESULT_KEY,
         PUBLIC_SAVE_STATUS_KEY,
     ):
         st.session_state.pop(key, None)
@@ -465,6 +476,37 @@ def _read_kis_quote_provider():
     app_secret = _secret_text_any("KIS_APP_SECRET", "KIS_APPSECRET", "KOREA_INVESTMENT_APP_SECRET")
     env = _secret_text_any("KIS_ENV", "KOREA_INVESTMENT_ENV") or "real"
     return _build_optional_kis_quote_provider(app_key, app_secret, env)
+
+
+def _kis_quote_config_status() -> str:
+    enabled = _secret_text_any("KIS_API_ENABLED", "KOREA_INVESTMENT_API_ENABLED")
+    if enabled and not _truthy(enabled):
+        return "꺼짐"
+    app_key = _secret_text_any("KIS_APP_KEY", "KIS_APPKEY", "KOREA_INVESTMENT_APP_KEY")
+    app_secret = _secret_text_any("KIS_APP_SECRET", "KIS_APPSECRET", "KOREA_INVESTMENT_APP_SECRET")
+    if app_key and app_secret:
+        return f"사용 중 · {_secret_text_any('KIS_ENV', 'KOREA_INVESTMENT_ENV') or 'real'}"
+    return "미설정"
+
+
+def _provider_display_name(value: object) -> str:
+    normalized = str(value or "").strip().lower()
+    labels = {
+        "korea_investment": "한국투자 Open API",
+        "finance_datareader": "FinanceDataReader",
+        "yfinance": "yfinance",
+        "yahoo-chart": "Yahoo chart",
+        "open-er-api": "open.er-api",
+        "manual": "수동 입력",
+        "sample": "샘플",
+    }
+    return labels.get(normalized, str(value or "-").strip() or "-")
+
+
+def _status_value(status: object, field: str, default: object = None) -> object:
+    if isinstance(status, dict):
+        return status.get(field, default)
+    return getattr(status, field, default)
 
 
 def _auth_session_secret() -> str:
@@ -638,6 +680,9 @@ def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     st.session_state.setdefault("last_price_refresh_at", None)
     st.session_state.setdefault(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
     st.session_state.setdefault(PRICE_REFRESH_IN_PROGRESS_KEY, False)
+    st.session_state.setdefault(AUTO_PRICE_REFRESH_ENABLED_KEY, False)
+    st.session_state.setdefault(AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY, 0.0)
+    st.session_state.setdefault(AUTO_PRICE_REFRESH_LAST_RESULT_KEY, "")
     st.session_state.setdefault(ALLOW_NEGATIVE_CASH_KEY, False)
     if public_auth_enabled:
         st.session_state[PORTFOLIO_NAME_KEY] = PUBLIC_PORTFOLIO_NAME
@@ -1048,13 +1093,16 @@ def _refresh_prices(
     mode: str = "전체 강제 재조회",
     refresh_fx: bool = True,
     public_auth_enabled: bool = False,
+    show_progress: bool = True,
+    quiet: bool = False,
 ) -> bool:
     holdings_rows = list(st.session_state.get("holdings_rows") or [])
     has_usd_cash = float(st.session_state.get("cash_usd") or 0.0) > 0
     if not holdings_rows and not (refresh_fx and has_usd_cash):
-        st.info("조회할 보유종목 또는 달러 현금이 없습니다.")
+        if not quiet:
+            st.info("조회할 보유종목 또는 달러 현금이 없습니다.")
         return False
-    progress = st.progress(0, text="최근 제공 가격 조회 준비 중") if holdings_rows else None
+    progress = st.progress(0, text="최근 제공 가격 조회 준비 중") if show_progress and holdings_rows else None
 
     def update_progress(completed: int, total: int, symbol: str) -> None:
         if progress is None:
@@ -1074,7 +1122,8 @@ def _refresh_prices(
         if fx_result is not None:
             refreshed_fx = _apply_fx_rate(*fx_result)
     if not refreshed and not refreshed_fx:
-        st.info("새로 조회할 대상 종목이 없습니다.")
+        if not quiet:
+            st.info("새로 조회할 대상 종목이 없습니다.")
         return False
     return True
 
@@ -1577,6 +1626,152 @@ def _auto_refresh_loaded_prices(owner_id, store, target_allocation_store, histor
             return
 
 
+def _source_counts_from_statuses(statuses: list[object]) -> Counter:
+    counts: Counter = Counter()
+    for status in statuses:
+        source = str(_status_value(status, "source") or "").strip()
+        if source:
+            counts[source] += 1
+    return counts
+
+
+def _source_counts_from_holdings(rows: list[dict[str, object]]) -> Counter:
+    counts: Counter = Counter()
+    for row in rows:
+        source = str(row.get("source") or row.get("provider") or "").strip()
+        if source:
+            counts[source] += 1
+    return counts
+
+
+def _format_source_counts(counts: Counter) -> str:
+    if not counts:
+        return "아직 조회 기록이 없습니다."
+    return " · ".join(f"{_provider_display_name(source)} {count}건" for source, count in counts.most_common())
+
+
+def _recent_quote_lines(statuses: list[object], *, limit: int = 6) -> list[str]:
+    lines: list[str] = []
+    for status in statuses[:limit]:
+        symbol = str(_status_value(status, "symbol", "") or "").strip().upper()
+        source = _provider_display_name(_status_value(status, "source", ""))
+        status_label = quote_status_label(_status_value(status, "status", ""))
+        if symbol:
+            lines.append(f"{symbol}: {source} · {status_label}")
+    return lines
+
+
+def _render_data_source_info() -> None:
+    statuses = list(st.session_state.get("price_update_statuses") or [])
+    holdings_rows = list(st.session_state.get("holdings_rows") or [])
+    summary = aggregate_price_statuses(statuses)
+    status_counts = _source_counts_from_statuses(statuses)
+    holding_counts = _source_counts_from_holdings(holdings_rows)
+    st.caption("주식 조회 우선순위: 한국투자 Open API → yfinance/FinanceDataReader fallback")
+    st.caption(f"KIS 설정: {_kis_quote_config_status()}")
+    st.caption(f"최근 주식 조회 출처: {_format_source_counts(status_counts or holding_counts)}")
+    if statuses:
+        st.caption(f"최근 주식 조회 상태: {summary.detail_text}")
+        for line in _recent_quote_lines(statuses):
+            st.caption(line)
+    st.caption(f"환율 출처: {_provider_display_name(st.session_state.get('fx_source') or 'manual')}")
+    if st.session_state.get("fx_fetched_at"):
+        st.caption(f"환율 조회 시각: {format_kst(st.session_state.get('fx_fetched_at'), compact=True)}")
+
+
+def _render_auto_refresh_controls() -> None:
+    enabled = st.checkbox(
+        "1분 자동갱신",
+        key=AUTO_PRICE_REFRESH_ENABLED_KEY,
+        help="앱이 열린 동안에만 60초마다 가격·환율 갱신을 시도합니다. 입력 작업 중이거나 직전 갱신 후 60초가 지나지 않으면 건너뜁니다.",
+    )
+    if not enabled:
+        st.caption("자동갱신 꺼짐 · 필요할 때 상단 버튼으로 수동 갱신합니다.")
+        return
+    last_attempt = float(st.session_state.get(AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY) or 0.0)
+    remaining = 0
+    if last_attempt:
+        remaining = max(0, AUTO_PRICE_REFRESH_INTERVAL_SECONDS - int(time.time() - last_attempt))
+    st.caption(f"자동갱신 켜짐 · 다음 확인까지 약 {remaining}초")
+    result = str(st.session_state.get(AUTO_PRICE_REFRESH_LAST_RESULT_KEY) or "").strip()
+    if result:
+        st.caption(result)
+
+
+def _auto_refresh_due(now: float) -> bool:
+    last_attempt = float(st.session_state.get(AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY) or 0.0)
+    return now - last_attempt >= AUTO_PRICE_REFRESH_INTERVAL_SECONDS
+
+
+def _maybe_run_periodic_price_refresh(
+    config: AppSecurityConfig,
+    owner_id,
+    history_store,
+    *,
+    public_auth_enabled: bool = False,
+) -> None:
+    if not st.session_state.get(AUTO_PRICE_REFRESH_ENABLED_KEY):
+        return
+    if public_auth_enabled and not _is_authenticated():
+        return
+    holdings_rows = list(st.session_state.get("holdings_rows") or [])
+    has_usd_cash = float(st.session_state.get("cash_usd") or 0.0) > 0
+    if not holdings_rows and not has_usd_cash:
+        st.session_state[AUTO_PRICE_REFRESH_LAST_RESULT_KEY] = "자동갱신 대기 · 조회할 보유종목 또는 달러 현금이 없습니다."
+        return
+    if st.session_state.get(PRICE_REFRESH_IN_PROGRESS_KEY):
+        return
+    now = time.time()
+    if not _auto_refresh_due(now):
+        return
+    st.session_state[AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY] = now
+    if not begin_ui_action(
+        "auto_price_refresh",
+        payload={"interval_seconds": AUTO_PRICE_REFRESH_INTERVAL_SECONDS},
+        cooldown_seconds=AUTO_PRICE_REFRESH_COOLDOWN_SECONDS,
+    ):
+        st.session_state[AUTO_PRICE_REFRESH_LAST_RESULT_KEY] = "자동갱신 대기 · 다른 작업 처리 중"
+        return
+    st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = True
+    should_rerun = False
+    try:
+        should_rerun = _refresh_prices(
+            config,
+            owner_id,
+            history_store,
+            mode="전체 강제 재조회",
+            refresh_fx=True,
+            public_auth_enabled=public_auth_enabled,
+            show_progress=False,
+            quiet=True,
+        )
+        summary = aggregate_price_statuses(st.session_state.get("price_update_statuses", []))
+        st.session_state[AUTO_PRICE_REFRESH_LAST_RESULT_KEY] = (
+            f"마지막 자동갱신 {format_kst(st.session_state.get('last_price_refresh_at'), compact=True)} · {summary.short_text}"
+            if should_rerun
+            else "자동갱신 확인 · 새로 반영할 가격/환율이 없습니다."
+        )
+    except Exception as exc:
+        LOGGER.exception("periodic_price_refresh_failed type=%s message=%s", type(exc).__name__, exc)
+        st.session_state[AUTO_PRICE_REFRESH_LAST_RESULT_KEY] = f"자동갱신 실패 · {exc}"
+    finally:
+        st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = False
+        finish_ui_action(success=True)
+    if should_rerun:
+        request_app_rerun()
+
+
+def _render_auto_refresh_runner(config: AppSecurityConfig, owner_id, history_store, *, public_auth_enabled: bool = False) -> None:
+    if not st.session_state.get(AUTO_PRICE_REFRESH_ENABLED_KEY):
+        return
+
+    @st.fragment(run_every=f"{AUTO_PRICE_REFRESH_INTERVAL_SECONDS}s")
+    def _periodic_price_refresh_fragment() -> None:
+        _maybe_run_periodic_price_refresh(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)
+
+    _periodic_price_refresh_fragment()
+
+
 def _render_saved_portfolio_selector(owner_id, store) -> None:
     if owner_id is None or store is None:
         st.text_input("포트폴리오 이름", key=PORTFOLIO_NAME_INPUT_KEY)
@@ -1618,8 +1813,9 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
         if public_auth_enabled:
             st.subheader("데이터")
             with st.expander("데이터 정보", expanded=False):
-                st.caption("미국 주식은 yfinance, USD/KRW 환율은 Yahoo chart와 open.er-api fallback, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
+                _render_data_source_info()
             with st.expander("가격 조회 옵션", expanded=False):
+                _render_auto_refresh_controls()
                 st.caption("현재가 갱신은 보유 중인 모든 종목과 USD/KRW 환율을 캐시 없이 다시 조회합니다.")
                 st.caption("실패 종목 재시도 버튼은 실패한 종목만 다시 조회합니다.")
             return
@@ -1650,8 +1846,9 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
             if st.session_state.fx_fetched_at:
                 st.caption(f"환율 조회: {format_kst(st.session_state.fx_fetched_at, compact=True)}")
         with st.expander("데이터 정보", expanded=False):
-            st.caption("미국 주식은 yfinance, USD/KRW 환율은 Yahoo chart와 open.er-api fallback, 국내 주식은 FinanceDataReader 기반 최근 제공 가격을 사용합니다. 무료 데이터라 실시간을 보장하지 않습니다.")
+            _render_data_source_info()
         with st.expander("가격 조회 옵션", expanded=False):
+            _render_auto_refresh_controls()
             st.caption("현재가 갱신은 보유 중인 모든 종목과 USD/KRW 환율을 캐시 없이 다시 조회합니다.")
             st.caption("실패 종목 재시도 버튼은 실패한 종목만 다시 조회합니다.")
 
@@ -1879,6 +2076,7 @@ _auto_load_account_portfolio(owner_id, portfolio_store, target_allocation_store)
 if not public_auth_enabled:
     _auto_refresh_loaded_prices(owner_id, portfolio_store, target_allocation_store, history_store)
 _render_sidebar(security_config, owner_id, portfolio_store, public_auth_enabled=public_auth_enabled)
+_render_auto_refresh_runner(security_config, owner_id, history_store, public_auth_enabled=public_auth_enabled)
 _render_security_status(security_config, public_auth_enabled=public_auth_enabled)
 if not public_auth_enabled and should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
     _render_login_form(security_config)
