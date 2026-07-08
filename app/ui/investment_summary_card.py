@@ -1326,24 +1326,28 @@ def _render_styles() -> None:
                 font-size: 0.76rem;
             }
             .summary-index-cells {
-                display: flex;
-                flex-wrap: nowrap;
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
                 gap: 6px;
-                overflow-x: auto;
-                scrollbar-width: none;
-                -webkit-overflow-scrolling: touch;
-            }
-            .summary-index-cells::-webkit-scrollbar {
-                display: none;
+                overflow-x: hidden;
             }
             .summary-index-cell {
-                flex: 0 0 auto;
-                min-width: 96px;
+                min-width: 0;
                 padding: 7px 6px;
-                font-size: 0.7rem;
+                font-size: clamp(0.62rem, 2.55vw, 0.7rem);
+            }
+            .summary-index-name {
+                min-height: 1.56em;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .summary-index-quote {
+                gap: 0;
+                font-size: clamp(0.58rem, 2.35vw, 0.66rem);
             }
             .summary-index-change {
-                font-size: 0.66rem;
+                font-size: 1em;
             }
             .summary-mobile-holdings {
                 display: block;
