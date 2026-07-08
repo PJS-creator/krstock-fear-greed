@@ -5,6 +5,8 @@ import pytest
 
 from portfolio.pricing import (
     FallbackFxProvider,
+    FallbackQuoteProvider,
+    KoreaInvestmentQuoteProvider,
     OpenErApiFxProvider,
     PriceProviderError,
     ProviderFxRate,
@@ -16,6 +18,10 @@ from portfolio.pricing import (
     YFinanceIntradayPriceProvider,
     YFinanceQuoteProvider,
     build_alpha_vantage_provider,
+    build_kis_quote_provider,
+    parse_kis_domestic_quote_response,
+    parse_kis_overseas_quote_response,
+    parse_kis_token_response,
     parse_alpha_vantage_currency_exchange_response,
     parse_alpha_vantage_global_quote_response,
     parse_open_er_api_usd_krw_response,
@@ -353,6 +359,137 @@ def test_yfinance_fx_provider_rejects_unsupported_pair():
 
     with pytest.raises(PriceProviderError, match="USD/KRW"):
         provider.get_exchange_rate("EUR", "KRW")
+
+
+def test_kis_token_response_parsing_uses_expiry_text():
+    now = datetime(2026, 7, 8, 0, 0, tzinfo=timezone.utc)
+    token, expires_at = parse_kis_token_response(
+        {
+            "access_token": "token-value",
+            "access_token_token_expired": "2026-07-09 09:00:00",
+        },
+        now=now,
+    )
+
+    assert token == "token-value"
+    assert expires_at.tzinfo is not None
+    assert expires_at > now
+
+
+def test_kis_domestic_quote_response_parsing():
+    quote = parse_kis_domestic_quote_response(
+        "005930",
+        {
+            "rt_cd": "0",
+            "output": {
+                "stck_prpr": "72000",
+                "stck_sdpr": "71000",
+                "stck_bsop_date": "20260708",
+                "stck_cntg_hour": "103015",
+            },
+        },
+    )
+
+    assert quote.symbol == "005930"
+    assert quote.price == pytest.approx(72000)
+    assert quote.previous_close == pytest.approx(71000)
+    assert quote.provider == "korea_investment"
+    assert quote.price_date.isoformat() == "2026-07-08"
+    assert quote.as_of_timestamp is not None
+
+
+def test_kis_overseas_quote_response_parsing():
+    quote = parse_kis_overseas_quote_response(
+        "googl",
+        {
+            "rt_cd": "0",
+            "output": {
+                "last": "180.25",
+                "base": "178.50",
+                "xymd": "20260707",
+                "xhms": "093000",
+            },
+        },
+    )
+
+    assert quote.symbol == "GOOGL"
+    assert quote.price == pytest.approx(180.25)
+    assert quote.previous_close == pytest.approx(178.5)
+    assert quote.provider == "korea_investment"
+    assert quote.price_date.isoformat() == "2026-07-07"
+
+
+def test_kis_provider_uses_domestic_endpoint_and_token_headers():
+    calls = []
+
+    def response_loader(method, url, headers, body, timeout_seconds):
+        calls.append((method, url, headers, body, timeout_seconds))
+        if url.endswith("/oauth2/tokenP"):
+            return {"access_token": "token-value", "expires_in": 3600}
+        assert "/uapi/domestic-stock/v1/quotations/inquire-price" in url
+        assert "FID_INPUT_ISCD=005930" in url
+        assert headers["authorization"] == "Bearer token-value"
+        assert headers["tr_id"] == "FHKST01010100"
+        return {
+            "rt_cd": "0",
+            "output": {
+                "stck_prpr": "72000",
+                "stck_sdpr": "71000",
+            },
+        }
+
+    provider = KoreaInvestmentQuoteProvider(app_key="app-key", app_secret="secret", response_loader=response_loader)
+    quote = provider.get_quote("005930")
+
+    assert quote.price == pytest.approx(72000)
+    assert [call[0] for call in calls] == ["POST", "GET"]
+
+
+def test_kis_provider_tries_us_exchange_candidates_until_success():
+    urls = []
+
+    def response_loader(method, url, headers, body, timeout_seconds):
+        urls.append(url)
+        if url.endswith("/oauth2/tokenP"):
+            return {"access_token": "token-value", "expires_in": 3600}
+        if "EXCD=NAS" in url:
+            return {"rt_cd": "1", "msg1": "not found"}
+        assert "EXCD=NYS" in url
+        assert headers["tr_id"] == "HHDFS00000300"
+        return {
+            "rt_cd": "0",
+            "output": {
+                "last": "41.25",
+                "base": "40.00",
+            },
+        }
+
+    provider = KoreaInvestmentQuoteProvider(
+        app_key="app-key",
+        app_secret="secret",
+        response_loader=response_loader,
+        us_exchanges=("NAS", "NYS"),
+    )
+    quote = provider.get_quote("QURE")
+
+    assert quote.symbol == "QURE"
+    assert quote.price == pytest.approx(41.25)
+    assert any("EXCD=NAS" in url for url in urls)
+    assert any("EXCD=NYS" in url for url in urls)
+
+
+def test_kis_builder_returns_none_without_credentials():
+    assert build_kis_quote_provider("", "secret") is None
+    assert build_kis_quote_provider("app-key", "") is None
+
+
+def test_fallback_quote_provider_uses_next_provider_after_failure():
+    fallback = FallbackQuoteProvider([FailingProvider(), FakeProvider()])
+
+    quote = fallback.get_quote("MSFT")
+
+    assert quote.price == pytest.approx(155.5)
+    assert quote.provider == "fake"
 
 
 def test_missing_us_provider_does_not_fail_and_keeps_manual_quotes():

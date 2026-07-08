@@ -106,3 +106,35 @@ class IntradayPriceProvider(Protocol):
 class FxProvider(Protocol):
     def get_exchange_rate(self, from_currency: str, to_currency: str) -> ProviderFxRate:
         """Return the latest provider FX rate or raise PriceProviderError."""
+
+
+class FallbackQuoteProvider:
+    """Try quote providers in order and use the first successful response."""
+
+    def __init__(self, providers: list[PriceProvider | None]) -> None:
+        self._providers = [provider for provider in providers if provider is not None]
+        if not self._providers:
+            raise ValueError("at least one quote provider is required")
+
+    def get_quote(self, symbol: str) -> ProviderQuote:
+        errors: list[str] = []
+        for provider in self._providers:
+            try:
+                return provider.get_quote(symbol)
+            except PriceProviderError as exc:
+                provider_name = getattr(provider, "provider_name", provider.__class__.__name__)
+                errors.append(f"{provider_name}: {exc}")
+        raise PriceProviderError("; ".join(errors) or "가격 provider 조회에 실패했습니다.")
+
+    def get_display_name(self, symbol: str) -> str:
+        for provider in self._providers:
+            lookup = getattr(provider, "get_display_name", None)
+            if not callable(lookup):
+                continue
+            try:
+                name = str(lookup(symbol)).strip()
+            except Exception:
+                continue
+            if name:
+                return name
+        return str(symbol or "").strip().upper()
