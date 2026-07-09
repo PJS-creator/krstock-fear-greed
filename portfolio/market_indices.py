@@ -13,6 +13,10 @@ from urllib.request import Request, urlopen
 
 YAHOO_CHART_INDEX_PROVIDER = "yahoo-chart"
 YAHOO_CHART_INDEX_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=5d&interval=1d"
+YAHOO_CHART_WARNING_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=60d&interval=60m"
+MARKET_WARNING_MA_PERIOD = 5
+MARKET_WARNING_BOLLINGER_PERIOD = 180
+MARKET_WARNING_BOLLINGER_MULTIPLIER = 2.0
 HTTP_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; krstock-fear-greed/1.0; +https://github.com/PJS-creator/krstock-fear-greed)",
     "Accept": "application/json",
@@ -45,12 +49,50 @@ class MarketIndexQuote:
         return self.status == "updated" and self.value is not None
 
 
+@dataclass(frozen=True)
+class MarketWarningSpec:
+    label: str
+    symbol: str
+    display_symbol: str | None = None
+
+
+@dataclass(frozen=True)
+class MarketWarningSignal:
+    label: str
+    symbol: str
+    status: str
+    trigger: str
+    value: float | None
+    moving_average: float | None
+    upper_band: float | None
+    middle_band: float | None
+    lower_band: float | None
+    source: str
+    fetched_at: datetime
+    as_of_timestamp: datetime | None = None
+    error_message: str | None = None
+
+    @property
+    def blocks_buy(self) -> bool:
+        return self.status == "buy_blocked"
+
+    @property
+    def blocks_sell(self) -> bool:
+        return self.status == "sell_blocked"
+
+
 DEFAULT_MARKET_INDEX_SPECS = (
     MarketIndexSpec("코스피", "^KS11"),
     MarketIndexSpec("코스닥", "^KQ11"),
     MarketIndexSpec("나스닥", "^IXIC"),
     MarketIndexSpec("필라델피아 반도체", "^SOX", "SOX"),
     MarketIndexSpec("미국 바이오", "^SPSIBI", "SPSIBI"),
+    MarketIndexSpec("금 지수", "XAUUSD=X", "XAU/USD"),
+)
+
+DEFAULT_MARKET_WARNING_SPECS = (
+    MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS"),
+    MarketWarningSpec("NASDAQ 100 선물", "NQ=F", "NQ=F"),
 )
 
 
@@ -148,6 +190,77 @@ def parse_yahoo_chart_market_index_response(spec: MarketIndexSpec, payload: Any)
     )
 
 
+def _average(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def _population_stddev(values: list[float], mean: float) -> float:
+    if not values:
+        return 0.0
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return math.sqrt(max(variance, 0.0))
+
+
+def parse_yahoo_chart_market_warning_response(spec: MarketWarningSpec, payload: Any) -> MarketWarningSignal:
+    result = _chart_result(payload)
+    points = _close_points(result)
+    if not points:
+        raise MarketIndexProviderError("Yahoo chart 응답에 60분봉 종가 데이터가 없습니다.")
+
+    closes = [point[1] for point in points]
+    latest_timestamp, latest_value = points[-1]
+    ma_window = closes[-MARKET_WARNING_MA_PERIOD:]
+    moving_average = _average(ma_window)
+    if len(closes) < MARKET_WARNING_BOLLINGER_PERIOD:
+        return MarketWarningSignal(
+            label=spec.label,
+            symbol=spec.display_symbol or spec.symbol,
+            status="insufficient",
+            trigger="데이터 부족",
+            value=latest_value,
+            moving_average=moving_average,
+            upper_band=None,
+            middle_band=None,
+            lower_band=None,
+            source=YAHOO_CHART_INDEX_PROVIDER,
+            fetched_at=datetime.now(timezone.utc),
+            as_of_timestamp=latest_timestamp,
+            error_message=f"60분봉 {MARKET_WARNING_BOLLINGER_PERIOD}개 미만",
+        )
+
+    band_window = closes[-MARKET_WARNING_BOLLINGER_PERIOD:]
+    middle = _average(band_window) or latest_value
+    stddev = _population_stddev(band_window, middle)
+    upper = middle + MARKET_WARNING_BOLLINGER_MULTIPLIER * stddev
+    lower = middle - MARKET_WARNING_BOLLINGER_MULTIPLIER * stddev
+    if latest_value > upper:
+        status = "buy_blocked"
+        trigger = "상단 이탈"
+    elif latest_value < lower:
+        status = "sell_blocked"
+        trigger = "하단 이탈"
+    else:
+        status = "clear"
+        trigger = "정상 범위"
+
+    return MarketWarningSignal(
+        label=spec.label,
+        symbol=spec.display_symbol or spec.symbol,
+        status=status,
+        trigger=trigger,
+        value=latest_value,
+        moving_average=moving_average,
+        upper_band=upper,
+        middle_band=middle,
+        lower_band=lower,
+        source=YAHOO_CHART_INDEX_PROVIDER,
+        fetched_at=datetime.now(timezone.utc),
+        as_of_timestamp=latest_timestamp,
+    )
+
+
 class YahooChartMarketIndexProvider:
     def __init__(
         self,
@@ -159,7 +272,7 @@ class YahooChartMarketIndexProvider:
         self._opener = opener
 
     def get_quote(self, spec: MarketIndexSpec) -> MarketIndexQuote:
-        encoded_symbol = quote(spec.symbol, safe="")
+        encoded_symbol = quote(spec.symbol, safe="=")
         request = Request(YAHOO_CHART_INDEX_URL.format(symbol=encoded_symbol), headers=HTTP_HEADERS)
         try:
             with self._opener(request, timeout=self._timeout_seconds) as response:
@@ -167,6 +280,27 @@ class YahooChartMarketIndexProvider:
         except (OSError, URLError, json.JSONDecodeError) as exc:
             raise MarketIndexProviderError(f"Yahoo chart 지수 조회 실패: {spec.display_symbol or spec.symbol}") from exc
         return parse_yahoo_chart_market_index_response(spec, payload)
+
+
+class YahooChartMarketWarningProvider:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float = 8.0,
+        opener=urlopen,
+    ) -> None:
+        self._timeout_seconds = timeout_seconds
+        self._opener = opener
+
+    def get_signal(self, spec: MarketWarningSpec) -> MarketWarningSignal:
+        encoded_symbol = quote(spec.symbol, safe="=")
+        request = Request(YAHOO_CHART_WARNING_URL.format(symbol=encoded_symbol), headers=HTTP_HEADERS)
+        try:
+            with self._opener(request, timeout=self._timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (OSError, URLError, json.JSONDecodeError) as exc:
+            raise MarketIndexProviderError(f"Yahoo chart 경고 지표 조회 실패: {spec.display_symbol or spec.symbol}") from exc
+        return parse_yahoo_chart_market_warning_response(spec, payload)
 
 
 def failed_market_index_quote(spec: MarketIndexSpec, error: object) -> MarketIndexQuote:
@@ -178,6 +312,23 @@ def failed_market_index_quote(spec: MarketIndexSpec, error: object) -> MarketInd
         change=None,
         change_pct=None,
         status="failed",
+        source=YAHOO_CHART_INDEX_PROVIDER,
+        fetched_at=datetime.now(timezone.utc),
+        error_message=str(error),
+    )
+
+
+def failed_market_warning_signal(spec: MarketWarningSpec, error: object) -> MarketWarningSignal:
+    return MarketWarningSignal(
+        label=spec.label,
+        symbol=spec.display_symbol or spec.symbol,
+        status="failed",
+        trigger="조회 실패",
+        value=None,
+        moving_average=None,
+        upper_band=None,
+        middle_band=None,
+        lower_band=None,
         source=YAHOO_CHART_INDEX_PROVIDER,
         fetched_at=datetime.now(timezone.utc),
         error_message=str(error),
@@ -197,4 +348,19 @@ def fetch_market_indices(
         except MarketIndexProviderError as exc:
             quotes.append(failed_market_index_quote(spec, exc))
     return quotes
+
+
+def fetch_market_warning_signals(
+    specs: Iterable[MarketWarningSpec] = DEFAULT_MARKET_WARNING_SPECS,
+    *,
+    provider: YahooChartMarketWarningProvider | None = None,
+) -> list[MarketWarningSignal]:
+    active_provider = provider or YahooChartMarketWarningProvider()
+    signals: list[MarketWarningSignal] = []
+    for spec in specs:
+        try:
+            signals.append(active_provider.get_signal(spec))
+        except MarketIndexProviderError as exc:
+            signals.append(failed_market_warning_signal(spec, exc))
+    return signals
 

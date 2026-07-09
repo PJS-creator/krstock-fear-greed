@@ -6,6 +6,7 @@ from app.ui.investment_summary_card import (
     _holding_allocation_rows,
     _holding_table_rows,
     _market_index_strip,
+    _market_warning_strip,
     _mobile_holding_summary_table,
     _sparkline_html,
     render_investment_summary_card,
@@ -219,6 +220,9 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "summary-heatmap-small:hover" in html
     assert "summary-index-strip" in html
     assert "주요 지수변동" in html
+    assert "summary-warning-strip" in html
+    assert "매수&매도 경고" in html
+    assert "Bollinger Band(180, 2.0)" in html
     assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in html
     assert "overflow-x: hidden;" in html
     assert "color-mix(in srgb, var(--token-overlay) 36%, transparent)" in html
@@ -246,12 +250,11 @@ def test_market_index_strip_renders_requested_compact_row():
             "status": "updated",
         },
         {
-            "label": "미국 바이오",
-            "symbol": "SPSIBI",
-            "value": None,
-            "change_pct": None,
-            "status": "failed",
-            "error_message": "network",
+            "label": "금 지수",
+            "symbol": "XAU/USD",
+            "value": 2365.4,
+            "change_pct": 0.006,
+            "status": "updated",
         },
     ]
     html = _market_index_strip(rows)
@@ -261,9 +264,46 @@ def test_market_index_strip_renders_requested_compact_row():
     assert "코스피" in html
     assert "7,200" in html
     assert "(+0.8%)" in html
-    assert "미국 바이오" in html
-    assert "(조회 실패)" in html
-    assert "network" in html
+    assert "금 지수" in html
+    assert "XAU/USD" in html
+    assert "summary-index-cell-gold" in html
+    assert "신규" in html
+
+
+def test_market_warning_strip_renders_buy_and_sell_block_cards_without_rule_box():
+    rows = [
+        {
+            "label": "KOSPI 200 선물",
+            "symbol": "KOS",
+            "status": "buy_blocked",
+            "trigger": "상단 이탈",
+            "value": 385.2,
+            "moving_average": 380.0,
+            "upper_band": 384.0,
+            "lower_band": 360.0,
+        },
+        {
+            "label": "NASDAQ 100 선물",
+            "symbol": "NQ=F",
+            "status": "sell_blocked",
+            "trigger": "하단 이탈",
+            "value": 19120.0,
+            "moving_average": 19300.0,
+            "upper_band": 19600.0,
+            "lower_band": 19200.0,
+        },
+    ]
+    html = _market_warning_strip(rows)
+
+    assert "summary-warning-strip" in html
+    assert "매수&매도 경고" in html
+    assert "KOSPI 200 선물" in html
+    assert "NASDAQ 100 선물" in html
+    assert "매수 금지" in html
+    assert "매도 금지" in html
+    assert "상단 이탈" in html
+    assert "하단 이탈" in html
+    assert "판정 방식" not in html
 
 
 def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_exclude_cash():
