@@ -23,9 +23,11 @@ KIS_REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
 KIS_VIRTUAL_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 KIS_DOMESTIC_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price"
 KIS_OVERSEAS_PRICE_PATH = "/uapi/overseas-price/v1/quotations/price"
+KIS_DOMESTIC_FUTURES_TIME_CHART_PATH = "/uapi/domestic-futureoption/v1/quotations/inquire-time-futurechartprice"
 KIS_TOKEN_PATH = "/oauth2/tokenP"
 KIS_DOMESTIC_TR_ID = "FHKST01010100"
 KIS_OVERSEAS_TR_ID = "HHDFS00000300"
+KIS_DOMESTIC_FUTURES_TIME_CHART_TR_ID = "FHKIF03020200"
 KIS_DEFAULT_US_EXCHANGES = ("NAS", "NYS", "AMS")
 KIS_TOKEN_REFRESH_MARGIN_SECONDS = 60
 US_SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
@@ -110,6 +112,55 @@ def _extract_output(payload: Mapping[str, Any], context: str) -> Mapping[str, An
     if not isinstance(output, Mapping):
         raise PriceProviderError(f"KIS {context} 응답에 output이 없습니다.")
     return output
+
+
+def _extract_output_rows(payload: Mapping[str, Any], context: str) -> list[Mapping[str, Any]]:
+    rt_cd = payload.get("rt_cd")
+    if rt_cd not in (None, "0", 0):
+        message = str(payload.get("msg1") or payload.get("msg_cd") or "알 수 없는 KIS 오류")
+        raise PriceProviderError(f"KIS {context} 응답 오류: {message}")
+    rows = payload.get("output2")
+    if rows is None:
+        rows = payload.get("output")
+    if isinstance(rows, Mapping):
+        rows = [rows]
+    if not isinstance(rows, list):
+        raise PriceProviderError(f"KIS {context} 응답에 분봉 데이터가 없습니다.")
+    normalized_rows = [row for row in rows if isinstance(row, Mapping)]
+    if not normalized_rows:
+        raise PriceProviderError(f"KIS {context} 응답에 유효한 분봉 데이터가 없습니다.")
+    return normalized_rows
+
+
+def parse_kis_domestic_futures_intraday_response(payload: Mapping[str, Any]) -> list[tuple[datetime | None, float]]:
+    rows = _extract_output_rows(payload, "국내 선물 60분봉")
+    points: list[tuple[datetime | None, float]] = []
+    for row in rows:
+        price_value = _first_present(
+            row,
+            (
+                "futs_prpr",
+                "stck_prpr",
+                "stck_clpr",
+                "futs_clpr",
+                "close",
+                "clos",
+                "prpr",
+            ),
+        )
+        try:
+            close = _as_positive_float(price_value, "futures_close")
+        except PriceProviderError:
+            continue
+        timestamp = _parse_kst_timestamp(
+            _first_present(row, ("stck_bsop_date", "bsop_date", "trd_dd", "xymd", "date")),
+            _first_present(row, ("stck_cntg_hour", "cntg_hour", "trd_tm", "xhms", "time")),
+        )
+        points.append((timestamp, close))
+    if not points:
+        raise PriceProviderError("KIS 국내 선물 60분봉 응답에 유효한 종가가 없습니다.")
+    points.sort(key=lambda point: point[0] or datetime.min.replace(tzinfo=timezone.utc))
+    return points
 
 
 def parse_kis_domestic_quote_response(symbol: object, payload: Mapping[str, Any]) -> ProviderQuote:
@@ -338,6 +389,28 @@ class KoreaInvestmentQuoteProvider:
             except PriceProviderError as exc:
                 errors.append(f"{exchange}: {exc}")
         raise PriceProviderError("; ".join(errors) or f"KIS 해외 주식 현재가 조회 실패: {normalized_symbol}")
+
+    def get_domestic_futures_intraday_closes(
+        self,
+        symbol: str,
+        *,
+        market_div_code: str = "F",
+    ) -> list[tuple[datetime | None, float]]:
+        normalized_symbol = str(symbol or "").strip().upper()
+        if not normalized_symbol:
+            raise PriceProviderError("KIS 국내 선물 종목코드가 설정되지 않았습니다.")
+        payload = self._request_json(
+            "GET",
+            KIS_DOMESTIC_FUTURES_TIME_CHART_PATH,
+            headers=self._headers(KIS_DOMESTIC_FUTURES_TIME_CHART_TR_ID),
+            query={
+                "FID_COND_MRKT_DIV_CODE": str(market_div_code or "F").strip().upper() or "F",
+                "FID_INPUT_ISCD": normalized_symbol,
+                "FID_HOUR_CLS_CODE": "1",
+                "FID_PW_DATA_INCU_YN": "Y",
+            },
+        )
+        return parse_kis_domestic_futures_intraday_response(payload)
 
 
 def build_kis_quote_provider(

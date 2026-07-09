@@ -281,6 +281,7 @@ def test_market_warning_strip_renders_buy_and_sell_block_cards_without_rule_box(
             "moving_average": 380.0,
             "upper_band": 384.0,
             "lower_band": 360.0,
+            "source": "korea_investment",
         },
         {
             "label": "NASDAQ 100 선물",
@@ -291,6 +292,7 @@ def test_market_warning_strip_renders_buy_and_sell_block_cards_without_rule_box(
             "moving_average": 19300.0,
             "upper_band": 19600.0,
             "lower_band": 19200.0,
+            "source": "yahoo-chart",
         },
     ]
     html = _market_warning_strip(rows)
@@ -303,6 +305,8 @@ def test_market_warning_strip_renders_buy_and_sell_block_cards_without_rule_box(
     assert "매도 금지" in html
     assert "상단 이탈" in html
     assert "하단 이탈" in html
+    assert "KIS 60분봉" in html
+    assert "Yahoo 60분봉" in html
     assert "판정 방식" not in html
 
 
