@@ -619,10 +619,9 @@ def _market_index_cell(row: MarketIndexQuote | Mapping[str, Any]) -> str:
         title_parts.append(str(error_message))
     is_gold = "XAU" in symbol.upper() or "금" in label
     cell_class = "summary-index-cell summary-index-cell-gold" if is_gold else "summary-index-cell"
-    new_badge = "<span class='summary-index-new'>신규</span>" if is_gold else ""
     return (
         f"<div class='{cell_class}' title='{escape(' · '.join(title_parts))}'>"
-        f"<span class='summary-index-name'>{escape(label)}{new_badge}</span>"
+        f"<span class='summary-index-name'>{escape(label)}</span>"
         "<span class='summary-index-quote'>"
         f"<span class='summary-index-value'>{escape(_market_index_value(value))}</span>"
         f"<span class='summary-index-change {change_class}'>({escape(change_text)})</span>"
@@ -668,6 +667,8 @@ def _market_warning_meta(status: str) -> tuple[str, str, str, str]:
         return "정상 범위", "summary-warning-clear", "정상 범위", "현재가가 밴드 범위 안에 위치"
     if status == "insufficient":
         return "데이터 부족", "summary-warning-neutral", "데이터 부족", "60분봉 180개 이상 필요"
+    if status == "configuration_required":
+        return "설정 필요", "summary-warning-neutral", "KIS 설정 필요", "KIS 선물 종목코드를 설정하세요"
     if status == "failed":
         return "조회 실패", "summary-warning-neutral", "조회 실패", "데이터를 가져오지 못했습니다"
     return "조회 대기", "summary-warning-neutral", "조회 대기", "다음 가격 갱신 때 다시 확인"
@@ -1185,18 +1186,6 @@ def _render_styles() -> None:
         .summary-index-cell-gold .summary-index-name,
         .summary-index-cell-gold .summary-index-change {
             color: var(--token-warning);
-        }
-        .summary-index-new {
-            display: inline-flex;
-            align-items: center;
-            margin-left: 5px;
-            padding: 1px 6px 2px;
-            border: 1px solid var(--token-warning);
-            border-radius: 999px;
-            color: var(--token-warning);
-            font-size: 0.64rem;
-            line-height: 1;
-            vertical-align: middle;
         }
         .summary-index-empty {
             color: var(--app-muted);
