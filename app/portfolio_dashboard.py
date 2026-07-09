@@ -982,49 +982,17 @@ def _cached_market_indices(refresh_key: str | None) -> list:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _cached_market_warning_signals(
-    refresh_key: str | None,
-    kis_enabled_text: str,
-    kis_app_key: str,
-    kis_app_secret: str,
-    kis_env: str,
-    kis_kospi200_futures_symbol: str,
-) -> list:
+def _cached_market_warning_signals(refresh_key: str | None) -> list:
     del refresh_key
-    kis_provider = None
-    if (not kis_enabled_text or _truthy(kis_enabled_text)) and kis_app_key and kis_app_secret and kis_kospi200_futures_symbol:
-        kis_provider = build_kis_quote_provider(kis_app_key, kis_app_secret, env=kis_env or "real")
     warning_specs = [
-        MarketWarningSpec(
-            "KOSPI 200 선물",
-            "KOS=F",
-            "KOS",
-            kis_symbol=kis_kospi200_futures_symbol or None,
-            requires_kis=True,
-        ),
+        MarketWarningSpec("KOSPI 200 지수", "^KS200", "^KS200"),
         MarketWarningSpec("NASDAQ 100 선물", "NQ=F", "NQ=F"),
     ]
-    return fetch_market_warning_signals(warning_specs, kis_provider=kis_provider)
+    return fetch_market_warning_signals(warning_specs)
 
 
 def _read_market_warning_signals(refresh_key: str | None) -> list:
-    kis_enabled_text = _secret_text_any("KIS_API_ENABLED", "KOREA_INVESTMENT_API_ENABLED")
-    kis_app_key = _secret_text_any("KIS_APP_KEY", "KIS_APPKEY", "KOREA_INVESTMENT_APP_KEY")
-    kis_app_secret = _secret_text_any("KIS_APP_SECRET", "KIS_APPSECRET", "KOREA_INVESTMENT_APP_SECRET")
-    kis_env = _secret_text_any("KIS_ENV", "KOREA_INVESTMENT_ENV") or "real"
-    kis_kospi200_futures_symbol = _secret_text_any(
-        "KIS_KOSPI200_FUTURES_SYMBOL",
-        "KIS_KOSPI200_FUTURE_SYMBOL",
-        "KOREA_INVESTMENT_KOSPI200_FUTURES_SYMBOL",
-    )
-    return _cached_market_warning_signals(
-        str(refresh_key or ""),
-        kis_enabled_text,
-        kis_app_key,
-        kis_app_secret,
-        kis_env,
-        kis_kospi200_futures_symbol,
-    )
+    return _cached_market_warning_signals(str(refresh_key or ""))
 
 
 def _resolve_owner_id(storage_config) -> str | None:

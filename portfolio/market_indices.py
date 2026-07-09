@@ -95,7 +95,7 @@ DEFAULT_MARKET_INDEX_SPECS = (
 )
 
 DEFAULT_MARKET_WARNING_SPECS = (
-    MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS"),
+    MarketWarningSpec("KOSPI 200 지수", "^KS200", "^KS200"),
     MarketWarningSpec("NASDAQ 100 선물", "NQ=F", "NQ=F"),
 )
 
@@ -444,7 +444,7 @@ def fetch_market_warning_signals(
             signals.append(
                 configuration_required_market_warning_signal(
                     spec,
-                    "KOSPI 200 선물 경고에는 KIS 앱키와 KIS_KOSPI200_FUTURES_SYMBOL 설정이 필요합니다.",
+                    f"{spec.label} 경고에는 KIS 앱키와 KIS 선물 종목코드 설정이 필요합니다.",
                 )
             )
             continue
