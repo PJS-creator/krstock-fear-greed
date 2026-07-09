@@ -19,6 +19,7 @@ from portfolio.pricing import (
     YFinanceQuoteProvider,
     build_alpha_vantage_provider,
     build_kis_quote_provider,
+    parse_kis_domestic_futures_intraday_response,
     parse_kis_domestic_quote_response,
     parse_kis_overseas_quote_response,
     parse_kis_token_response,
@@ -476,6 +477,48 @@ def test_kis_provider_tries_us_exchange_candidates_until_success():
     assert quote.price == pytest.approx(41.25)
     assert any("EXCD=NAS" in url for url in urls)
     assert any("EXCD=NYS" in url for url in urls)
+
+
+def test_kis_domestic_futures_intraday_response_parsing_sorts_points():
+    points = parse_kis_domestic_futures_intraday_response(
+        {
+            "rt_cd": "0",
+            "output2": [
+                {"stck_bsop_date": "20260708", "stck_cntg_hour": "100000", "futs_prpr": "382.50"},
+                {"stck_bsop_date": "20260708", "stck_cntg_hour": "090000", "futs_prpr": "381.25"},
+            ],
+        }
+    )
+
+    assert [point[1] for point in points] == [381.25, 382.50]
+    assert all(point[0] is not None for point in points)
+
+
+def test_kis_provider_uses_domestic_futures_intraday_endpoint():
+    calls = []
+
+    def response_loader(method, url, headers, body, timeout_seconds):
+        calls.append((method, url, headers, body, timeout_seconds))
+        if url.endswith("/oauth2/tokenP"):
+            return {"access_token": "token-value", "expires_in": 3600}
+        assert "/uapi/domestic-futureoption/v1/quotations/inquire-time-futurechartprice" in url
+        assert "FID_COND_MRKT_DIV_CODE=F" in url
+        assert "FID_INPUT_ISCD=101W9000" in url
+        assert headers["authorization"] == "Bearer token-value"
+        assert headers["tr_id"] == "FHKIF03020200"
+        return {
+            "rt_cd": "0",
+            "output2": [
+                {"stck_bsop_date": "20260708", "stck_cntg_hour": "090000", "futs_prpr": "381.25"},
+                {"stck_bsop_date": "20260708", "stck_cntg_hour": "100000", "futs_prpr": "382.50"},
+            ],
+        }
+
+    provider = KoreaInvestmentQuoteProvider(app_key="app-key", app_secret="secret", response_loader=response_loader)
+    points = provider.get_domestic_futures_intraday_closes("101W9000")
+
+    assert [point[1] for point in points] == [381.25, 382.50]
+    assert [call[0] for call in calls] == ["POST", "GET"]
 
 
 def test_kis_builder_returns_none_without_credentials():

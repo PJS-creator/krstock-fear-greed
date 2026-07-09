@@ -5,7 +5,7 @@ import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Protocol
 from urllib.error import URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -28,6 +28,7 @@ class MarketIndexSpec:
     label: str
     symbol: str
     display_symbol: str | None = None
+    fallback_symbols: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,9 @@ class MarketWarningSpec:
     label: str
     symbol: str
     display_symbol: str | None = None
+    kis_symbol: str | None = None
+    kis_market_div_code: str = "F"
+    requires_kis: bool = False
 
 
 @dataclass(frozen=True)
@@ -87,7 +91,7 @@ DEFAULT_MARKET_INDEX_SPECS = (
     MarketIndexSpec("나스닥", "^IXIC"),
     MarketIndexSpec("필라델피아 반도체", "^SOX", "SOX"),
     MarketIndexSpec("미국 바이오", "^SPSIBI", "SPSIBI"),
-    MarketIndexSpec("금 지수", "XAUUSD=X", "XAU/USD"),
+    MarketIndexSpec("금 지수", "XAUUSD=X", "XAU/USD", ("GC=F", "GLD")),
 )
 
 DEFAULT_MARKET_WARNING_SPECS = (
@@ -98,6 +102,15 @@ DEFAULT_MARKET_WARNING_SPECS = (
 
 class MarketIndexProviderError(RuntimeError):
     """Raised when an index provider cannot return a usable quote."""
+
+
+class KisFuturesIntradayProvider(Protocol):
+    def get_domestic_futures_intraday_closes(
+        self,
+        symbol: str,
+        *,
+        market_div_code: str = "F",
+    ) -> list[tuple[datetime | None, float]]: ...
 
 
 def _as_float(value: object) -> float | None:
@@ -203,11 +216,14 @@ def _population_stddev(values: list[float], mean: float) -> float:
     return math.sqrt(max(variance, 0.0))
 
 
-def parse_yahoo_chart_market_warning_response(spec: MarketWarningSpec, payload: Any) -> MarketWarningSignal:
-    result = _chart_result(payload)
-    points = _close_points(result)
+def _market_warning_signal_from_points(
+    spec: MarketWarningSpec,
+    points: list[tuple[datetime | None, float]],
+    *,
+    source: str,
+) -> MarketWarningSignal:
     if not points:
-        raise MarketIndexProviderError("Yahoo chart 응답에 60분봉 종가 데이터가 없습니다.")
+        raise MarketIndexProviderError("60분봉 종가 데이터가 없습니다.")
 
     closes = [point[1] for point in points]
     latest_timestamp, latest_value = points[-1]
@@ -224,7 +240,7 @@ def parse_yahoo_chart_market_warning_response(spec: MarketWarningSpec, payload: 
             upper_band=None,
             middle_band=None,
             lower_band=None,
-            source=YAHOO_CHART_INDEX_PROVIDER,
+            source=source,
             fetched_at=datetime.now(timezone.utc),
             as_of_timestamp=latest_timestamp,
             error_message=f"60분봉 {MARKET_WARNING_BOLLINGER_PERIOD}개 미만",
@@ -255,10 +271,26 @@ def parse_yahoo_chart_market_warning_response(spec: MarketWarningSpec, payload: 
         upper_band=upper,
         middle_band=middle,
         lower_band=lower,
-        source=YAHOO_CHART_INDEX_PROVIDER,
+        source=source,
         fetched_at=datetime.now(timezone.utc),
         as_of_timestamp=latest_timestamp,
     )
+
+
+def parse_yahoo_chart_market_warning_response(spec: MarketWarningSpec, payload: Any) -> MarketWarningSignal:
+    result = _chart_result(payload)
+    points = _close_points(result)
+    try:
+        return _market_warning_signal_from_points(spec, points, source=YAHOO_CHART_INDEX_PROVIDER)
+    except MarketIndexProviderError as exc:
+        raise MarketIndexProviderError(f"Yahoo chart 경고 지표 계산 실패: {exc}") from exc
+
+
+def market_warning_signal_from_kis_points(
+    spec: MarketWarningSpec,
+    points: list[tuple[datetime | None, float]],
+) -> MarketWarningSignal:
+    return _market_warning_signal_from_points(spec, points, source="korea_investment")
 
 
 class YahooChartMarketIndexProvider:
@@ -335,6 +367,38 @@ def failed_market_warning_signal(spec: MarketWarningSpec, error: object) -> Mark
     )
 
 
+def configuration_required_market_warning_signal(spec: MarketWarningSpec, message: str) -> MarketWarningSignal:
+    return MarketWarningSignal(
+        label=spec.label,
+        symbol=spec.display_symbol or spec.symbol,
+        status="configuration_required",
+        trigger="KIS 설정 필요",
+        value=None,
+        moving_average=None,
+        upper_band=None,
+        middle_band=None,
+        lower_band=None,
+        source="korea_investment",
+        fetched_at=datetime.now(timezone.utc),
+        error_message=message,
+    )
+
+
+def _fetch_market_index_with_fallback(
+    spec: MarketIndexSpec,
+    provider: YahooChartMarketIndexProvider,
+) -> MarketIndexQuote:
+    errors: list[str] = []
+    candidate_specs = [spec]
+    candidate_specs.extend(MarketIndexSpec(spec.label, symbol, spec.display_symbol) for symbol in spec.fallback_symbols)
+    for candidate in candidate_specs:
+        try:
+            return provider.get_quote(candidate)
+        except MarketIndexProviderError as exc:
+            errors.append(f"{candidate.symbol}: {exc}")
+    raise MarketIndexProviderError("; ".join(errors) or f"지수 조회 실패: {spec.display_symbol or spec.symbol}")
+
+
 def fetch_market_indices(
     specs: Iterable[MarketIndexSpec] = DEFAULT_MARKET_INDEX_SPECS,
     *,
@@ -344,7 +408,7 @@ def fetch_market_indices(
     quotes: list[MarketIndexQuote] = []
     for spec in specs:
         try:
-            quotes.append(active_provider.get_quote(spec))
+            quotes.append(_fetch_market_index_with_fallback(spec, active_provider))
         except MarketIndexProviderError as exc:
             quotes.append(failed_market_index_quote(spec, exc))
     return quotes
@@ -354,10 +418,34 @@ def fetch_market_warning_signals(
     specs: Iterable[MarketWarningSpec] = DEFAULT_MARKET_WARNING_SPECS,
     *,
     provider: YahooChartMarketWarningProvider | None = None,
+    kis_provider: KisFuturesIntradayProvider | None = None,
 ) -> list[MarketWarningSignal]:
     active_provider = provider or YahooChartMarketWarningProvider()
     signals: list[MarketWarningSignal] = []
     for spec in specs:
+        if spec.requires_kis and (not spec.kis_symbol or kis_provider is None):
+            signals.append(
+                configuration_required_market_warning_signal(
+                    spec,
+                    "KOSPI 200 선물 경고에는 KIS 앱키와 KIS_KOSPI200_FUTURES_SYMBOL 설정이 필요합니다.",
+                )
+            )
+            continue
+        if spec.kis_symbol and kis_provider is not None:
+            try:
+                points = kis_provider.get_domestic_futures_intraday_closes(
+                    spec.kis_symbol,
+                    market_div_code=spec.kis_market_div_code,
+                )
+                signals.append(market_warning_signal_from_kis_points(spec, points))
+                continue
+            except Exception as exc:
+                try:
+                    signals.append(active_provider.get_signal(spec))
+                    continue
+                except MarketIndexProviderError as fallback_exc:
+                    signals.append(failed_market_warning_signal(spec, f"KIS: {exc}; Yahoo fallback: {fallback_exc}"))
+                    continue
         try:
             signals.append(active_provider.get_signal(spec))
         except MarketIndexProviderError as exc:

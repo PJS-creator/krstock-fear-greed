@@ -619,10 +619,9 @@ def _market_index_cell(row: MarketIndexQuote | Mapping[str, Any]) -> str:
         title_parts.append(str(error_message))
     is_gold = "XAU" in symbol.upper() or "금" in label
     cell_class = "summary-index-cell summary-index-cell-gold" if is_gold else "summary-index-cell"
-    new_badge = "<span class='summary-index-new'>신규</span>" if is_gold else ""
     return (
         f"<div class='{cell_class}' title='{escape(' · '.join(title_parts))}'>"
-        f"<span class='summary-index-name'>{escape(label)}{new_badge}</span>"
+        f"<span class='summary-index-name'>{escape(label)}</span>"
         "<span class='summary-index-quote'>"
         f"<span class='summary-index-value'>{escape(_market_index_value(value))}</span>"
         f"<span class='summary-index-change {change_class}'>({escape(change_text)})</span>"
@@ -668,6 +667,8 @@ def _market_warning_meta(status: str) -> tuple[str, str, str, str]:
         return "정상 범위", "summary-warning-clear", "정상 범위", "현재가가 밴드 범위 안에 위치"
     if status == "insufficient":
         return "데이터 부족", "summary-warning-neutral", "데이터 부족", "60분봉 180개 이상 필요"
+    if status == "configuration_required":
+        return "설정 필요", "summary-warning-neutral", "KIS 설정 필요", "KIS 선물 종목코드를 설정하세요"
     if status == "failed":
         return "조회 실패", "summary-warning-neutral", "조회 실패", "데이터를 가져오지 못했습니다"
     return "조회 대기", "summary-warning-neutral", "조회 대기", "다음 가격 갱신 때 다시 확인"
@@ -682,6 +683,7 @@ def _market_warning_card(row: MarketWarningSignal | Mapping[str, Any]) -> str:
     moving_average = _market_warning_attr(row, "moving_average")
     upper_band = _market_warning_attr(row, "upper_band")
     lower_band = _market_warning_attr(row, "lower_band")
+    source = _market_warning_attr(row, "source")
     error_message = _market_warning_attr(row, "error_message")
     badge, status_class, default_trigger, default_desc = _market_warning_meta(status)
     trigger = raw_trigger if raw_trigger and raw_trigger != "조회 대기" else default_trigger
@@ -699,12 +701,14 @@ def _market_warning_card(row: MarketWarningSignal | Mapping[str, Any]) -> str:
         title_parts.append(f"BB 하단 {_market_warning_value(lower_band)}")
     if error_message:
         title_parts.append(str(error_message))
+    source_label = "KIS 60분봉" if str(source or "").lower() == "korea_investment" else "Yahoo 60분봉"
     return (
         f"<div class='summary-warning-card {status_class}' title='{escape(' · '.join(title_parts))}'>"
         "<div class='summary-warning-card-head'>"
         f"<strong>{escape(label)}</strong>"
         f"<span>{escape(symbol)}</span>"
         "</div>"
+        f"<div class='summary-warning-source'>{escape(source_label)}</div>"
         f"<div class='summary-warning-badge'>{escape(badge)}</div>"
         f"<div class='summary-warning-trigger'>{escape(trigger)}</div>"
         f"<div class='summary-warning-detail'>{escape(detail)}</div>"
@@ -1183,18 +1187,6 @@ def _render_styles() -> None:
         .summary-index-cell-gold .summary-index-change {
             color: var(--token-warning);
         }
-        .summary-index-new {
-            display: inline-flex;
-            align-items: center;
-            margin-left: 5px;
-            padding: 1px 6px 2px;
-            border: 1px solid var(--token-warning);
-            border-radius: 999px;
-            color: var(--token-warning);
-            font-size: 0.64rem;
-            line-height: 1;
-            vertical-align: middle;
-        }
         .summary-index-empty {
             color: var(--app-muted);
             font-size: 0.82rem;
@@ -1255,6 +1247,12 @@ def _render_styles() -> None:
             color: var(--app-muted);
             font-size: 0.68rem;
             font-weight: 800;
+        }
+        .summary-warning-source {
+            margin-top: 4px;
+            color: var(--app-muted);
+            font-size: 0.66rem;
+            font-weight: 760;
         }
         .summary-warning-badge {
             display: inline-flex;

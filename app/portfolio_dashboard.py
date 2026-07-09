@@ -84,7 +84,7 @@ from portfolio.auth import (
 from portfolio.history import build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
-from portfolio.market_indices import fetch_market_indices, fetch_market_warning_signals
+from portfolio.market_indices import MarketWarningSpec, fetch_market_indices, fetch_market_warning_signals
 from portfolio.cash_ledger import (
     calculate_cash_balances,
     create_balance_adjustment_entries,
@@ -982,9 +982,49 @@ def _cached_market_indices(refresh_key: str | None) -> list:
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def _cached_market_warning_signals(refresh_key: str | None) -> list:
+def _cached_market_warning_signals(
+    refresh_key: str | None,
+    kis_enabled_text: str,
+    kis_app_key: str,
+    kis_app_secret: str,
+    kis_env: str,
+    kis_kospi200_futures_symbol: str,
+) -> list:
     del refresh_key
-    return fetch_market_warning_signals()
+    kis_provider = None
+    if (not kis_enabled_text or _truthy(kis_enabled_text)) and kis_app_key and kis_app_secret and kis_kospi200_futures_symbol:
+        kis_provider = build_kis_quote_provider(kis_app_key, kis_app_secret, env=kis_env or "real")
+    warning_specs = [
+        MarketWarningSpec(
+            "KOSPI 200 선물",
+            "KOS=F",
+            "KOS",
+            kis_symbol=kis_kospi200_futures_symbol or None,
+            requires_kis=True,
+        ),
+        MarketWarningSpec("NASDAQ 100 선물", "NQ=F", "NQ=F"),
+    ]
+    return fetch_market_warning_signals(warning_specs, kis_provider=kis_provider)
+
+
+def _read_market_warning_signals(refresh_key: str | None) -> list:
+    kis_enabled_text = _secret_text_any("KIS_API_ENABLED", "KOREA_INVESTMENT_API_ENABLED")
+    kis_app_key = _secret_text_any("KIS_APP_KEY", "KIS_APPKEY", "KOREA_INVESTMENT_APP_KEY")
+    kis_app_secret = _secret_text_any("KIS_APP_SECRET", "KIS_APPSECRET", "KOREA_INVESTMENT_APP_SECRET")
+    kis_env = _secret_text_any("KIS_ENV", "KOREA_INVESTMENT_ENV") or "real"
+    kis_kospi200_futures_symbol = _secret_text_any(
+        "KIS_KOSPI200_FUTURES_SYMBOL",
+        "KIS_KOSPI200_FUTURE_SYMBOL",
+        "KOREA_INVESTMENT_KOSPI200_FUTURES_SYMBOL",
+    )
+    return _cached_market_warning_signals(
+        str(refresh_key or ""),
+        kis_enabled_text,
+        kis_app_key,
+        kis_app_secret,
+        kis_env,
+        kis_kospi200_futures_symbol,
+    )
 
 
 def _resolve_owner_id(storage_config) -> str | None:
@@ -2003,7 +2043,7 @@ def _render_summary_card_section(metrics) -> None:
         last_refresh=last_refresh,
         transactions=list(st.session_state.get("portfolio_transactions", [])),
         market_indices=_cached_market_indices(str(last_refresh or "")),
-        market_warnings=_cached_market_warning_signals(str(last_refresh or "")),
+        market_warnings=_read_market_warning_signals(str(last_refresh or "")),
     )
 
 
