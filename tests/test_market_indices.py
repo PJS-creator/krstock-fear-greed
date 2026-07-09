@@ -7,6 +7,7 @@ from portfolio.market_indices import (
     MarketIndexQuote,
     MarketIndexSpec,
     MarketWarningSpec,
+    configuration_required_market_warning_signal,
     failed_market_index_quote,
     failed_market_warning_signal,
     fetch_market_indices,
@@ -64,6 +65,39 @@ def test_fetch_market_indices_preserves_failed_index_rows():
     assert rows[0].status == "failed"
     assert rows[0].value is None
     assert "boom" in str(rows[0].error_message)
+
+
+def test_fetch_market_indices_tries_fallback_symbols_before_failing():
+    class FallbackProvider:
+        def __init__(self):
+            self.symbols = []
+
+        def get_quote(self, spec):
+            self.symbols.append(spec.symbol)
+            if spec.symbol == "XAUUSD=X":
+                raise MarketIndexProviderError("primary unavailable")
+            return MarketIndexQuote(
+                label=spec.label,
+                symbol=spec.display_symbol or spec.symbol,
+                value=2365.4,
+                previous_close=2350.0,
+                change=15.4,
+                change_pct=0.006553,
+                status="updated",
+                source="yahoo-chart",
+                fetched_at=datetime.now(timezone.utc),
+            )
+
+    provider = FallbackProvider()
+    rows = fetch_market_indices(
+        [MarketIndexSpec("금 지수", "XAUUSD=X", "XAU/USD", ("GC=F",))],
+        provider=provider,
+    )
+
+    assert provider.symbols == ["XAUUSD=X", "GC=F"]
+    assert rows[0].status == "updated"
+    assert rows[0].symbol == "XAU/USD"
+    assert rows[0].value == 2365.4
 
 
 def _warning_payload(closes: list[float]) -> dict:
@@ -172,6 +206,20 @@ def test_fetch_market_warning_signals_prefers_kis_before_yahoo():
     assert yahoo_provider.calls == 0
 
 
+def test_fetch_market_warning_signals_marks_required_kis_configuration():
+    rows = fetch_market_warning_signals(
+        [MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS", requires_kis=True)],
+        provider=None,
+        kis_provider=None,
+    )
+
+    assert rows[0].label == "KOSPI 200 선물"
+    assert rows[0].source == "korea_investment"
+    assert rows[0].status == "configuration_required"
+    assert rows[0].trigger == "KIS 설정 필요"
+    assert "KIS_KOSPI200_FUTURES_SYMBOL" in str(rows[0].error_message)
+
+
 def test_fetch_market_warning_signals_falls_back_to_yahoo_when_kis_fails():
     class KisProvider:
         def get_domestic_futures_intraday_closes(self, symbol, *, market_div_code="F"):
@@ -242,4 +290,16 @@ def test_failed_market_warning_signal_has_safe_display_fields():
     assert signal.fetched_at.tzinfo == timezone.utc
     assert signal.status == "failed"
     assert signal.trigger == "조회 실패"
+
+
+def test_configuration_required_market_warning_signal_has_safe_display_fields():
+    signal = configuration_required_market_warning_signal(
+        MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS", requires_kis=True),
+        "missing secret",
+    )
+
+    assert isinstance(signal.fetched_at, datetime)
+    assert signal.fetched_at.tzinfo == timezone.utc
+    assert signal.status == "configuration_required"
+    assert signal.trigger == "KIS 설정 필요"
 
