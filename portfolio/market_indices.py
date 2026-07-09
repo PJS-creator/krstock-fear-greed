@@ -367,6 +367,23 @@ def failed_market_warning_signal(spec: MarketWarningSpec, error: object) -> Mark
     )
 
 
+def failed_kis_market_warning_signal(spec: MarketWarningSpec, error: object) -> MarketWarningSignal:
+    return MarketWarningSignal(
+        label=spec.label,
+        symbol=spec.display_symbol or spec.symbol,
+        status="failed",
+        trigger="KIS 조회 실패",
+        value=None,
+        moving_average=None,
+        upper_band=None,
+        middle_band=None,
+        lower_band=None,
+        source="korea_investment",
+        fetched_at=datetime.now(timezone.utc),
+        error_message=str(error),
+    )
+
+
 def configuration_required_market_warning_signal(spec: MarketWarningSpec, message: str) -> MarketWarningSignal:
     return MarketWarningSignal(
         label=spec.label,
@@ -440,6 +457,9 @@ def fetch_market_warning_signals(
                 signals.append(market_warning_signal_from_kis_points(spec, points))
                 continue
             except Exception as exc:
+                if spec.requires_kis:
+                    signals.append(failed_kis_market_warning_signal(spec, exc))
+                    continue
                 try:
                     signals.append(active_provider.get_signal(spec))
                     continue

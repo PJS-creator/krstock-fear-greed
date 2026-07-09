@@ -8,6 +8,7 @@ from portfolio.market_indices import (
     MarketIndexSpec,
     MarketWarningSpec,
     configuration_required_market_warning_signal,
+    failed_kis_market_warning_signal,
     failed_market_index_quote,
     failed_market_warning_signal,
     fetch_market_indices,
@@ -240,6 +241,33 @@ def test_fetch_market_warning_signals_falls_back_to_yahoo_when_kis_fails():
     assert rows[0].status == "clear"
 
 
+def test_required_kis_market_warning_does_not_fall_back_to_yahoo_when_kis_fails():
+    class KisProvider:
+        def get_domestic_futures_intraday_closes(self, symbol, *, market_div_code="F"):
+            raise RuntimeError("KIS temporary failure")
+
+    class YahooProvider:
+        calls = 0
+
+        def get_signal(self, spec):
+            self.calls += 1
+            raise AssertionError("KOSPI 200 futures warning must stay on KIS failures")
+
+    yahoo_provider = YahooProvider()
+    rows = fetch_market_warning_signals(
+        [MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS", kis_symbol="A01609", requires_kis=True)],
+        provider=yahoo_provider,
+        kis_provider=KisProvider(),
+    )
+
+    assert rows[0].label == "KOSPI 200 선물"
+    assert rows[0].source == "korea_investment"
+    assert rows[0].status == "failed"
+    assert rows[0].trigger == "KIS 조회 실패"
+    assert "KIS temporary failure" in str(rows[0].error_message)
+    assert yahoo_provider.calls == 0
+
+
 def test_fetch_market_warning_signals_reports_both_errors_when_kis_and_yahoo_fail():
     class KisProvider:
         def get_domestic_futures_intraday_closes(self, symbol, *, market_div_code="F"):
@@ -302,4 +330,17 @@ def test_configuration_required_market_warning_signal_has_safe_display_fields():
     assert signal.fetched_at.tzinfo == timezone.utc
     assert signal.status == "configuration_required"
     assert signal.trigger == "KIS 설정 필요"
+
+
+def test_failed_kis_market_warning_signal_has_safe_display_fields():
+    signal = failed_kis_market_warning_signal(
+        MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS", kis_symbol="A01609", requires_kis=True),
+        "network",
+    )
+
+    assert isinstance(signal.fetched_at, datetime)
+    assert signal.fetched_at.tzinfo == timezone.utc
+    assert signal.status == "failed"
+    assert signal.trigger == "KIS 조회 실패"
+    assert signal.source == "korea_investment"
 
