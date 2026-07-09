@@ -334,6 +334,29 @@ def test_market_warning_strip_shows_kis_configuration_required_without_failed_co
     assert "데이터를 가져오지 못했습니다" not in html
 
 
+def test_market_warning_strip_keeps_required_kis_failure_on_kis_source():
+    rows = [
+        {
+            "label": "KOSPI 200 선물",
+            "symbol": "KOS",
+            "status": "failed",
+            "trigger": "KIS 조회 실패",
+            "value": None,
+            "moving_average": None,
+            "upper_band": None,
+            "lower_band": None,
+            "source": "korea_investment",
+            "error_message": "KIS temporary failure",
+        },
+    ]
+    html = _market_warning_strip(rows)
+
+    assert "KOSPI 200 선물" in html
+    assert "KIS 60분봉" in html
+    assert "KIS 조회 실패" in html
+    assert "Yahoo 60분봉" not in html
+
+
 def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_exclude_cash():
     tiles = _heatmap_tiles(_allocation_rows(_metrics()))
 

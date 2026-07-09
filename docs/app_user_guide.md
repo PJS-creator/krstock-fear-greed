@@ -361,7 +361,7 @@ KIS_KOSPI200_FUTURES_SYMBOL = "KOSPI 200 선물 최근월물 종목코드"
 
 `KIS_KOSPI200_FUTURES_SYMBOL`은 총괄현황의 **매수&매도 경고**에서 KOSPI 200 선물을 KIS 60분봉으로 먼저 조회할 때 사용합니다. 선물 종목코드는 만기마다 바뀔 수 있으므로 한국투자증권 Open API 문서나 HTS/MTS에서 현재 최근월물 코드를 확인해 최신 값으로 유지하세요.
 
-이 값이 없으면 KOSPI 200 선물 경고 카드는 `조회 실패`가 아니라 `설정 필요`로 표시됩니다. KIS 조회가 실패하거나 특정 해외 종목 거래소 매핑이 맞지 않으면 앱은 기존 yfinance, FinanceDataReader 또는 Yahoo chart 조회로 자동 fallback합니다.
+이 값이 없으면 KOSPI 200 선물 경고 카드는 `조회 실패`가 아니라 `설정 필요`로 표시됩니다. 이 값이 있는데 KIS 조회 자체가 실패하면 `KIS 60분봉`의 `KIS 조회 실패`로 표시하고, 불안정한 Yahoo `KOS=F` 경고 조회로 내려가지 않습니다. 일반 주식 현재가에서 KIS 조회가 실패하거나 특정 해외 종목 거래소 매핑이 맞지 않으면 앱은 기존 yfinance, FinanceDataReader 또는 Yahoo chart 조회로 자동 fallback합니다.
 
 배포 전 Supabase SQL Editor에서 `docs/supabase_migration_v2_auth_rls.sql`의 SQL 전체 내용을 복사해 실행합니다. SQL Editor에는 파일 경로가 아니라 SQL 내용을 붙여넣어야 합니다.
 
