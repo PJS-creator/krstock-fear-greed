@@ -127,9 +127,9 @@ def test_default_market_indices_include_requested_six_indices():
     ]
 
 
-def test_default_market_warning_specs_track_kospi_and_nasdaq_futures():
+def test_default_market_warning_specs_track_kospi200_index_and_nasdaq_futures():
     assert [(spec.label, spec.display_symbol or spec.symbol) for spec in DEFAULT_MARKET_WARNING_SPECS] == [
-        ("KOSPI 200 선물", "KOS"),
+        ("KOSPI 200 지수", "^KS200"),
         ("NASDAQ 100 선물", "NQ=F"),
     ]
 
@@ -218,7 +218,7 @@ def test_fetch_market_warning_signals_marks_required_kis_configuration():
     assert rows[0].source == "korea_investment"
     assert rows[0].status == "configuration_required"
     assert rows[0].trigger == "KIS 설정 필요"
-    assert "KIS_KOSPI200_FUTURES_SYMBOL" in str(rows[0].error_message)
+    assert "KIS 선물 종목코드" in str(rows[0].error_message)
 
 
 def test_fetch_market_warning_signals_falls_back_to_yahoo_when_kis_fails():
