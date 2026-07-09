@@ -11,6 +11,7 @@ from portfolio.market_indices import (
     failed_market_warning_signal,
     fetch_market_indices,
     fetch_market_warning_signals,
+    market_warning_signal_from_kis_points,
     parse_yahoo_chart_market_index_response,
     parse_yahoo_chart_market_warning_response,
 )
@@ -131,6 +132,85 @@ def test_parse_market_warning_response_handles_insufficient_intraday_data():
     assert quote.status == "insufficient"
     assert quote.value == 100.0
     assert "180" in str(quote.error_message)
+
+
+def test_market_warning_signal_from_kis_points_uses_korea_investment_source():
+    quote = market_warning_signal_from_kis_points(
+        MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS", kis_symbol="101W9000"),
+        [(None, 100.0)] * 179 + [(None, 120.0)],
+    )
+
+    assert quote.status == "buy_blocked"
+    assert quote.symbol == "KOS"
+    assert quote.source == "korea_investment"
+
+
+def test_fetch_market_warning_signals_prefers_kis_before_yahoo():
+    class KisProvider:
+        def get_domestic_futures_intraday_closes(self, symbol, *, market_div_code="F"):
+            assert symbol == "101W9000"
+            assert market_div_code == "F"
+            return [(None, 100.0)] * 180
+
+    class YahooProvider:
+        calls = 0
+
+        def get_signal(self, spec):
+            self.calls += 1
+            raise AssertionError("Yahoo fallback should not be called when KIS succeeds")
+
+    yahoo_provider = YahooProvider()
+    rows = fetch_market_warning_signals(
+        [MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS", kis_symbol="101W9000")],
+        provider=yahoo_provider,
+        kis_provider=KisProvider(),
+    )
+
+    assert rows[0].label == "KOSPI 200 선물"
+    assert rows[0].source == "korea_investment"
+    assert rows[0].status == "clear"
+    assert yahoo_provider.calls == 0
+
+
+def test_fetch_market_warning_signals_falls_back_to_yahoo_when_kis_fails():
+    class KisProvider:
+        def get_domestic_futures_intraday_closes(self, symbol, *, market_div_code="F"):
+            raise RuntimeError("KIS temporary failure")
+
+    class YahooProvider:
+        def get_signal(self, spec):
+            return parse_yahoo_chart_market_warning_response(spec, _warning_payload([100.0] * 180))
+
+    rows = fetch_market_warning_signals(
+        [MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS", kis_symbol="101W9000")],
+        provider=YahooProvider(),
+        kis_provider=KisProvider(),
+    )
+
+    assert rows[0].label == "KOSPI 200 선물"
+    assert rows[0].source == "yahoo-chart"
+    assert rows[0].status == "clear"
+
+
+def test_fetch_market_warning_signals_reports_both_errors_when_kis_and_yahoo_fail():
+    class KisProvider:
+        def get_domestic_futures_intraday_closes(self, symbol, *, market_div_code="F"):
+            raise RuntimeError("KIS temporary failure")
+
+    class YahooProvider:
+        def get_signal(self, spec):
+            raise MarketIndexProviderError("Yahoo temporary failure")
+
+    rows = fetch_market_warning_signals(
+        [MarketWarningSpec("KOSPI 200 선물", "KOS=F", "KOS", kis_symbol="101W9000")],
+        provider=YahooProvider(),
+        kis_provider=KisProvider(),
+    )
+
+    assert rows[0].label == "KOSPI 200 선물"
+    assert rows[0].status == "failed"
+    assert "KIS: KIS temporary failure" in str(rows[0].error_message)
+    assert "Yahoo fallback: Yahoo temporary failure" in str(rows[0].error_message)
 
 
 def test_fetch_market_warning_signals_preserves_failed_rows():

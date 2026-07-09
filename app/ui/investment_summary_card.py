@@ -682,6 +682,7 @@ def _market_warning_card(row: MarketWarningSignal | Mapping[str, Any]) -> str:
     moving_average = _market_warning_attr(row, "moving_average")
     upper_band = _market_warning_attr(row, "upper_band")
     lower_band = _market_warning_attr(row, "lower_band")
+    source = _market_warning_attr(row, "source")
     error_message = _market_warning_attr(row, "error_message")
     badge, status_class, default_trigger, default_desc = _market_warning_meta(status)
     trigger = raw_trigger if raw_trigger and raw_trigger != "조회 대기" else default_trigger
@@ -699,12 +700,14 @@ def _market_warning_card(row: MarketWarningSignal | Mapping[str, Any]) -> str:
         title_parts.append(f"BB 하단 {_market_warning_value(lower_band)}")
     if error_message:
         title_parts.append(str(error_message))
+    source_label = "KIS 60분봉" if str(source or "").lower() == "korea_investment" else "Yahoo 60분봉"
     return (
         f"<div class='summary-warning-card {status_class}' title='{escape(' · '.join(title_parts))}'>"
         "<div class='summary-warning-card-head'>"
         f"<strong>{escape(label)}</strong>"
         f"<span>{escape(symbol)}</span>"
         "</div>"
+        f"<div class='summary-warning-source'>{escape(source_label)}</div>"
         f"<div class='summary-warning-badge'>{escape(badge)}</div>"
         f"<div class='summary-warning-trigger'>{escape(trigger)}</div>"
         f"<div class='summary-warning-detail'>{escape(detail)}</div>"
@@ -1255,6 +1258,12 @@ def _render_styles() -> None:
             color: var(--app-muted);
             font-size: 0.68rem;
             font-weight: 800;
+        }
+        .summary-warning-source {
+            margin-top: 4px;
+            color: var(--app-muted);
+            font-size: 0.66rem;
+            font-weight: 760;
         }
         .summary-warning-badge {
             display: inline-flex;
