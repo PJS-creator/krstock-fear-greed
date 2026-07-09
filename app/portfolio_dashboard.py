@@ -1000,6 +1000,7 @@ def _cached_market_warning_signals(
             "KOS=F",
             "KOS",
             kis_symbol=kis_kospi200_futures_symbol or None,
+            requires_kis=True,
         ),
         MarketWarningSpec("NASDAQ 100 선물", "NQ=F", "NQ=F"),
     ]

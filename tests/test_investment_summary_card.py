@@ -267,7 +267,7 @@ def test_market_index_strip_renders_requested_compact_row():
     assert "금 지수" in html
     assert "XAU/USD" in html
     assert "summary-index-cell-gold" in html
-    assert "신규" in html
+    assert "신규" not in html
 
 
 def test_market_warning_strip_renders_buy_and_sell_block_cards_without_rule_box():
@@ -308,6 +308,30 @@ def test_market_warning_strip_renders_buy_and_sell_block_cards_without_rule_box(
     assert "KIS 60분봉" in html
     assert "Yahoo 60분봉" in html
     assert "판정 방식" not in html
+
+
+def test_market_warning_strip_shows_kis_configuration_required_without_failed_copy():
+    rows = [
+        {
+            "label": "KOSPI 200 선물",
+            "symbol": "KOS",
+            "status": "configuration_required",
+            "trigger": "KIS 설정 필요",
+            "value": None,
+            "moving_average": None,
+            "upper_band": None,
+            "lower_band": None,
+            "source": "korea_investment",
+            "error_message": "KIS_KOSPI200_FUTURES_SYMBOL 설정이 필요합니다.",
+        },
+    ]
+    html = _market_warning_strip(rows)
+
+    assert "KOSPI 200 선물" in html
+    assert "KIS 60분봉" in html
+    assert "설정 필요" in html
+    assert "KIS 선물 종목코드를 설정하세요" in html
+    assert "데이터를 가져오지 못했습니다" not in html
 
 
 def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_exclude_cash():
