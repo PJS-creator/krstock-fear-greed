@@ -91,6 +91,26 @@ def test_portfolio_payload_round_trip():
     assert v2["journal_notes"][0]["title"] == "복기"
 
 
+def test_portfolio_payload_round_trip_preserves_allowed_negative_cash():
+    payload = serialize_portfolio_payload(
+        [],
+        usd_krw=1300,
+        cash_krw=-1000,
+        cash_usd=-2,
+        cash_ledger=[
+            {"event_date": "2026-01-01", "currency": "USD", "event_type": "manual_adjustment", "amount": "-2"}
+        ],
+    )
+
+    rows, usd_krw, cash_krw = deserialize_portfolio_payload(payload)
+    reloaded = deserialize_portfolio_payload_v2(payload)
+
+    assert rows == []
+    assert usd_krw == 1300.0
+    assert cash_krw == -1000.0
+    assert reloaded["cash_balances"] == {"KRW": -1000.0, "USD": -2.0}
+
+
 def test_v1_payload_migrates_to_current_schema():
     v1 = {"schema_version": 1, "rows": [_row(symbol="abc")], "usd_krw": 1300, "cash_krw": 10000}
 

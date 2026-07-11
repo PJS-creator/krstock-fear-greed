@@ -59,6 +59,29 @@ def test_transaction_preview_resolves_korean_names_and_preserves_required_fields
     assert transactions[0]["occurred_at"] == "2026-04-13"
 
 
+def test_transaction_preview_prefers_explicit_ticker_and_preserves_display_name():
+    preview = build_transaction_preview(
+        [
+            {
+                "transaction_type": "매입",
+                "ticker_or_name": "삼성전자우선주",
+                "ticker": "005935",
+                "market": "KR",
+                "currency": "KRW",
+                "display_name": "삼성전자우선주",
+                "unit_price": "160904",
+                "quantity": "200",
+                "occurred_at": "2026-04-28",
+            }
+        ],
+        korea_listing_records=[],
+    )
+
+    assert preview.summary == {"total": 1, "ok": 1, "candidate_required": 0, "error": 0}
+    assert preview.rows[0]["ticker"] == "005935"
+    assert preview.rows[0]["display_name"] == "삼성전자우선주"
+
+
 def test_standard_trade_form_input_normalizes_to_legacy_transaction_shape():
     row = normalize_trade_input(
         {

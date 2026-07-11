@@ -347,7 +347,8 @@ def build_transaction_preview(
             continue
         if not any(clean_text(row.get(field)) for field in ("transaction_type", "side", "ticker_or_name", "ticker", "symbol", "quantity", "unit_price", "avg_price", "occurred_at", "date")):
             continue
-        raw_input = row.get("ticker_or_name") or row.get("ticker") or row.get("symbol")
+        # Explicit identifiers stay usable even when the optional Korea listing lookup is unavailable.
+        raw_input = row.get("ticker") or row.get("symbol") or row.get("ticker_or_name")
         try:
             transaction_type = normalize_transaction_type(row.get("transaction_type") or row.get("side"))
             unit_price = parse_positive_float("unit_price", _first_present(row.get("unit_price"), row.get("avg_price"), row.get("price")))
@@ -371,6 +372,7 @@ def build_transaction_preview(
             message = f"선택한 시장({market_hint})과 인식된 시장({resolution.market})이 다릅니다."
         if status == "error":
             errors.append(f"{row_number}행: {message}")
+        display_name = clean_text(row.get("display_name")) or resolution.display_name
         preview_rows.append(
             {
                 "row_number": row_number,
@@ -378,7 +380,7 @@ def build_transaction_preview(
                 "transaction_label": TRANSACTION_TYPE_LABELS[transaction_type],
                 "raw_input": resolution.raw_input,
                 "ticker": resolution.ticker,
-                "display_name": resolution.display_name,
+                "display_name": display_name,
                 "market": resolution.market,
                 "currency": currency_hint or resolution.currency,
                 "unit_price": unit_price,

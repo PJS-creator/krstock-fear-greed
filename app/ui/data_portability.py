@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 
 import pandas as pd
 import streamlit as st
 
-from portfolio.cash_ledger import calculate_cash_balances, create_cash_ledger_entries_for_trade, serialize_cash_ledger_rows
+from portfolio.cash_ledger import (
+    calculate_cash_balances,
+    create_cash_ledger_entries_for_trade,
+    create_opening_balance_entries,
+    serialize_cash_ledger_rows,
+)
 from portfolio.data_portability import (
     CASH_LEDGER_IMPORT_COLUMNS,
     TRANSACTION_IMPORT_COLUMNS,
@@ -25,6 +31,8 @@ from .theme import DIMENSIONS
 
 TRANSACTION_IMPORT_PREVIEW_KEY = "transaction_import_preview_valid_rows"
 CASH_IMPORT_PREVIEW_KEY = "cash_import_preview_valid_rows"
+ALLOW_NEGATIVE_CASH_KEY = "allow_negative_cash_balance"
+LOGGER = logging.getLogger(__name__)
 
 
 @st.cache_data(show_spinner=False)
@@ -47,22 +55,44 @@ def _issues_frame(issues) -> pd.DataFrame:
     )
 
 
-def _update_cash_balances_from_ledger() -> None:
-    balances = calculate_cash_balances(st.session_state.get("cash_ledger_entries", []))
-    st.session_state.cash_krw = float(balances["KRW"])
-    st.session_state.cash_usd = float(balances["USD"])
+def _reject_negative_cash_balances(cash_balances: dict[str, object]) -> None:
+    if bool(st.session_state.get(ALLOW_NEGATIVE_CASH_KEY, False)):
+        return
+    negative_balances = [currency for currency, amount in cash_balances.items() if amount < 0]
+    if negative_balances:
+        currencies = ", ".join(negative_balances)
+        raise ValueError(
+            f"{currencies} 현금 잔고가 부족합니다. 현금·입출금·환율에서 입금 또는 시작 현금을 먼저 입력하거나 "
+            "고급 설정의 '현금 부족이어도 저장 허용'을 켜세요."
+        )
+
+
+def _opening_entries_for_transaction_import(
+    current_ledger: list[dict[str, object]],
+    imported: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    if current_ledger or not imported:
+        return []
+    return create_opening_balance_entries(
+        {
+            "KRW": st.session_state.get("cash_krw", 0.0),
+            "USD": st.session_state.get("cash_usd", 0.0),
+        },
+        event_date=str(imported[0]["occurred_at"])[:10],
+        portfolio_id=str(st.session_state.get("portfolio_name") or "main"),
+    )
 
 
 def _apply_transaction_import(rows: list[dict[str, object]]) -> None:
     existing = normalize_transaction_rows(st.session_state.get("portfolio_transactions", []))
     imported = normalize_transaction_rows(rows)
-    combined = existing + imported
-    st.session_state.portfolio_transactions = normalize_transaction_rows(combined)
-    st.session_state.holdings_rows = transactions_to_holdings(
-        st.session_state.portfolio_transactions,
+    next_transactions = normalize_transaction_rows(existing + imported)
+    next_holdings = transactions_to_holdings(
+        next_transactions,
         previous_holdings=st.session_state.get("holdings_rows", []),
     )
-    ledger_additions = []
+    current_ledger = list(st.session_state.get("cash_ledger_entries") or [])
+    ledger_additions = _opening_entries_for_transaction_import(current_ledger, imported)
     for transaction in imported:
         ledger_additions.extend(
             create_cash_ledger_entries_for_trade(
@@ -70,16 +100,29 @@ def _apply_transaction_import(rows: list[dict[str, object]]) -> None:
                 portfolio_id=str(st.session_state.get("portfolio_name") or "main"),
             )
         )
-    st.session_state.cash_ledger_entries = serialize_cash_ledger_rows(list(st.session_state.get("cash_ledger_entries") or []) + ledger_additions)
-    _update_cash_balances_from_ledger()
+    next_ledger = serialize_cash_ledger_rows(current_ledger + ledger_additions)
+    cash_balances = calculate_cash_balances(next_ledger)
+    _reject_negative_cash_balances(cash_balances)
+
+    # Commit only after every derived value has been calculated successfully.
+    st.session_state.portfolio_transactions = next_transactions
+    st.session_state.holdings_rows = next_holdings
+    st.session_state.cash_ledger_entries = next_ledger
+    st.session_state.cash_krw = float(cash_balances["KRW"])
+    st.session_state.cash_usd = float(cash_balances["USD"])
     st.session_state.pop(TRANSACTION_IMPORT_PREVIEW_KEY, None)
     st.toast("거래 CSV를 반영했습니다.")
     request_app_rerun()
 
 
 def _apply_cash_import(rows: list[dict[str, object]]) -> None:
-    st.session_state.cash_ledger_entries = serialize_cash_ledger_rows(list(st.session_state.get("cash_ledger_entries") or []) + rows)
-    _update_cash_balances_from_ledger()
+    next_ledger = serialize_cash_ledger_rows(list(st.session_state.get("cash_ledger_entries") or []) + rows)
+    cash_balances = calculate_cash_balances(next_ledger)
+    _reject_negative_cash_balances(cash_balances)
+
+    st.session_state.cash_ledger_entries = next_ledger
+    st.session_state.cash_krw = float(cash_balances["KRW"])
+    st.session_state.cash_usd = float(cash_balances["USD"])
     st.session_state.pop(CASH_IMPORT_PREVIEW_KEY, None)
     st.toast("현금 원장 CSV를 반영했습니다.")
     request_app_rerun()
@@ -131,9 +174,13 @@ def _render_transaction_import() -> None:
         if begin_ui_action("import_transactions_csv", payload=valid_rows):
             try:
                 _apply_transaction_import(valid_rows)
+            except ValueError as exc:
+                finish_ui_action(success=False)
+                st.error(f"거래 CSV를 가져올 수 없습니다: {exc}")
             except Exception:
                 finish_ui_action(success=False)
-                raise
+                LOGGER.exception("Unexpected transaction CSV import failure")
+                st.error("거래 CSV를 가져오는 중 문제가 발생했습니다. 입력 내용을 확인한 뒤 다시 시도해 주세요.")
 
 
 def _render_cash_import() -> None:
@@ -188,9 +235,13 @@ def _render_cash_import() -> None:
         if begin_ui_action("import_cash_ledger_csv", payload=valid_rows):
             try:
                 _apply_cash_import(valid_rows)
+            except ValueError as exc:
+                finish_ui_action(success=False)
+                st.error(f"현금 원장 CSV를 가져올 수 없습니다: {exc}")
             except Exception:
                 finish_ui_action(success=False)
-                raise
+                LOGGER.exception("Unexpected cash ledger CSV import failure")
+                st.error("현금 원장 CSV를 가져오는 중 문제가 발생했습니다. 입력 내용을 확인한 뒤 다시 시도해 주세요.")
 
 
 def _render_exports(portfolio_snapshot: dict[str, object]) -> None:
