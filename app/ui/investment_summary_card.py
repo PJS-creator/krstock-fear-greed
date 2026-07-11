@@ -17,6 +17,38 @@ from .formatters import KST, format_kst, format_number, format_price, instrument
 from .theme import SEMANTIC_COLORS, get_active_theme
 
 
+_SECTOR_BY_TICKER = {
+    "000660": "반도체·전자",
+    "005930": "반도체·전자",
+    "005935": "반도체·전자",
+    "009540": "조선·산업재",
+    "071050": "금융",
+    "239890": "디스플레이 소재",
+    "AYA": "귀금속·광업",
+    "AVR": "바이오·헬스케어",
+    "CCCC": "바이오·헬스케어",
+    "CGEM": "바이오·헬스케어",
+    "CMPS": "바이오·헬스케어",
+    "CTMX": "바이오·헬스케어",
+    "EXK": "귀금속·광업",
+    "GHRS": "바이오·헬스케어",
+    "MAKO": "귀금속·광업",
+    "PSNL": "바이오·헬스케어",
+    "QURE": "바이오·헬스케어",
+    "VOR": "바이오·헬스케어",
+}
+
+_SECTOR_BY_NAME = {
+    "HD한국조선해양": "조선·산업재",
+    "SK하이닉스": "반도체·전자",
+    "삼성전자": "반도체·전자",
+    "삼성전자우": "반도체·전자",
+    "삼성전자우선주": "반도체·전자",
+    "피엔에이치테크": "디스플레이 소재",
+    "한국금융지주": "금융",
+}
+
+
 def _krw(value: float | None) -> str:
     if value is None:
         return "-"
@@ -100,6 +132,31 @@ def _signed_price(value: float, currency: object) -> str:
 def _currency_label(value: object) -> str:
     currency = str(value or "").upper()
     return currency if currency in {"KRW", "USD"} else "-"
+
+
+def _market_code(holding: Mapping[str, Any]) -> str:
+    market = str(holding.get("market") or "").strip().upper()
+    if market in {"KR", "KOSPI", "KOSDAQ"}:
+        return "KR"
+    if market in {"US", "NASDAQ", "NYSE", "AMEX"}:
+        return "US"
+    currency = _currency_label(holding.get("currency"))
+    if currency == "KRW":
+        return "KR"
+    if currency == "USD":
+        return "US"
+    return market[:2] or "-"
+
+
+def _holding_sector(holding: Mapping[str, Any]) -> str:
+    explicit_sector = str(holding.get("sector") or holding.get("sector_name") or "").strip()
+    if explicit_sector:
+        return explicit_sector
+    ticker = str(holding.get("ticker") or holding.get("symbol") or "").strip().upper()
+    if ticker in _SECTOR_BY_TICKER:
+        return _SECTOR_BY_TICKER[ticker]
+    display_name = str(holding.get("display_name") or holding.get("name") or "").strip()
+    return _SECTOR_BY_NAME.get(display_name, "기타")
 
 
 def _currency_badge(value: object) -> str:
@@ -400,6 +457,8 @@ def _holding_allocation_rows(metrics: PortfolioMetrics) -> list[dict[str, Any]]:
                 "day_change_krw": item.day_change_krw,
                 "kind": "holding",
                 "currency": _currency_label(item.holding.get("currency")),
+                "market_code": _market_code(item.holding),
+                "sector": _holding_sector(item.holding),
                 "allocation_detail": _holding_allocation_detail(item.holding, float(value)),
             }
         )
@@ -569,8 +628,13 @@ def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
         tile_height = float(row.get("height") or 0.0)
         is_small = weight < 0.035 or tile_width < 14 or tile_height < 14
         tile_classes = "summary-heatmap-tile summary-heatmap-small" if is_small else "summary-heatmap-tile"
-        title = f"{row['label']} · {change_text} · 비중 {percentage(weight, digits=2)}"
-        label_html = f"<div class='summary-heatmap-name'>{escape(str(row['label']))}</div>"
+        market_code = str(row.get("market_code") or "-")
+        market_suffix = f" ({market_code})" if market_code != "-" else ""
+        title = f"{row['label']}{market_suffix} · {change_text} · 비중 {percentage(weight, digits=2)}"
+        market_html = (
+            f" <span class='summary-heatmap-market'>({escape(market_code)})</span>" if market_code != "-" else ""
+        )
+        label_html = f"<div class='summary-heatmap-name'>{escape(str(row['label']))}{market_html}</div>"
         change_html = f"<div class='summary-heatmap-change'>{escape(change_text)}</div>"
         tiles.append(
             f"<div class='{tile_classes}' "
@@ -585,6 +649,91 @@ def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
         "<div class='summary-heatmap-empty' "
         f"style='background:{SEMANTIC_COLORS['missing']}'>보유자산 없음</div>"
     )
+
+
+def _sector_groups(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("sector") or "기타"), []).append(row)
+    groups = [
+        {
+            "label": sector,
+            "rows": sorted(sector_rows, key=_sort_key, reverse=True),
+            "value_krw": sum(float(row.get("value_krw") or 0.0) for row in sector_rows),
+            "weight": sum(float(row.get("weight") or 0.0) for row in sector_rows),
+        }
+        for sector, sector_rows in grouped.items()
+    ]
+    return sorted(groups, key=_sort_key, reverse=True)
+
+
+def _sector_member_layout_class(count: int, *, compact: bool) -> str:
+    if compact:
+        return f"summary-sector-members-compact summary-sector-members-compact-{min(max(count, 1), 3)}"
+    if count == 9:
+        return "summary-sector-members-nine"
+    if count == 3:
+        return "summary-sector-members-three"
+    if count == 2:
+        return "summary-sector-members-two"
+    if count == 1:
+        return "summary-sector-members-one"
+    return "summary-sector-members-grid"
+
+
+def _sector_member_tile(row: dict[str, Any], *, compact: bool) -> str:
+    weight = float(row.get("weight") or 0.0)
+    change_pct = row.get("day_change_pct")
+    change_text = signed_percentage(change_pct) if change_pct is not None else "-"
+    market_code = str(row.get("market_code") or "-")
+    market_suffix = f" ({market_code})" if market_code != "-" else ""
+    title = f"{row['label']}{market_suffix} · {change_text} · 비중 {percentage(weight, digits=2)}"
+    tile_class = "summary-sector-tile summary-sector-tile-compact" if compact else "summary-sector-tile"
+    market_html = (
+        f" <span class='summary-heatmap-market'>({escape(market_code)})</span>" if market_code != "-" else ""
+    )
+    return (
+        f"<div class='{tile_class}' title='{escape(title)}' aria-label='{escape(title)}' "
+        f"style='background:{row['heat_color']}'>"
+        f"<div class='summary-sector-tile-name'>{escape(str(row['label']))}{market_html}</div>"
+        f"<div class='summary-sector-tile-change'>{escape(change_text)}</div>"
+        f"<div class='summary-sector-tile-weight'>비중 {escape(percentage(weight, digits=2))}</div>"
+        "</div>"
+    )
+
+
+def _sector_group_html(group: dict[str, Any], *, role: str) -> str:
+    rows = list(group["rows"])
+    compact = role == "compact"
+    member_layout = _sector_member_layout_class(len(rows), compact=compact)
+    tiles = "".join(_sector_member_tile(row, compact=compact) for row in rows)
+    return (
+        f"<section class='summary-sector-group summary-sector-group-{role}'>"
+        "<div class='summary-sector-group-head'>"
+        f"<div class='summary-sector-group-name'><strong>{escape(str(group['label']))}</strong>"
+        f"<span>{len(rows)}종목</span></div>"
+        f"<div class='summary-sector-group-weight'>{escape(percentage(float(group['weight']), digits=2))}</div>"
+        "</div>"
+        f"<div class='summary-sector-members {member_layout}'>{tiles}</div>"
+        "</section>"
+    )
+
+
+def _sector_heatmap(rows: list[dict[str, Any]]) -> str:
+    groups = _sector_groups(rows)
+    if not groups:
+        return (
+            "<div class='summary-sector-heatmap summary-heatmap-desktop summary-sector-heatmap-empty'>"
+            "보유자산 없음</div>"
+        )
+    count_class = f"summary-sector-heatmap-count-{min(len(groups), 3)}"
+    parts = [_sector_group_html(groups[0], role="primary")]
+    if len(groups) >= 2:
+        parts.append(_sector_group_html(groups[1], role="secondary"))
+    if len(groups) > 2:
+        compact_groups = "".join(_sector_group_html(group, role="compact") for group in groups[2:])
+        parts.append(f"<div class='summary-sector-compact-grid'>{compact_groups}</div>")
+    return f"<div class='summary-sector-heatmap summary-heatmap-desktop {count_class}'>{''.join(parts)}</div>"
 
 
 def _market_index_value(value: object) -> str:
@@ -971,7 +1120,7 @@ def _render_styles() -> None:
         .summary-legend-total { border-top: 1px solid var(--app-border); margin-top: 12px; padding-top: 14px; color: var(--app-positive); text-align: center; font-size: 1.18rem; font-weight: 850; }
         .summary-heatmap-card {
             padding: 18px;
-            min-height: 360px;
+            min-height: 560px;
             display: flex;
             flex-direction: column;
         }
@@ -1005,6 +1154,7 @@ def _render_styles() -> None:
             overflow: hidden;
             box-shadow: var(--app-shadow);
         }
+        .summary-heatmap-mobile { display: none; }
         .summary-heatmap-tile {
             position: absolute;
             border: 2px solid var(--summary-heatmap-tile-border);
@@ -1061,8 +1211,192 @@ def _render_styles() -> None:
             word-break: keep-all;
             overflow-wrap: anywhere;
         }
+        .summary-heatmap-market {
+            color: var(--token-chart-tooltip-text);
+            font-size: 0.72em;
+            font-weight: 750;
+            opacity: 0.78;
+            white-space: nowrap;
+        }
         .summary-heatmap-change { font-size: 0.82em; margin-top: 6px; font-weight: 760; font-variant-numeric: tabular-nums; }
         .summary-heatmap-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--app-muted); }
+        .summary-sector-heatmap {
+            flex: 1;
+            min-height: 470px;
+            display: grid;
+            grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
+            grid-template-rows: minmax(300px, 1fr) auto;
+            gap: 8px;
+        }
+        .summary-sector-group {
+            min-width: 0;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            padding: 9px;
+            border: 1px solid var(--summary-heatmap-border);
+            border-radius: 7px;
+            background: var(--summary-heatmap-bg);
+            overflow: hidden;
+        }
+        .summary-sector-group-primary { grid-column: 1; grid-row: 1 / 3; }
+        .summary-sector-group-secondary { grid-column: 2; grid-row: 1; }
+        .summary-sector-compact-grid {
+            grid-column: 2;
+            grid-row: 2;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+        .summary-sector-heatmap-count-1,
+        .summary-sector-heatmap-count-2 {
+            grid-template-rows: minmax(420px, 1fr);
+        }
+        .summary-sector-heatmap-count-1 .summary-sector-group-primary {
+            grid-column: 1 / 3;
+            grid-row: 1;
+        }
+        .summary-sector-heatmap-count-2 .summary-sector-group-primary {
+            grid-column: 1;
+            grid-row: 1;
+        }
+        .summary-sector-heatmap-count-2 .summary-sector-group-secondary {
+            grid-column: 2;
+            grid-row: 1;
+        }
+        .summary-sector-group-head {
+            min-height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 0 2px 7px;
+        }
+        .summary-sector-group-name {
+            min-width: 0;
+            display: flex;
+            align-items: baseline;
+            gap: 7px;
+        }
+        .summary-sector-group-name strong {
+            min-width: 0;
+            color: var(--app-heading);
+            font-size: 0.9rem;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .summary-sector-group-name span {
+            color: var(--app-muted);
+            font-size: 0.68rem;
+            white-space: nowrap;
+        }
+        .summary-sector-group-weight {
+            color: var(--app-primary);
+            font-size: 0.82rem;
+            font-weight: 850;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+        }
+        .summary-sector-members {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            gap: 4px;
+        }
+        .summary-sector-members-nine {
+            grid-template-columns: repeat(12, minmax(0, 1fr));
+            grid-template-rows: repeat(10, minmax(0, 1fr));
+        }
+        .summary-sector-members-nine > :nth-child(1) { grid-column: 1 / 8; grid-row: 1 / 6; }
+        .summary-sector-members-nine > :nth-child(2) { grid-column: 8 / 13; grid-row: 1 / 6; }
+        .summary-sector-members-nine > :nth-child(3) { grid-column: 1 / 5; grid-row: 6 / 10; }
+        .summary-sector-members-nine > :nth-child(4) { grid-column: 5 / 9; grid-row: 6 / 10; }
+        .summary-sector-members-nine > :nth-child(5) { grid-column: 9 / 13; grid-row: 6 / 10; }
+        .summary-sector-members-nine > :nth-child(6) { grid-column: 1 / 4; grid-row: 10; }
+        .summary-sector-members-nine > :nth-child(7) { grid-column: 4 / 7; grid-row: 10; }
+        .summary-sector-members-nine > :nth-child(8) { grid-column: 7 / 10; grid-row: 10; }
+        .summary-sector-members-nine > :nth-child(9) { grid-column: 10 / 13; grid-row: 10; }
+        .summary-sector-members-three {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-rows: repeat(2, minmax(0, 1fr));
+        }
+        .summary-sector-members-three > :first-child { grid-row: 1 / 3; }
+        .summary-sector-members-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .summary-sector-members-one { grid-template-columns: 1fr; }
+        .summary-sector-members-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-auto-rows: minmax(72px, 1fr);
+        }
+        .summary-sector-members-compact { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        .summary-sector-members-compact-1 { grid-template-columns: 1fr; }
+        .summary-sector-members-compact-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .summary-sector-tile {
+            min-width: 0;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            padding: 5px;
+            border: 1px solid color-mix(in srgb, var(--token-chart-tooltip-text) 26%, transparent);
+            border-radius: 5px;
+            color: var(--token-chart-tooltip-text);
+            text-align: center;
+            overflow: hidden;
+            transition: filter 150ms ease, transform 150ms ease, box-shadow 150ms ease;
+        }
+        .summary-sector-tile:hover {
+            z-index: 4;
+            filter: brightness(1.14) saturate(1.04);
+            transform: translateZ(0) scale(1.025);
+            box-shadow: var(--app-shadow-sm);
+        }
+        .summary-sector-tile-name {
+            max-width: 100%;
+            font-size: clamp(0.64rem, 0.88vw, 0.94rem);
+            font-weight: 850;
+            line-height: 1.15;
+            overflow-wrap: anywhere;
+        }
+        .summary-sector-tile-change {
+            font-size: clamp(0.72rem, 1vw, 1.05rem);
+            font-weight: 900;
+            font-variant-numeric: tabular-nums;
+        }
+        .summary-sector-tile-weight {
+            color: var(--token-chart-tooltip-text);
+            font-size: 0.62rem;
+            font-weight: 700;
+            opacity: 0.78;
+            white-space: nowrap;
+        }
+        .summary-sector-group-compact {
+            min-height: 78px;
+            padding: 6px;
+        }
+        .summary-sector-group-compact .summary-sector-group-head {
+            min-height: 23px;
+            padding-bottom: 4px;
+        }
+        .summary-sector-group-compact .summary-sector-group-name strong { font-size: 0.68rem; }
+        .summary-sector-group-compact .summary-sector-group-name span { display: none; }
+        .summary-sector-group-compact .summary-sector-group-weight { font-size: 0.64rem; }
+        .summary-sector-tile-compact {
+            gap: 1px;
+            padding: 3px;
+        }
+        .summary-sector-tile-compact .summary-sector-tile-name { font-size: 0.56rem; }
+        .summary-sector-tile-compact .summary-sector-tile-change { font-size: 0.62rem; }
+        .summary-sector-tile-compact .summary-sector-tile-weight { display: none; }
+        .summary-sector-heatmap-empty {
+            place-items: center;
+            color: var(--app-muted);
+            border: 1px solid var(--summary-heatmap-border);
+            border-radius: 7px;
+            background: var(--summary-heatmap-bg);
+        }
         .summary-index-strip {
             margin-top: 12px;
             padding: 10px 12px;
@@ -1516,7 +1850,8 @@ def _render_styles() -> None:
         .summary-foot { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; color: var(--app-muted); font-size: 0.9rem; }
         @media (max-width: 980px) {
             .summary-top, .summary-main, .summary-split-grid, .summary-kpi-grid { grid-template-columns: 1fr; }
-            .summary-heatmap-card { min-height: 320px; }
+            .summary-heatmap-card { min-height: 560px; }
+            .summary-sector-heatmap { min-height: 480px; }
             .summary-heatmap-area { min-height: 260px; }
         }
         @media (max-width: 720px) {
@@ -1563,6 +1898,8 @@ def _render_styles() -> None:
             .summary-heatmap-card {
                 min-height: 282px;
             }
+            .summary-sector-heatmap { display: none; }
+            .summary-heatmap-mobile { display: block; }
             .summary-heatmap-head {
                 align-items: flex-start;
                 flex-direction: column;
@@ -1919,7 +2256,8 @@ def render_investment_summary_card(
         )
     else:
         cash_legend_rows = "<div class='summary-empty-line'>현금 없음</div>"
-    heatmap_tiles = _heatmap_tiles(holding_allocation_rows)
+    desktop_heatmap = _sector_heatmap(holding_allocation_rows)
+    mobile_heatmap_tiles = _heatmap_tiles(holding_allocation_rows)
     market_index_strip = _market_index_strip(market_indices)
     market_warning_strip = _market_warning_strip(market_warnings)
     mobile_holding_summary = _mobile_holding_summary_table(metrics)
@@ -1965,7 +2303,8 @@ def render_investment_summary_card(
                     <h3>구성·성과</h3>
                     <div class="summary-heatmap-legend"><span class="up">상승</span><span class="down">하락</span></div>
                 </div>
-                <div class="summary-heatmap-area">{heatmap_tiles}</div>
+                {desktop_heatmap}
+                <div class="summary-heatmap-area summary-heatmap-mobile">{mobile_heatmap_tiles}</div>
                 {market_index_strip}
                 {market_warning_strip}
             </div>
