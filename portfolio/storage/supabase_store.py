@@ -76,10 +76,10 @@ def should_enable_storage(config: SupabaseStorageConfig, *, owner_id: str | None
     return config.has_credentials and bool(owner_id or config.owner_id)
 
 
-def build_supabase_store(config: SupabaseStorageConfig) -> "SupabasePortfolioStore | None":
+def build_supabase_store(config: SupabaseStorageConfig, *, client: Any | None = None) -> "SupabasePortfolioStore | None":
     if not has_supabase_credentials(config):
         return None
-    return SupabasePortfolioStore(config)
+    return SupabasePortfolioStore(config, client=client)
 
 
 def _field(source: Any, name: str) -> Any:
@@ -142,13 +142,13 @@ def _record_from_mapping(data: Mapping[str, Any]) -> PortfolioRecord:
 
 
 class SupabasePortfolioStore:
-    def __init__(self, config: SupabaseStorageConfig) -> None:
+    def __init__(self, config: SupabaseStorageConfig, *, client: Any | None = None) -> None:
         if not has_supabase_credentials(config):
             raise PortfolioStoreError("Supabase storage is not configured")
 
         self._owner_id = config.owner_id
         self._table_name = config.table_name
-        self._client = create_supabase_client(config)
+        self._client = client if client is not None else create_supabase_client(config)
 
     def _table(self):
         return self._client.table(self._table_name)
@@ -194,13 +194,11 @@ class SupabasePortfolioStore:
         if not clean_name:
             raise PortfolioStoreError("portfolio_name is required")
 
-        existing = self.get_portfolio(owner_id, clean_name)
         now = _utc_now_iso()
         row = {
             "owner_id": owner_id,
             "portfolio_name": clean_name,
             "payload_json": dict(payload_json),
-            "created_at": existing.created_at if existing else now,
             "updated_at": now,
         }
         try:

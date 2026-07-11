@@ -47,7 +47,7 @@ def test_public_dashboard_applies_chrome_guard_only_in_public_mode():
     source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
 
     assert "from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles" in source
-    assert "if public_auth_enabled:\n    inject_public_cloud_chrome_guard()" in source
+    assert "    if public_auth_enabled:\n        inject_public_cloud_chrome_guard()" in source
 
 
 def test_android_webview_keeps_system_bars_readable_and_hides_floating_chrome():

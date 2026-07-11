@@ -427,3 +427,34 @@ Manual QA:
 
 - 가격 갱신 중 네트워크를 끊거나 브라우저를 장시간 방치한 뒤 돌아왔을 때 갱신 버튼이 다시 눌리는지 확인한다.
 - 로그인 유지 상태에서 1시간 이상 방치 후 저장/가격 갱신/탭 이동이 정상 동작하는지 확인한다.
+
+## Runtime Performance and Failure Isolation Follow-up
+
+2026-07-11 전체 실행 경로를 다시 점검해 다음 병목을 확인했다.
+
+- 공개 entrypoint가 Streamlit rerun마다 `app.portfolio_dashboard` 모듈을 reload해 stale module race와 불필요한 재초기화 가능성이 있었다.
+- 자산추이의 native tabs는 선택되지 않은 성과분석, 리스크분석, 과거 재구성 화면까지 한 번에 실행했다.
+- CSV 가져오기/내보내기도 두 화면을 동시에 만들었다.
+- 포트폴리오 자동 저장과 가격 갱신이 `st.cache_data.clear()`로 앱 전체 캐시를 비워 시장 지수, 과거 가격, 종목 목록과 이력 캐시를 함께 무효화했다.
+- Supabase 포트폴리오 저장과 이력 저장이 upsert 전에 select를 실행해 저장 한 번에 왕복 요청이 두 번 발생했다.
+- 네 종류의 Supabase store가 같은 사용자 세션에서도 각각 클라이언트를 만들었다.
+- 상태를 가지는 Supabase Auth 클라이언트가 전역 resource cache에 저장되어 사용자 세션 간 인증 상태가 섞일 여지가 있었다.
+- 갱신된 access token을 resource cache key로 사용하면 장기 운영 중 이전 Supabase client가 계속 남을 수 있었다.
+- 1분 자동갱신이 현재가뿐 아니라 모든 종목의 당일 분봉도 순차 조회해 외부 API 지연이 누적될 수 있었다.
+- 자산추이 snapshot 실패가 포트폴리오 자동 저장 예외 범위 밖으로 전파될 수 있었다.
+- 여러 세션이 동시에 KIS 조회를 시작하면 같은 앱 키로 access token 발급 요청이 겹칠 수 있었다.
+
+Implemented changes:
+
+- 공개 entrypoint는 import/reload 대신 `run_dashboard(public_auth_enabled=True)`를 한 번 호출한다.
+- 자산추이와 CSV 하위 화면은 radio 기반 lazy rendering으로 바꿔 선택한 화면만 계산한다.
+- 전역 cache flush를 제거하고 포트폴리오 목록, 자산 이력, 과거 스케줄 캐시만 필요한 시점에 각각 무효화한다.
+- Supabase Auth와 데이터 store는 전역 cache 대신 각 Streamlit 세션에서만 재사용하고 로그아웃 시 폐기한다.
+- 같은 인증 세션의 portfolio/history/schedule/target allocation store는 Supabase client 하나를 공유한다.
+- 포트폴리오와 이력 저장은 충돌 키 기반 단일 upsert로 처리한다.
+- 목표 비중 테이블은 목표 비중이 실제 변경된 저장에서만 갱신한다.
+- 평가금액에 영향을 주지 않는 메모·목표 비중 변경은 불필요한 자산추이 snapshot을 만들지 않는다.
+- 가격 조회에는 24초 처리 예산을 적용하고, 시간 제한 이후 종목은 마지막 정상 가격을 유지한다.
+- 1분 자동갱신은 현재가와 환율만 갱신하며 당일 분봉은 수동 갱신에만 포함한다.
+- 자산 이력 저장 실패를 비치명적 오류로 격리해 포트폴리오 저장과 앱 shell을 유지한다.
+- KIS access token 발급을 잠금으로 직렬화해 동시 갱신에서도 중복 발급 요청을 막는다.

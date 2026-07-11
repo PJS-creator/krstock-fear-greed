@@ -7,6 +7,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from datetime import date, datetime, timedelta, timezone
+from threading import Lock
 from typing import Any
 
 from .base import PriceProviderError, ProviderQuote
@@ -293,6 +294,8 @@ class KoreaInvestmentQuoteProvider:
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
         self._access_token: str | None = None
         self._access_token_expires_at: datetime | None = None
+        self._token_lock = Lock()
+        self._resolved_exchange_by_symbol: dict[str, str] = {}
 
     def _url(self, path: str, query: Mapping[str, str] | None = None) -> str:
         url = f"{self._base_url}{path}"
@@ -326,20 +329,29 @@ class KoreaInvestmentQuoteProvider:
             and self._access_token_expires_at > now + timedelta(seconds=KIS_TOKEN_REFRESH_MARGIN_SECONDS)
         ):
             return self._access_token
-
-        payload = self._request_json(
-            "POST",
-            KIS_TOKEN_PATH,
-            body={
-                "grant_type": "client_credentials",
-                "appkey": self._app_key,
-                "appsecret": self._app_secret,
-            },
-        )
-        token, expires_at = parse_kis_token_response(payload, now=now)
-        self._access_token = token
-        self._access_token_expires_at = expires_at
-        return token
+        with self._token_lock:
+            now = self._now_fn()
+            if now.tzinfo is None:
+                now = now.replace(tzinfo=timezone.utc)
+            if (
+                self._access_token
+                and self._access_token_expires_at is not None
+                and self._access_token_expires_at > now + timedelta(seconds=KIS_TOKEN_REFRESH_MARGIN_SECONDS)
+            ):
+                return self._access_token
+            payload = self._request_json(
+                "POST",
+                KIS_TOKEN_PATH,
+                body={
+                    "grant_type": "client_credentials",
+                    "appkey": self._app_key,
+                    "appsecret": self._app_secret,
+                },
+            )
+            token, expires_at = parse_kis_token_response(payload, now=now)
+            self._access_token = token
+            self._access_token_expires_at = expires_at
+            return token
 
     def _headers(self, tr_id: str) -> dict[str, str]:
         return {
@@ -373,7 +385,13 @@ class KoreaInvestmentQuoteProvider:
     def _get_overseas_quote(self, symbol: str) -> ProviderQuote:
         normalized_symbol = normalize_kis_us_symbol(symbol)
         errors: list[str] = []
-        for exchange in self._us_exchanges:
+        resolved_exchange = self._resolved_exchange_by_symbol.get(normalized_symbol)
+        exchanges = tuple(
+            dict.fromkeys(
+                ([resolved_exchange] if resolved_exchange else []) + list(self._us_exchanges)
+            )
+        )
+        for exchange in exchanges:
             try:
                 payload = self._request_json(
                     "GET",
@@ -385,7 +403,9 @@ class KoreaInvestmentQuoteProvider:
                         "SYMB": normalized_symbol,
                     },
                 )
-                return parse_kis_overseas_quote_response(normalized_symbol, payload)
+                quote = parse_kis_overseas_quote_response(normalized_symbol, payload)
+                self._resolved_exchange_by_symbol[normalized_symbol] = exchange
+                return quote
             except PriceProviderError as exc:
                 errors.append(f"{exchange}: {exc}")
         raise PriceProviderError("; ".join(errors) or f"KIS 해외 주식 현재가 조회 실패: {normalized_symbol}")
@@ -418,9 +438,15 @@ def build_kis_quote_provider(
     app_secret: str | None,
     *,
     env: str = "real",
+    timeout_seconds: float = 5.0,
 ) -> KoreaInvestmentQuoteProvider | None:
     app_key = str(app_key or "").strip()
     app_secret = str(app_secret or "").strip()
     if not app_key or not app_secret:
         return None
-    return KoreaInvestmentQuoteProvider(app_key=app_key, app_secret=app_secret, env=env)
+    return KoreaInvestmentQuoteProvider(
+        app_key=app_key,
+        app_secret=app_secret,
+        env=env,
+        timeout_seconds=timeout_seconds,
+    )

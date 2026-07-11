@@ -87,10 +87,10 @@ class MemoryTargetAllocationStore:
 
 
 class SupabaseTargetAllocationStore:
-    def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_TARGET_ALLOCATIONS_TABLE) -> None:
+    def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_TARGET_ALLOCATIONS_TABLE, client: Any | None = None) -> None:
         if not has_supabase_credentials(config):
             raise PortfolioStoreError("Supabase storage is not configured")
-        self._client = create_supabase_client(config)
+        self._client = client if client is not None else create_supabase_client(config)
         self._table_name = table_name
 
     def _table(self):
@@ -130,10 +130,10 @@ class SupabaseTargetAllocationStore:
         return [_allocation_from_db_row(row) for row in saved_rows]
 
 
-def build_target_allocation_store(config: SupabaseStorageConfig) -> SupabaseTargetAllocationStore | None:
+def build_target_allocation_store(config: SupabaseStorageConfig, *, client: Any | None = None) -> SupabaseTargetAllocationStore | None:
     if not has_supabase_credentials(config):
         return None
-    return SupabaseTargetAllocationStore(config)
+    return SupabaseTargetAllocationStore(config, client=client)
 
 
 def load_target_allocations_prefer_table(

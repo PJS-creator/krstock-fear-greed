@@ -409,7 +409,7 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
                 return
             try:
                 schedule_store.delete_schedule(owner_id, selected.schedule_name)
-                st.cache_data.clear()
+                _list_schedules_cached.clear()
                 request_app_rerun()
             except HistoricalScheduleStoreError as exc:
                 finish_ui_action(success=False)
@@ -428,7 +428,7 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
                         schedule_store.save_schedule(owner_id, clean_name, selected.payload_json)
                         if clean_name != selected.schedule_name:
                             schedule_store.delete_schedule(owner_id, selected.schedule_name)
-                        st.cache_data.clear()
+                        _list_schedules_cached.clear()
                         st.session_state[SCHEDULE_NAME_KEY] = clean_name
                         request_app_rerun()
                     except HistoricalScheduleStoreError as exc:
@@ -446,7 +446,7 @@ def _render_schedule_controls(owner_id: str | None, schedule_store: HistoricalSc
                 notes=st.session_state.get(NOTES_KEY, ""),
             )
             schedule_store.save_schedule(owner_id, schedule_name, payload)
-            st.cache_data.clear()
+            _list_schedules_cached.clear()
             st.success("과거 보유현황 스케줄을 저장했습니다.")
         except (HistoricalScheduleStoreError, HistoricalHoldingsError) as exc:
             finish_ui_action(success=False)

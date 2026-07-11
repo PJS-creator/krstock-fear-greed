@@ -238,9 +238,17 @@ def _render_exports(portfolio_snapshot: dict[str, object]) -> None:
 def render_data_portability_tools(*, portfolio_snapshot: dict[str, object]) -> None:
     st.subheader("CSV 가져오기/내보내기")
     st.caption("저장 전 미리보기와 검증을 거칩니다. 오류 또는 중복으로 표시된 행은 저장하지 않습니다.")
-    import_tab, export_tab = st.tabs(["가져오기", "내보내기"])
-    with import_tab:
+    with st.container(key="data_portability_tabs"):
+        selected_view = st.radio(
+            "CSV 화면",
+            ["import", "export"],
+            format_func={"import": "가져오기", "export": "내보내기"}.get,
+            key="data_portability_view",
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+    if selected_view == "import":
         _render_transaction_import()
         _render_cash_import()
-    with export_tab:
+    else:
         _render_exports(portfolio_snapshot)

@@ -226,6 +226,40 @@ def _get_quote_with_cache(
     return quote, False
 
 
+def _refresh_budget_exhausted(
+    *,
+    started_at: float,
+    max_refresh_seconds: float | None,
+    now_fn: Callable[[], float],
+) -> bool:
+    if max_refresh_seconds is None:
+        return False
+    return now_fn() - started_at >= max(0.0, max_refresh_seconds)
+
+
+def _budget_limited_status(row: Mapping[str, Any]) -> tuple[dict[str, object], PriceUpdateStatus]:
+    updated_row = dict(row)
+    symbol = str(row["ticker"])
+    market = str(row["market"])
+    currency = str(row["currency"])
+    has_last_price = row.get("current_price") is not None
+    status = QUOTE_STATUS_STALE if has_last_price else QUOTE_STATUS_FAILED
+    message = "가격 조회 시간 제한에 도달해 마지막 정상 가격을 유지했습니다." if has_last_price else "가격 조회 시간 제한에 도달해 가격을 가져오지 못했습니다."
+    updated_row = _mark_quote_error(updated_row, status=status, error_message="가격 조회 시간 제한")
+    return updated_row, PriceUpdateStatus(
+        symbol=symbol,
+        market=market,
+        currency=currency,
+        status=status,
+        message=message,
+        fetched_at=updated_row.get("fetched_at"),
+        price_date=updated_row.get("price_date"),
+        as_of_timestamp=updated_row.get("as_of_timestamp"),
+        source=updated_row.get("source") or updated_row.get("provider"),
+        error_message=updated_row.get("error_message"),
+    )
+
+
 def _provider_display_name(provider: PriceProvider, symbol: str) -> str | None:
     lookup = getattr(provider, "get_display_name", None)
     if not callable(lookup):
@@ -329,6 +363,7 @@ def refresh_holding_quotes(
     request_interval_seconds: float = ALPHA_VANTAGE_REQUEST_INTERVAL_SECONDS,
     sleep_fn: Callable[[float], None] = sleep,
     now_fn: Callable[[], float] = monotonic,
+    max_refresh_seconds: float | None = None,
 ) -> tuple[list[dict[str, object]], list[PriceUpdateStatus]]:
     normalized_rows = normalize_holding_rows(rows)
     quote_cache = cache or DEFAULT_QUOTE_CACHE
@@ -340,8 +375,19 @@ def refresh_holding_quotes(
     updated_rows: list[dict[str, object]] = []
     statuses: list[PriceUpdateStatus] = []
     total_rows = len(normalized_rows)
+    started_at = now_fn()
 
     for row in normalized_rows:
+        if _refresh_budget_exhausted(
+            started_at=started_at,
+            max_refresh_seconds=max_refresh_seconds,
+            now_fn=now_fn,
+        ):
+            updated_row, status = _budget_limited_status(row)
+            updated_rows.append(updated_row)
+            statuses.append(status)
+            _report_progress(on_progress, len(updated_rows), total_rows, str(row["ticker"]))
+            continue
         updated_row = dict(row)
         symbol = str(row["ticker"])
         market = str(row["market"])
@@ -393,7 +439,12 @@ def refresh_holding_quotes(
                 continue
             status = QUOTE_STATUS_CACHED if was_cached else QUOTE_STATUS_UPDATED
             quoted_row = _update_row_from_quote(updated_row, quote, status=status, provider=provider)
-            updated_rows.append(_attach_intraday_prices(quoted_row, intraday_provider, symbol=quote.symbol, market=market))
+            effective_intraday_provider = None if _refresh_budget_exhausted(
+                started_at=started_at,
+                max_refresh_seconds=max_refresh_seconds,
+                now_fn=now_fn,
+            ) else intraday_provider
+            updated_rows.append(_attach_intraday_prices(quoted_row, effective_intraday_provider, symbol=quote.symbol, market=market))
             statuses.append(
                 _status_from_quote(
                     symbol=quote.symbol,
@@ -452,7 +503,12 @@ def refresh_holding_quotes(
                 continue
             status = QUOTE_STATUS_CACHED if was_cached else QUOTE_STATUS_UPDATED
             quoted_row = _update_row_from_quote(updated_row, quote, status=status, provider=korea_provider)
-            updated_rows.append(_attach_intraday_prices(quoted_row, intraday_provider, symbol=quote.symbol, market=market))
+            effective_intraday_provider = None if _refresh_budget_exhausted(
+                started_at=started_at,
+                max_refresh_seconds=max_refresh_seconds,
+                now_fn=now_fn,
+            ) else intraday_provider
+            updated_rows.append(_attach_intraday_prices(quoted_row, effective_intraday_provider, symbol=quote.symbol, market=market))
             statuses.append(
                 _status_from_quote(
                     symbol=quote.symbol,

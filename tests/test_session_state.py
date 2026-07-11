@@ -62,10 +62,9 @@ def test_public_entrypoint_restores_public_auth_environment_flag():
     assert os.environ.get("PORTFOLIO_PUBLIC_AUTH") == previous
 
 
-def test_public_entrypoint_recovers_from_stale_dashboard_reload_module():
+def test_public_entrypoint_calls_dashboard_without_module_reload():
     source = Path("app/public_portfolio_dashboard.py").read_text(encoding="utf-8")
 
-    assert "def _load_dashboard_module()" in source
-    assert "importlib.reload(module)" in source
-    assert "sys.modules.pop(DASHBOARD_MODULE, None)" in source
-    assert "importlib.import_module(DASHBOARD_MODULE)" in source
+    assert "run_dashboard(public_auth_enabled=True)" in source
+    assert "importlib" not in source
+    assert "DASHBOARD_MODULE" not in source

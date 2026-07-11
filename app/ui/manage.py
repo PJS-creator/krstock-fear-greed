@@ -20,6 +20,7 @@ from portfolio.storage import (
 )
 from portfolio.transactions import TRANSACTION_COLUMNS, normalize_transaction_rows, rows_to_csv as transaction_rows_to_csv
 from .formatters import format_kst
+from .history import clear_history_cache
 from .stability import begin_ui_action, finish_ui_action, request_app_rerun
 
 STORAGE_UNCONFIGURED_MESSAGE = "저장소가 설정되지 않아 CSV 방식만 사용할 수 있습니다"
@@ -170,17 +171,22 @@ def render_storage_tools(
                     st.session_state.get("target_allocations", []),
                 )
                 if history_store is not None:
-                    history_store.save_snapshot(
-                        build_history_record(
-                            owner_id=owner_id,
-                            portfolio_name=clean_name,
-                            event_type="portfolio_save",
-                            metrics=metrics,
+                    try:
+                        history_store.save_snapshot(
+                            build_history_record(
+                                owner_id=owner_id,
+                                portfolio_name=clean_name,
+                                event_type="portfolio_save",
+                                metrics=metrics,
+                            )
                         )
-                    )
+                    except Exception:
+                        st.warning("포트폴리오는 저장했지만 자산추이 기록을 남기지 못했습니다.")
+                    else:
+                        clear_history_cache()
                 if on_capture is not None:
                     on_capture("portfolio_save")
-                st.cache_data.clear()
+                list_portfolios_cached.clear()
                 _queue_portfolio_name_update(clean_name)
                 _set_storage_status(f"{clean_name} 포트폴리오를 저장했습니다.")
                 request_app_rerun()
@@ -226,7 +232,7 @@ def render_storage_tools(
                     store.save_portfolio(owner_id, clean_name, selected.payload_json)
                     if clean_name != selected.portfolio_name:
                         store.delete_portfolio(owner_id, selected.portfolio_name)
-                    st.cache_data.clear()
+                    list_portfolios_cached.clear()
                     _queue_portfolio_name_update(clean_name)
                     _set_storage_status(f"{selected.portfolio_name} → {clean_name} 이름을 변경했습니다.")
                     request_app_rerun()
@@ -240,7 +246,7 @@ def render_storage_tools(
             return
         try:
             if store.delete_portfolio(owner_id, selected.portfolio_name):
-                st.cache_data.clear()
+                list_portfolios_cached.clear()
                 _set_storage_status(f"{selected.portfolio_name} 포트폴리오를 삭제했습니다.")
                 request_app_rerun()
             else:
@@ -274,7 +280,7 @@ def render_manual_capture(
                     metrics=metrics,
                 )
             )
-            st.cache_data.clear()
+            clear_history_cache()
             st.success("현재 총자산 스냅샷을 기록했습니다.")
         except Exception:
             finish_ui_action(success=False)
