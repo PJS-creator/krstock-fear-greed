@@ -221,8 +221,8 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "summary-index-strip" in html
     assert "주요 지수변동" in html
     assert "summary-warning-strip" in html
-    assert "매수&매도 경고" in html
-    assert "Bollinger Band(180, 2.0)" in html
+    assert "매수&매도 경고" not in html
+    assert "Bollinger Band(180, 2.0)" not in html
     assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in html
     assert "overflow-x: hidden;" in html
     assert "color-mix(in srgb, var(--token-overlay) 36%, transparent)" in html
@@ -270,7 +270,7 @@ def test_market_index_strip_renders_requested_compact_row():
     assert "신규" not in html
 
 
-def test_market_warning_strip_renders_buy_and_sell_block_cards_without_rule_box():
+def test_market_warning_strip_renders_only_index_names_and_status_badges():
     rows = [
         {
             "label": "KOSPI 200 선물",
@@ -298,16 +298,24 @@ def test_market_warning_strip_renders_buy_and_sell_block_cards_without_rule_box(
     html = _market_warning_strip(rows)
 
     assert "summary-warning-strip" in html
-    assert "매수&매도 경고" in html
     assert "KOSPI 200 선물" in html
     assert "NASDAQ 100 선물" in html
     assert "매수 금지" in html
     assert "매도 금지" in html
-    assert "상단 이탈" in html
-    assert "하단 이탈" in html
-    assert "KIS 60분봉" in html
-    assert "Yahoo 60분봉" in html
-    assert "판정 방식" not in html
+    for removed_text in (
+        "매수&매도 경고",
+        "상단 이탈",
+        "하단 이탈",
+        "KIS 60분봉",
+        "Yahoo 60분봉",
+        "NQ=F",
+        "385.2",
+        "19120",
+    ):
+        assert removed_text not in html
+    assert "summary-warning-mini" not in html
+    assert "summary-warning-trigger" not in html
+    assert "summary-warning-detail" not in html
 
 
 def test_market_warning_strip_shows_kis_configuration_required_without_failed_copy():
@@ -328,10 +336,10 @@ def test_market_warning_strip_shows_kis_configuration_required_without_failed_co
     html = _market_warning_strip(rows)
 
     assert "KOSPI 200 선물" in html
-    assert "KIS 60분봉" in html
     assert "설정 필요" in html
-    assert "KIS 선물 종목코드를 설정하세요" in html
-    assert "데이터를 가져오지 못했습니다" not in html
+    assert "KIS 60분봉" not in html
+    assert "KIS 선물 종목코드를 설정하세요" not in html
+    assert "KIS_KOSPI200_FUTURES_SYMBOL" not in html
 
 
 def test_market_warning_strip_keeps_required_kis_failure_on_kis_source():
@@ -352,8 +360,10 @@ def test_market_warning_strip_keeps_required_kis_failure_on_kis_source():
     html = _market_warning_strip(rows)
 
     assert "KOSPI 200 선물" in html
-    assert "KIS 60분봉" in html
-    assert "KIS 조회 실패" in html
+    assert "조회 실패" in html
+    assert "KIS 60분봉" not in html
+    assert "KIS 조회 실패" not in html
+    assert "KIS temporary failure" not in html
     assert "Yahoo 60분봉" not in html
 
 
