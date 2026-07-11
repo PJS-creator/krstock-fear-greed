@@ -84,6 +84,31 @@ def test_transaction_csv_preview_skips_existing_duplicate():
     assert preview.duplicate_count == 1
 
 
+def test_transaction_csv_preview_uses_explicit_korean_ticker_without_listing_data():
+    preview = preview_transaction_import(
+        [
+            {
+                "external_id": "kr-buy-001",
+                "transaction_type": "매입",
+                "ticker_or_name": "SK하이닉스",
+                "ticker": "000660",
+                "market": "KR",
+                "currency": "KRW",
+                "display_name": "SK하이닉스",
+                "unit_price": "1117140",
+                "quantity": "20",
+                "occurred_at": "2026-04-08",
+            }
+        ],
+        korea_listing_records=[],
+    )
+
+    assert preview.error_count == 0
+    assert preview.valid_rows[0]["ticker"] == "000660"
+    assert preview.valid_rows[0]["display_name"] == "SK하이닉스"
+    assert preview.valid_rows[0]["external_id"] == "kr-buy-001"
+
+
 def test_cash_ledger_csv_preview_validates_and_skips_duplicates():
     rows = csv_to_rows(
         rows_to_csv(

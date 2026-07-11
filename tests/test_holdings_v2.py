@@ -91,6 +91,15 @@ def test_krw_usd_cash_conversion_and_usd_exposure():
     assert metrics.total_value_krw == 12100
 
 
+def test_portfolio_metrics_supports_explicitly_allowed_negative_cash():
+    metrics = build_portfolio_metrics([], cash_krw=-1000, cash_usd=-2, usd_krw=1000)
+
+    assert metrics.cash.cash_krw == -1000
+    assert metrics.cash.cash_usd == -2
+    assert metrics.cash_total_krw == -3000
+    assert metrics.total_value_krw == -3000
+
+
 class FakeProvider:
     def __init__(self) -> None:
         self.calls = []

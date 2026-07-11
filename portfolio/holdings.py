@@ -137,7 +137,7 @@ def _normalize_ticker_for_market(value: object, market: str) -> str:
     return normalize_ticker(value)
 
 
-def parse_non_negative_float(field_name: str, value: object) -> float:
+def parse_finite_float(field_name: str, value: object) -> float:
     if isinstance(value, bool):
         raise ValueError(f"{field_name} must be a number")
     try:
@@ -146,6 +146,11 @@ def parse_non_negative_float(field_name: str, value: object) -> float:
         raise ValueError(f"{field_name} must be a number") from exc
     if not math.isfinite(number):
         raise ValueError(f"{field_name} must be a finite number")
+    return number
+
+
+def parse_non_negative_float(field_name: str, value: object) -> float:
+    number = parse_finite_float(field_name, value)
     if number < 0:
         raise ValueError(f"{field_name} must be non-negative")
     return number
@@ -344,8 +349,8 @@ def build_portfolio_metrics(
     if usd_krw <= 0:
         raise ValueError("usd_krw must be positive")
     cash = CashBalances(
-        cash_krw=parse_non_negative_float("cash_krw", cash_krw),
-        cash_usd=parse_non_negative_float("cash_usd", cash_usd),
+        cash_krw=parse_finite_float("cash_krw", cash_krw),
+        cash_usd=parse_finite_float("cash_usd", cash_usd),
     )
     rows = normalize_holding_rows(holdings)
     partial: list[tuple[dict[str, object], float | None, float | None, float | None, float | None, float | None, float | None, float]] = []

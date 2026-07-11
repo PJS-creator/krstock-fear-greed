@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from portfolio.cash_ledger import serialize_cash_ledger_rows
-from portfolio.holdings import normalize_holding_rows, parse_non_negative_float
+from portfolio.holdings import normalize_holding_rows
 from portfolio.journal import normalize_journal_notes
 from portfolio.manual_input import normalize_portfolio_rows
 from portfolio.rebalancing import serialize_target_allocations
@@ -91,8 +91,8 @@ def serialize_portfolio_payload(
             raise PortfolioPayloadError(str(exc)) from exc
 
     clean_usd_krw = _positive_float("usd_krw", usd_krw)
-    clean_cash_krw = _non_negative_float("cash_krw", cash_krw)
-    clean_cash_usd = _non_negative_float("cash_usd", cash_usd)
+    clean_cash_krw = _finite_float("cash_krw", cash_krw)
+    clean_cash_usd = _finite_float("cash_usd", cash_usd)
     try:
         clean_transactions = normalize_transaction_rows(transactions or [])
     except ValueError as exc:
@@ -167,8 +167,8 @@ def deserialize_portfolio_payload_v2(payload_json: Mapping[str, Any]) -> dict[st
     clean_payload = serialize_portfolio_payload(
         holdings,
         usd_krw=_positive_float("usd_krw", payload_json.get("usd_krw")),
-        cash_krw=parse_non_negative_float("cash_krw", cash_balances.get("KRW", 0.0)),
-        cash_usd=parse_non_negative_float("cash_usd", cash_balances.get("USD", 0.0)),
+        cash_krw=_finite_float("cash_krw", cash_balances.get("KRW", 0.0)),
+        cash_usd=_finite_float("cash_usd", cash_balances.get("USD", 0.0)),
         transactions=payload_json.get("transactions") if schema_version == SCHEMA_VERSION else [],
         cash_ledger=payload_json.get("cash_ledger") if schema_version == SCHEMA_VERSION else [],
         fx_metadata=payload_json.get("fx_metadata") if isinstance(payload_json.get("fx_metadata"), Mapping) else {},
@@ -192,5 +192,5 @@ def deserialize_portfolio_payload(payload_json: Mapping[str, Any]) -> tuple[list
     return (
         list(payload["holdings"]),
         _positive_float("usd_krw", payload.get("usd_krw")),
-        _non_negative_float("cash_krw", cash_balances.get("KRW", 0.0)),
+        _finite_float("cash_krw", cash_balances.get("KRW", 0.0)),
     )
