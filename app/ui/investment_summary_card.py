@@ -636,89 +636,40 @@ def _market_warning_attr(row: MarketWarningSignal | Mapping[str, Any], key: str)
     return getattr(row, key, None)
 
 
-def _market_warning_value(value: object) -> str:
-    if value is None:
-        return "-"
-    return format_number(float(value), digits=2, trim=True)
-
-
 def _market_warning_placeholder_rows() -> list[dict[str, Any]]:
     return [
         {
             "label": spec.label,
-            "symbol": spec.display_symbol or spec.symbol,
             "status": "pending",
-            "trigger": "조회 대기",
-            "value": None,
-            "moving_average": None,
-            "upper_band": None,
-            "lower_band": None,
         }
         for spec in DEFAULT_MARKET_WARNING_SPECS
     ]
 
 
-def _market_warning_meta(status: str) -> tuple[str, str, str, str]:
+def _market_warning_meta(status: str) -> tuple[str, str]:
     if status == "buy_blocked":
-        return "매수 금지", "summary-warning-buy", "상단 이탈", "현재가가 BB 상단 위에 위치"
+        return "매수 금지", "summary-warning-buy"
     if status == "sell_blocked":
-        return "매도 금지", "summary-warning-sell", "하단 이탈", "현재가가 BB 하단 아래에 위치"
+        return "매도 금지", "summary-warning-sell"
     if status == "clear":
-        return "정상 범위", "summary-warning-clear", "정상 범위", "현재가가 밴드 범위 안에 위치"
+        return "정상 범위", "summary-warning-clear"
     if status == "insufficient":
-        return "데이터 부족", "summary-warning-neutral", "데이터 부족", "60분봉 180개 이상 필요"
+        return "데이터 부족", "summary-warning-neutral"
     if status == "configuration_required":
-        return "설정 필요", "summary-warning-neutral", "KIS 설정 필요", "KIS 선물 종목코드를 설정하세요"
+        return "설정 필요", "summary-warning-neutral"
     if status == "failed":
-        return "조회 실패", "summary-warning-neutral", "조회 실패", "데이터를 가져오지 못했습니다"
-    return "조회 대기", "summary-warning-neutral", "조회 대기", "다음 가격 갱신 때 다시 확인"
+        return "조회 실패", "summary-warning-neutral"
+    return "조회 대기", "summary-warning-neutral"
 
 
 def _market_warning_card(row: MarketWarningSignal | Mapping[str, Any]) -> str:
     label = str(_market_warning_attr(row, "label") or "-")
-    symbol = str(_market_warning_attr(row, "symbol") or "")
     status = str(_market_warning_attr(row, "status") or "pending")
-    raw_trigger = str(_market_warning_attr(row, "trigger") or "")
-    value = _market_warning_attr(row, "value")
-    moving_average = _market_warning_attr(row, "moving_average")
-    upper_band = _market_warning_attr(row, "upper_band")
-    lower_band = _market_warning_attr(row, "lower_band")
-    source = _market_warning_attr(row, "source")
-    error_message = _market_warning_attr(row, "error_message")
-    badge, status_class, default_trigger, default_desc = _market_warning_meta(status)
-    trigger = raw_trigger if raw_trigger and raw_trigger != "조회 대기" else default_trigger
-    value_text = _market_warning_value(value)
-    ma_text = _market_warning_value(moving_average)
-    if value is not None and moving_average is not None:
-        detail = f"현재 {value_text} · MA5 {ma_text}"
-    else:
-        detail = default_desc
-    title_parts = [label]
-    if symbol:
-        title_parts.append(symbol)
-    if upper_band is not None and lower_band is not None:
-        title_parts.append(f"BB 상단 {_market_warning_value(upper_band)}")
-        title_parts.append(f"BB 하단 {_market_warning_value(lower_band)}")
-    if error_message:
-        title_parts.append(str(error_message))
-    source_label = "KIS 60분봉" if str(source or "").lower() == "korea_investment" else "Yahoo 60분봉"
+    badge, status_class = _market_warning_meta(status)
     return (
-        f"<div class='summary-warning-card {status_class}' title='{escape(' · '.join(title_parts))}'>"
-        "<div class='summary-warning-card-head'>"
-        f"<strong>{escape(label)}</strong>"
-        f"<span>{escape(symbol)}</span>"
-        "</div>"
-        f"<div class='summary-warning-source'>{escape(source_label)}</div>"
+        f"<div class='summary-warning-card {status_class}'>"
+        f"<strong class='summary-warning-label'>{escape(label)}</strong>"
         f"<div class='summary-warning-badge'>{escape(badge)}</div>"
-        f"<div class='summary-warning-trigger'>{escape(trigger)}</div>"
-        f"<div class='summary-warning-detail'>{escape(detail)}</div>"
-        "<div class='summary-warning-mini' aria-hidden='true'>"
-        "<span class='summary-warning-band summary-warning-band-upper'></span>"
-        "<span class='summary-warning-band summary-warning-band-mid'></span>"
-        "<span class='summary-warning-band summary-warning-band-lower'></span>"
-        "<span class='summary-warning-path'></span>"
-        "<span class='summary-warning-dot'></span>"
-        "</div>"
         "</div>"
     )
 
@@ -728,10 +679,6 @@ def _market_warning_strip(rows: list[MarketWarningSignal | Mapping[str, Any]] | 
     cards = "".join(_market_warning_card(row) for row in warning_rows)
     return (
         "<div class='summary-warning-strip' aria-label='매수 매도 경고'>"
-        "<div class='summary-warning-head'>"
-        "<div class='summary-warning-title'>매수&매도 경고</div>"
-        "<div class='summary-warning-subtitle'>60분봉 · MA5 · Bollinger Band(180, 2.0) 기준</div>"
-        "</div>"
         f"<div class='summary-warning-cards'>{cards}</div>"
         "</div>"
     )
@@ -1192,26 +1139,7 @@ def _render_styles() -> None:
             font-size: 0.82rem;
         }
         .summary-warning-strip {
-            margin-top: 12px;
-            padding: 12px;
-            border: 1px solid var(--app-border);
-            border-radius: 8px;
-            background: var(--summary-panel-bg);
-        }
-        .summary-warning-head {
-            margin-bottom: 10px;
-        }
-        .summary-warning-title {
-            color: var(--app-heading);
-            font-size: 0.95rem;
-            font-weight: 900;
-        }
-        .summary-warning-subtitle {
-            margin-top: 3px;
-            color: var(--app-muted);
-            font-size: 0.75rem;
-            font-weight: 720;
-            line-height: 1.35;
+            margin-top: 10px;
         }
         .summary-warning-cards {
             display: grid;
@@ -1220,20 +1148,14 @@ def _render_styles() -> None:
         }
         .summary-warning-card {
             min-width: 0;
-            padding: 12px;
-            border: 1px solid var(--app-border);
-            border-radius: 8px;
-            background: var(--app-surface);
-            color: var(--app-text);
-        }
-        .summary-warning-card-head {
             display: flex;
-            align-items: baseline;
+            align-items: center;
             justify-content: space-between;
             gap: 8px;
-            min-width: 0;
+            padding: 2px 0;
+            color: var(--app-text);
         }
-        .summary-warning-card-head strong {
+        .summary-warning-label {
             min-width: 0;
             color: var(--app-heading);
             font-size: 0.86rem;
@@ -1242,25 +1164,13 @@ def _render_styles() -> None:
             text-overflow: ellipsis;
             white-space: nowrap;
         }
-        .summary-warning-card-head span {
-            flex: 0 0 auto;
-            color: var(--app-muted);
-            font-size: 0.68rem;
-            font-weight: 800;
-        }
-        .summary-warning-source {
-            margin-top: 4px;
-            color: var(--app-muted);
-            font-size: 0.66rem;
-            font-weight: 760;
-        }
         .summary-warning-badge {
+            flex: 0 0 auto;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            margin-top: 9px;
-            min-height: 27px;
-            padding: 4px 10px 5px;
+            min-height: 25px;
+            padding: 4px 9px;
             border-radius: 999px;
             border: 1px solid var(--app-border);
             color: var(--app-muted);
@@ -1268,112 +1178,22 @@ def _render_styles() -> None:
             font-size: 0.75rem;
             font-weight: 900;
             line-height: 1;
-        }
-        .summary-warning-trigger {
-            margin-top: 9px;
-            color: var(--app-heading);
-            font-size: 0.82rem;
-            font-weight: 900;
-        }
-        .summary-warning-detail {
-            margin-top: 4px;
-            min-height: 2.5em;
-            color: var(--app-muted);
-            font-size: 0.68rem;
-            font-weight: 690;
-            line-height: 1.25;
-        }
-        .summary-warning-mini {
-            position: relative;
-            height: 66px;
-            margin-top: 9px;
-            overflow: hidden;
-            border: 1px solid var(--app-border);
-            border-radius: 7px;
-            background: var(--summary-panel-bg);
-        }
-        .summary-warning-band,
-        .summary-warning-path {
-            position: absolute;
-            left: 10px;
-            right: 10px;
-            height: 2px;
-            border-radius: 999px;
-        }
-        .summary-warning-band-upper {
-            top: 18px;
-            background: var(--token-warning);
-        }
-        .summary-warning-band-mid {
-            top: 33px;
-            background: var(--app-muted);
-            opacity: 0.72;
-        }
-        .summary-warning-band-lower {
-            top: 50px;
-            background: var(--token-loss);
-        }
-        .summary-warning-path {
-            top: 31px;
-            height: 3px;
-            background: var(--token-primary);
-            transform-origin: center;
-        }
-        .summary-warning-dot {
-            position: absolute;
-            right: 8px;
-            width: 11px;
-            height: 11px;
-            border-radius: 50%;
-            background: var(--token-neutral-value);
-        }
-        .summary-warning-buy {
-            border-color: color-mix(in srgb, var(--token-profit) 55%, var(--app-border));
+            white-space: nowrap;
         }
         .summary-warning-buy .summary-warning-badge {
             border-color: var(--token-profit);
             color: var(--token-profit);
             background: var(--token-profit-soft);
         }
-        .summary-warning-buy .summary-warning-trigger {
-            color: var(--token-profit);
-        }
-        .summary-warning-buy .summary-warning-path {
-            transform: translateY(-8px) rotate(-7deg);
-        }
-        .summary-warning-buy .summary-warning-dot {
-            top: 13px;
-            background: var(--token-profit);
-        }
-        .summary-warning-sell {
-            border-color: color-mix(in srgb, var(--token-loss) 55%, var(--app-border));
-        }
         .summary-warning-sell .summary-warning-badge {
             border-color: var(--token-loss);
             color: var(--token-loss);
             background: var(--token-loss-soft);
         }
-        .summary-warning-sell .summary-warning-trigger {
-            color: var(--token-loss);
-        }
-        .summary-warning-sell .summary-warning-path {
-            transform: translateY(10px) rotate(7deg);
-        }
-        .summary-warning-sell .summary-warning-dot {
-            top: 45px;
-            background: var(--token-loss);
-        }
         .summary-warning-clear .summary-warning-badge {
             border-color: var(--token-success);
             color: var(--token-success);
             background: var(--token-success-soft);
-        }
-        .summary-warning-clear .summary-warning-dot {
-            top: 29px;
-            background: var(--token-success);
-        }
-        .summary-warning-neutral .summary-warning-dot {
-            top: 29px;
         }
         .summary-mobile-holdings { display: none; }
         .summary-table-wrap { margin-top: 16px; overflow: hidden; }
