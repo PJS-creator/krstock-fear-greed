@@ -49,6 +49,16 @@ HOLDING_COLUMNS = [
     "source",
     "error_message",
 ]
+HOLDING_METADATA_FIELDS = (
+    "sector",
+    "sector_key",
+    "industry",
+    "industry_key",
+    "quote_type",
+    "metadata_source",
+    "metadata_fetched_at",
+    "metadata_error",
+)
 
 
 @dataclass(frozen=True)
@@ -237,6 +247,14 @@ def normalize_holding_row(row: Mapping[str, Any]) -> dict[str, object]:
         "intraday_prices": intraday_prices,
         "intraday_provider": clean_text(row.get("intraday_provider")) or None,
         "intraday_fetched_at": clean_text(row.get("intraday_fetched_at")) or None,
+        "sector": clean_text(row.get("sector") or row.get("sector_name")) or None,
+        "sector_key": clean_text(row.get("sector_key")) or None,
+        "industry": clean_text(row.get("industry")) or None,
+        "industry_key": clean_text(row.get("industry_key")) or None,
+        "quote_type": clean_text(row.get("quote_type")) or None,
+        "metadata_source": clean_text(row.get("metadata_source")) or None,
+        "metadata_fetched_at": clean_text(row.get("metadata_fetched_at")) or None,
+        "metadata_error": clean_text(row.get("metadata_error")) or None,
     }
 
 
