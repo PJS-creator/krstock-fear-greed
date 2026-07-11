@@ -56,12 +56,12 @@ def _record_from_row(row: Mapping[str, Any]) -> PortfolioHistoryRecord:
 
 
 class SupabasePortfolioHistoryStore:
-    def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_HISTORY_TABLE_NAME) -> None:
+    def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_HISTORY_TABLE_NAME, client: Any | None = None) -> None:
         if not has_supabase_credentials(config):
             raise PortfolioHistoryStoreError("Supabase storage is not configured")
         self._table_name = table_name
         try:
-            self._client = create_supabase_client(config)
+            self._client = client if client is not None else create_supabase_client(config)
         except PortfolioStoreError as exc:
             raise PortfolioHistoryStoreError("Failed to create Supabase client") from exc
 
@@ -70,18 +70,10 @@ class SupabasePortfolioHistoryStore:
 
     def save_snapshot(self, record: PortfolioHistoryRecord) -> PortfolioHistoryRecord:
         try:
-            existing = (
-                self._table()
-                .select("*")
-                .eq("owner_id", record.owner_id)
-                .eq("portfolio_name", record.portfolio_name)
-                .eq("fingerprint", record.fingerprint)
-                .limit(1)
-                .execute()
-            )
-            if existing.data:
-                return _record_from_row(existing.data[0])
-            result = self._table().insert(_record_to_row(record)).execute()
+            result = self._table().upsert(
+                _record_to_row(record),
+                on_conflict="owner_id,portfolio_name,fingerprint",
+            ).execute()
         except Exception as exc:
             raise PortfolioHistoryStoreError("Failed to save portfolio history snapshot") from exc
         rows = result.data or [_record_to_row(record)]
@@ -111,7 +103,7 @@ class SupabasePortfolioHistoryStore:
         return [_record_from_row(row) for row in (result.data or [])]
 
 
-def build_supabase_history_store(config: SupabaseStorageConfig) -> SupabasePortfolioHistoryStore | None:
+def build_supabase_history_store(config: SupabaseStorageConfig, *, client: Any | None = None) -> SupabasePortfolioHistoryStore | None:
     if not has_supabase_credentials(config):
         return None
-    return SupabasePortfolioHistoryStore(config)
+    return SupabasePortfolioHistoryStore(config, client=client)

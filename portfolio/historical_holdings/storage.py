@@ -145,12 +145,12 @@ def _record_from_row(row: Mapping[str, Any]) -> HistoricalScheduleRecord:
 
 
 class SupabaseHistoricalScheduleStore:
-    def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_SCHEDULE_TABLE_NAME) -> None:
+    def __init__(self, config: SupabaseStorageConfig, *, table_name: str = DEFAULT_SCHEDULE_TABLE_NAME, client: Any | None = None) -> None:
         if not has_supabase_credentials(config):
             raise HistoricalScheduleStoreError("Supabase storage is not configured")
         self._table_name = table_name
         try:
-            self._client = create_supabase_client(config)
+            self._client = client if client is not None else create_supabase_client(config)
         except PortfolioStoreError as exc:
             raise HistoricalScheduleStoreError("Failed to create Supabase client") from exc
 
@@ -189,13 +189,11 @@ class SupabaseHistoricalScheduleStore:
         clean_name = schedule_name.strip()
         if not clean_name:
             raise HistoricalScheduleStoreError("schedule_name is required")
-        existing = self.get_schedule(owner_id, clean_name)
         now = _utc_now_iso()
         row = {
             "owner_id": owner_id,
             "schedule_name": clean_name,
             "payload_json": dict(payload_json),
-            "created_at": existing.created_at if existing else now,
             "updated_at": now,
         }
         try:
@@ -213,7 +211,7 @@ class SupabaseHistoricalScheduleStore:
         return bool(result.data)
 
 
-def build_supabase_historical_schedule_store(config: SupabaseStorageConfig) -> SupabaseHistoricalScheduleStore | None:
+def build_supabase_historical_schedule_store(config: SupabaseStorageConfig, *, client: Any | None = None) -> SupabaseHistoricalScheduleStore | None:
     if not has_supabase_credentials(config):
         return None
-    return SupabaseHistoricalScheduleStore(config)
+    return SupabaseHistoricalScheduleStore(config, client=client)

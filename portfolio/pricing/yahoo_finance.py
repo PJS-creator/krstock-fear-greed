@@ -198,8 +198,8 @@ class YFinanceQuoteProvider:
         return parse_yfinance_history_frame(normalized_symbol, frame)
 
 
-def build_yfinance_provider() -> YFinanceQuoteProvider:
-    return YFinanceQuoteProvider()
+def build_yfinance_provider(*, timeout_seconds: float = 10.0) -> YFinanceQuoteProvider:
+    return YFinanceQuoteProvider(timeout_seconds=timeout_seconds)
 
 
 def _intraday_symbol_candidates(symbol: object, market: str | None) -> list[str]:
@@ -277,8 +277,8 @@ class YFinanceIntradayPriceProvider:
         raise PriceProviderError(f"yfinance 당일 분봉 데이터 조회 실패{suffix}")
 
 
-def build_yfinance_intraday_provider() -> YFinanceIntradayPriceProvider:
-    return YFinanceIntradayPriceProvider()
+def build_yfinance_intraday_provider(*, timeout_seconds: float = 10.0) -> YFinanceIntradayPriceProvider:
+    return YFinanceIntradayPriceProvider(timeout_seconds=timeout_seconds)
 
 
 class YFinanceFxProvider:
@@ -315,8 +315,8 @@ class YFinanceFxProvider:
         )
 
 
-def build_yfinance_fx_provider() -> YFinanceFxProvider:
-    return YFinanceFxProvider()
+def build_yfinance_fx_provider(*, timeout_seconds: float = 10.0) -> YFinanceFxProvider:
+    return YFinanceFxProvider(timeout_seconds=timeout_seconds)
 
 
 def parse_yahoo_chart_usd_krw_response(payload: Mapping[str, Any]) -> ProviderFxRate:

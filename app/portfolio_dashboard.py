@@ -39,14 +39,12 @@ def _stop_if_unsupported_python_runtime() -> None:
     st.stop()
 
 
-_stop_if_unsupported_python_runtime()
-
 from app.ui.auth_persistence import delete_remember_cookie, get_cookie_manager, get_remember_cookie, set_remember_cookie
 from app.ui.components import render_app_header, render_price_update_log, safe_render_section
 from app.ui.data_portability import render_data_portability_tools
 from app.ui.formatters import format_kst, format_number, format_price, full_krw
 from app.ui.holdings import render_holdings_table
-from app.ui.history import render_history_tab
+from app.ui.history import clear_history_cache, render_history_tab
 from app.ui.investment_summary_card import render_investment_summary_card
 from app.ui.journal import render_journal_tab
 from app.ui.onboarding import SAMPLE_PORTFOLIO_ACTIVE_KEY, render_onboarding
@@ -110,6 +108,7 @@ from portfolio.storage import (
     PortfolioStoreError,
     build_target_allocation_store,
     build_supabase_store,
+    create_supabase_client,
     has_supabase_credentials,
     save_target_allocations_if_available,
     serialize_portfolio_payload,
@@ -131,11 +130,17 @@ DEFAULT_PORTFOLIO_KEY = "authenticated_default_portfolio"
 AUTH_ACCESS_TOKEN_KEY = "authenticated_access_token"
 AUTH_REFRESH_TOKEN_KEY = "authenticated_refresh_token"
 AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY = "authenticated_session_refresh_last_attempt_at"
+PUBLIC_AUTH_STORE_KEY = "_public_auth_store"
+PUBLIC_AUTH_STORE_CONFIG_KEY = "_public_auth_store_config"
+SUPABASE_STORES_KEY = "_supabase_stores"
+SUPABASE_STORES_CONFIG_KEY = "_supabase_stores_config"
 PORTFOLIO_NAME_KEY = "portfolio_name"
 PORTFOLIO_NAME_INPUT_KEY = "portfolio_name_input"
 PENDING_PORTFOLIO_NAME_KEY = "pending_portfolio_name"
 PENDING_PORTFOLIO_STATE_KEY = "pending_portfolio_state"
 SAVED_SIGNATURE_KEY = "saved_portfolio_signature"
+SAVED_TARGET_ALLOCATIONS_SIGNATURE_KEY = "saved_target_allocations_signature"
+SAVED_VALUATION_SIGNATURE_KEY = "saved_valuation_signature"
 LAST_SAVED_STATE_KEY = "last_saved_portfolio_state"
 MARK_CLEAN_KEY = "mark_portfolio_clean"
 SAVE_STATUS_KEY = "portfolio_save_status_message"
@@ -143,6 +148,10 @@ PRICE_REFRESH_MODE_KEY = "price_refresh_mode"
 PRICE_REFRESH_IN_PROGRESS_KEY = "price_refresh_in_progress"
 PRICE_REFRESH_STARTED_AT_KEY = "price_refresh_started_at"
 PRICE_REFRESH_STALE_SECONDS = 180.0
+PRICE_REFRESH_BUDGET_SECONDS = 24.0
+KIS_REQUEST_TIMEOUT_SECONDS = 3.0
+YFINANCE_REQUEST_TIMEOUT_SECONDS = 5.0
+INTRADAY_REQUEST_TIMEOUT_SECONDS = 3.0
 AUTO_PRICE_REFRESH_ENABLED_KEY = "auto_price_refresh_enabled"
 AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY = "auto_price_refresh_last_attempt_at"
 AUTO_PRICE_REFRESH_LAST_RESULT_KEY = "auto_price_refresh_last_result"
@@ -284,6 +293,21 @@ def _current_portfolio_signature() -> str:
     return dirty_signature(_current_portfolio_state())
 
 
+def _current_target_allocations_signature() -> str:
+    return dirty_signature({"target_allocations": st.session_state.get("target_allocations", [])})
+
+
+def _current_valuation_signature() -> str:
+    return dirty_signature(
+        {
+            "holdings_rows": st.session_state.get("holdings_rows", []),
+            "cash_krw": st.session_state.get("cash_krw", 0.0),
+            "cash_usd": st.session_state.get("cash_usd", 0.0),
+            "usd_krw": st.session_state.get("usd_krw", 1380.0),
+        }
+    )
+
+
 def _current_portfolio_state() -> dict[str, object]:
     return {
         "portfolio_name": _clean_portfolio_name(st.session_state.get(PORTFOLIO_NAME_KEY)),
@@ -305,6 +329,8 @@ def _current_portfolio_state() -> dict[str, object]:
 
 def _mark_portfolio_clean() -> None:
     st.session_state[SAVED_SIGNATURE_KEY] = _current_portfolio_signature()
+    st.session_state[SAVED_TARGET_ALLOCATIONS_SIGNATURE_KEY] = _current_target_allocations_signature()
+    st.session_state[SAVED_VALUATION_SIGNATURE_KEY] = _current_valuation_signature()
     st.session_state[LAST_SAVED_STATE_KEY] = _current_portfolio_state()
 
 
@@ -403,6 +429,10 @@ def _logout(cookie_manager=None) -> None:
         AUTH_ACCESS_TOKEN_KEY,
         AUTH_REFRESH_TOKEN_KEY,
         AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY,
+        PUBLIC_AUTH_STORE_KEY,
+        PUBLIC_AUTH_STORE_CONFIG_KEY,
+        SUPABASE_STORES_KEY,
+        SUPABASE_STORES_CONFIG_KEY,
         AUTO_LOAD_ATTEMPTED_KEY,
         AUTO_PRICE_REFRESHED_KEY,
         AUTO_PRICE_REFRESH_ENABLED_KEY,
@@ -464,11 +494,21 @@ def _read_public_auth_settings() -> bool:
     return enabled
 
 
-@st.cache_resource(show_spinner=False)
 def _build_public_auth_store(storage_config) -> SupabaseAuthStore | None:
-    if not storage_config.supabase_url or not storage_config.publishable_key:
+    auth_config = storage_config.with_auth_session(owner_id=None, access_token=None, refresh_token=None)
+    if not auth_config.supabase_url or not auth_config.publishable_key:
+        st.session_state.pop(PUBLIC_AUTH_STORE_KEY, None)
+        st.session_state.pop(PUBLIC_AUTH_STORE_CONFIG_KEY, None)
         return None
-    return SupabaseAuthStore(storage_config)
+    config_key = (auth_config.supabase_url, auth_config.publishable_key)
+    if st.session_state.get(PUBLIC_AUTH_STORE_CONFIG_KEY) == config_key:
+        cached_store = st.session_state.get(PUBLIC_AUTH_STORE_KEY)
+        if cached_store is not None:
+            return cached_store
+    store = SupabaseAuthStore(auth_config)
+    st.session_state[PUBLIC_AUTH_STORE_CONFIG_KEY] = config_key
+    st.session_state[PUBLIC_AUTH_STORE_KEY] = store
+    return store
 
 
 def _secret_text(name: str) -> str:
@@ -488,7 +528,12 @@ def _secret_text_any(*names: str) -> str:
 
 @st.cache_resource(show_spinner=False)
 def _build_optional_kis_quote_provider(app_key: str, app_secret: str, env: str):
-    return build_kis_quote_provider(app_key, app_secret, env=env or "real")
+    return build_kis_quote_provider(
+        app_key,
+        app_secret,
+        env=env or "real",
+        timeout_seconds=KIS_REQUEST_TIMEOUT_SECONDS,
+    )
 
 
 def _read_kis_quote_provider():
@@ -959,20 +1004,29 @@ def _render_mobile_public_auth_status(*, public_auth_enabled: bool = False) -> N
     )
 
 
-@st.cache_resource(show_spinner=False)
 def _build_stores(storage_config):
     if not has_supabase_credentials(storage_config):
+        st.session_state.pop(SUPABASE_STORES_KEY, None)
+        st.session_state.pop(SUPABASE_STORES_CONFIG_KEY, None)
         return None, None, None, None
+    if st.session_state.get(SUPABASE_STORES_CONFIG_KEY) == storage_config:
+        cached_stores = st.session_state.get(SUPABASE_STORES_KEY)
+        if cached_stores is not None:
+            return cached_stores
     try:
-        return (
-            build_supabase_store(storage_config),
-            build_supabase_history_store(storage_config),
-            build_supabase_historical_schedule_store(storage_config),
-            build_target_allocation_store(storage_config),
+        client = create_supabase_client(storage_config)
+        stores = (
+            build_supabase_store(storage_config, client=client),
+            build_supabase_history_store(storage_config, client=client),
+            build_supabase_historical_schedule_store(storage_config, client=client),
+            build_target_allocation_store(storage_config, client=client),
         )
     except (PortfolioStoreError, HistoricalScheduleStoreError, RuntimeError) as exc:
         st.sidebar.warning(f"Supabase 저장소를 초기화할 수 없습니다: {exc}")
         return None, None, None, None
+    st.session_state[SUPABASE_STORES_CONFIG_KEY] = storage_config
+    st.session_state[SUPABASE_STORES_KEY] = stores
+    return stores
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -1056,15 +1110,32 @@ def _current_portfolio_payload():
 
 def _persist_current_portfolio(owner_id, store, target_allocation_store=None) -> None:
     portfolio_name = _current_portfolio_name()
-    store.save_portfolio(owner_id, portfolio_name, _current_portfolio_payload())
-    save_target_allocations_if_available(
-        target_allocation_store,
-        owner_id,
-        portfolio_name,
-        st.session_state.get("target_allocations", []),
+    target_allocations_changed = (
+        st.session_state.get(SAVED_TARGET_ALLOCATIONS_SIGNATURE_KEY) != _current_target_allocations_signature()
     )
-    st.cache_data.clear()
+    store.save_portfolio(owner_id, portfolio_name, _current_portfolio_payload())
+    if target_allocations_changed:
+        save_target_allocations_if_available(
+            target_allocation_store,
+            owner_id,
+            portfolio_name,
+            st.session_state.get("target_allocations", []),
+        )
+    list_portfolios_cached.clear()
     _mark_portfolio_clean()
+
+
+def _save_history_snapshot_safely(history_store, record) -> bool:
+    if history_store is None:
+        return False
+    try:
+        history_store.save_snapshot(record)
+    except Exception as exc:
+        LOGGER.exception("history_snapshot_save_failed type=%s message=%s", type(exc).__name__, exc)
+        st.session_state[ACCOUNT_STATUS_KEY] = "포트폴리오는 저장했지만 자산추이 기록을 남기지 못했습니다. 다음 변경 때 다시 시도합니다."
+        return False
+    clear_history_cache()
+    return True
 
 
 def _save_current_portfolio(owner_id, store, target_allocation_store, history_store, metrics) -> None:
@@ -1072,10 +1143,12 @@ def _save_current_portfolio(owner_id, store, target_allocation_store, history_st
         st.warning("Supabase 저장소가 설정되지 않아 저장할 수 없습니다.")
         return
     portfolio_name = _current_portfolio_name()
+    valuation_changed = st.session_state.get(SAVED_VALUATION_SIGNATURE_KEY) != _current_valuation_signature()
     try:
         _persist_current_portfolio(owner_id, store, target_allocation_store)
-        if history_store is not None:
-            history_store.save_snapshot(
+        if valuation_changed:
+            _save_history_snapshot_safely(
+                history_store,
                 build_history_record(
                     owner_id=owner_id,
                     portfolio_name=portfolio_name,
@@ -1104,11 +1177,13 @@ def _auto_save_public_portfolio(owner_id, store, target_allocation_store, histor
     if not _portfolio_is_dirty():
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장됨"
         return
+    valuation_changed = st.session_state.get(SAVED_VALUATION_SIGNATURE_KEY) != _current_valuation_signature()
     try:
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 중"
         _persist_current_portfolio(owner_id, store, target_allocation_store)
-        if history_store is not None:
-            history_store.save_snapshot(
+        if valuation_changed:
+            _save_history_snapshot_safely(
+                history_store,
                 build_history_record(
                     owner_id=owner_id,
                     portfolio_name=PUBLIC_PORTFOLIO_NAME,
@@ -1136,9 +1211,10 @@ def _refresh_price_rows(
     on_progress=None,
 ) -> bool:
     kis_provider = _read_kis_quote_provider()
-    us_provider = FallbackQuoteProvider([kis_provider, build_yfinance_provider()]) if kis_provider else build_yfinance_provider()
+    yfinance_provider = build_yfinance_provider(timeout_seconds=YFINANCE_REQUEST_TIMEOUT_SECONDS)
+    us_provider = FallbackQuoteProvider([kis_provider, yfinance_provider]) if kis_provider else yfinance_provider
     korea_provider = FallbackQuoteProvider([kis_provider, build_korea_quote_provider()]) if kis_provider else build_korea_quote_provider()
-    intraday_provider = build_yfinance_intraday_provider() if include_intraday else None
+    intraday_provider = build_yfinance_intraday_provider(timeout_seconds=INTRADAY_REQUEST_TIMEOUT_SECONDS) if include_intraday else None
     all_rows = list(st.session_state.holdings_rows)
     target_rows = list(select_price_refresh_rows(all_rows, mode))
     if not target_rows:
@@ -1151,6 +1227,7 @@ def _refresh_price_rows(
         intraday_provider=intraday_provider,
         cache=TTLQuoteCache() if mode == "전체 강제 재조회" else None,
         on_progress=on_progress,
+        max_refresh_seconds=PRICE_REFRESH_BUDGET_SECONDS,
     )
     updated_by_key = {(str(row.get("market")), str(row.get("ticker"))): row for row in updated_rows}
     st.session_state.holdings_rows = [updated_by_key.get((str(row.get("market")), str(row.get("ticker"))), row) for row in all_rows]
@@ -1160,7 +1237,8 @@ def _refresh_price_rows(
         st.session_state.last_price_refresh_at = max(fetched_times)
     if owner_id is not None and history_store is not None and any(status.status in {"updated", "cached"} for status in statuses):
         metrics = _current_metrics()
-        history_store.save_snapshot(
+        _save_history_snapshot_safely(
+            history_store,
             build_history_record(
                 owner_id=owner_id,
                 portfolio_name=_current_portfolio_name(),
@@ -1168,7 +1246,6 @@ def _refresh_price_rows(
                 metrics=metrics,
             )
         )
-        st.cache_data.clear()
     return True
 
 
@@ -1182,6 +1259,7 @@ def _refresh_prices(
     public_auth_enabled: bool = False,
     show_progress: bool = True,
     quiet: bool = False,
+    include_intraday: bool = True,
 ) -> bool:
     holdings_rows = list(st.session_state.get("holdings_rows") or [])
     has_usd_cash = float(st.session_state.get("cash_usd") or 0.0) > 0
@@ -1199,7 +1277,13 @@ def _refresh_prices(
 
     refreshed = False
     try:
-        refreshed = _refresh_price_rows(owner_id, history_store, mode=mode, include_intraday=True, on_progress=update_progress) if holdings_rows else False
+        refreshed = _refresh_price_rows(
+            owner_id,
+            history_store,
+            mode=mode,
+            include_intraday=include_intraday,
+            on_progress=update_progress,
+        ) if holdings_rows else False
     finally:
         if progress is not None:
             progress.empty()
@@ -1844,6 +1928,7 @@ def _maybe_run_periodic_price_refresh(
             public_auth_enabled=public_auth_enabled,
             show_progress=False,
             quiet=True,
+            include_intraday=False,
         )
         summary = aggregate_price_statuses(st.session_state.get("price_update_statuses", []))
         st.session_state[AUTO_PRICE_REFRESH_LAST_RESULT_KEY] = (
@@ -2154,47 +2239,70 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
         safe_render_section("리밸런싱", lambda: _render_rebalancing_section(metrics))
 
 
-st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
-_initialize_theme_state()
-inject_styles(_current_theme_mode())
-public_auth_enabled = _read_public_auth_settings()
-if public_auth_enabled:
-    inject_public_cloud_chrome_guard()
-_initialize_session_state(public_auth_enabled=public_auth_enabled)
-security_config = _read_security_config()
-storage_config = _read_storage_config(public_auth_enabled=public_auth_enabled)
-if public_auth_enabled and not _is_authenticated():
-    if _restore_public_auth_session(storage_config):
-        storage_config = _read_storage_config(public_auth_enabled=True)
-if public_auth_enabled and _is_authenticated():
-    if _refresh_public_auth_session_if_due(storage_config):
-        storage_config = _read_storage_config(public_auth_enabled=True)
-if public_auth_enabled and not _is_authenticated():
-    _render_public_auth_gate(storage_config)
-if not public_auth_enabled and should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
-    _render_login_form(security_config)
-if public_auth_enabled:
-    _handle_public_logout_query()
+def run_dashboard(*, public_auth_enabled: bool | None = None) -> None:
+    _stop_if_unsupported_python_runtime()
+    st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
+    _initialize_theme_state()
+    inject_styles(_current_theme_mode())
+    if public_auth_enabled is None:
+        public_auth_enabled = _read_public_auth_settings()
+    if public_auth_enabled:
+        inject_public_cloud_chrome_guard()
+    _initialize_session_state(public_auth_enabled=public_auth_enabled)
+    security_config = _read_security_config()
+    storage_config = _read_storage_config(public_auth_enabled=public_auth_enabled)
+    if public_auth_enabled and not _is_authenticated():
+        if _restore_public_auth_session(storage_config):
+            storage_config = _read_storage_config(public_auth_enabled=True)
+    if public_auth_enabled and _is_authenticated():
+        if _refresh_public_auth_session_if_due(storage_config):
+            storage_config = _read_storage_config(public_auth_enabled=True)
+    if public_auth_enabled and not _is_authenticated():
+        _render_public_auth_gate(storage_config)
+    if not public_auth_enabled and should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
+        _render_login_form(security_config)
+    if public_auth_enabled:
+        _handle_public_logout_query()
 
-portfolio_store, history_store, historical_schedule_store, target_allocation_store = _build_stores(storage_config)
-owner_id = _resolve_owner_id(storage_config)
-_auto_load_account_portfolio(owner_id, portfolio_store, target_allocation_store)
-if not public_auth_enabled:
-    _auto_refresh_loaded_prices(owner_id, portfolio_store, target_allocation_store, history_store)
-_render_sidebar(security_config, owner_id, portfolio_store, public_auth_enabled=public_auth_enabled)
-_render_auto_refresh_runner(security_config, owner_id, history_store, public_auth_enabled=public_auth_enabled)
-_render_security_status(security_config, public_auth_enabled=public_auth_enabled)
-if not public_auth_enabled and should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
-    _render_login_form(security_config)
-metrics = _current_metrics()
-if public_auth_enabled:
-    _auto_save_public_portfolio(owner_id, portfolio_store, target_allocation_store, history_store, metrics)
-_render_header(security_config, owner_id, portfolio_store, target_allocation_store, history_store, metrics, public_auth_enabled=public_auth_enabled)
-_render_mobile_public_auth_status(public_auth_enabled=public_auth_enabled)
-_render_status_messages()
+    portfolio_store, history_store, historical_schedule_store, target_allocation_store = _build_stores(storage_config)
+    owner_id = _resolve_owner_id(storage_config)
+    _auto_load_account_portfolio(owner_id, portfolio_store, target_allocation_store)
+    if not public_auth_enabled:
+        _auto_refresh_loaded_prices(owner_id, portfolio_store, target_allocation_store, history_store)
+    _render_sidebar(security_config, owner_id, portfolio_store, public_auth_enabled=public_auth_enabled)
+    _render_auto_refresh_runner(security_config, owner_id, history_store, public_auth_enabled=public_auth_enabled)
+    _render_security_status(security_config, public_auth_enabled=public_auth_enabled)
+    if not public_auth_enabled and should_lock_manual_mode(security_config, is_authenticated=_is_authenticated()):
+        _render_login_form(security_config)
+    metrics = _current_metrics()
+    if public_auth_enabled:
+        _auto_save_public_portfolio(owner_id, portfolio_store, target_allocation_store, history_store, metrics)
+    _render_header(
+        security_config,
+        owner_id,
+        portfolio_store,
+        target_allocation_store,
+        history_store,
+        metrics,
+        public_auth_enabled=public_auth_enabled,
+    )
+    _render_mobile_public_auth_status(public_auth_enabled=public_auth_enabled)
+    _render_status_messages()
 
-if public_auth_enabled:
-    safe_render_section("온보딩", lambda: render_onboarding(portfolio_snapshot=_current_portfolio_payload()))
-    _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)
-else:
-    _render_private_dashboard_sections(security_config, owner_id, portfolio_store, target_allocation_store, history_store, historical_schedule_store, metrics)
+    if public_auth_enabled:
+        safe_render_section("온보딩", lambda: render_onboarding(portfolio_snapshot=_current_portfolio_payload()))
+        _render_public_dashboard_sections(security_config, owner_id, portfolio_store, history_store, historical_schedule_store, metrics)
+    else:
+        _render_private_dashboard_sections(
+            security_config,
+            owner_id,
+            portfolio_store,
+            target_allocation_store,
+            history_store,
+            historical_schedule_store,
+            metrics,
+        )
+
+
+if __name__ == "__main__":
+    run_dashboard()

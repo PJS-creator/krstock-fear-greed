@@ -177,6 +177,46 @@ def test_korea_refresh_without_last_price_marks_failed():
     assert statuses[0].status == QUOTE_STATUS_FAILED
 
 
+def test_quote_refresh_budget_keeps_remaining_last_prices_without_more_requests():
+    class Clock:
+        value = 0.0
+
+        def now(self):
+            return self.value
+
+    class SlowProvider:
+        def __init__(self, clock):
+            self.clock = clock
+            self.calls = []
+
+        def get_quote(self, symbol):
+            self.calls.append(symbol)
+            self.clock.value = 30.0
+            return ProviderQuote.now(symbol=symbol, price=101.0, previous_close=100.0, provider="slow")
+
+    clock = Clock()
+    provider = SlowProvider(clock)
+    rows = [
+        {"market": "US", "ticker": "AAA", "currency": "USD", "quantity": 1, "current_price": 100, "previous_close": 99},
+        {"market": "US", "ticker": "BBB", "currency": "USD", "quantity": 1, "current_price": 200, "previous_close": 198},
+    ]
+
+    updated_rows, statuses = refresh_holding_quotes(
+        rows,
+        provider,
+        cache=TTLQuoteCache(),
+        request_interval_seconds=0,
+        now_fn=clock.now,
+        max_refresh_seconds=24.0,
+    )
+
+    assert provider.calls == ["AAA"]
+    assert updated_rows[0]["current_price"] == pytest.approx(101.0)
+    assert updated_rows[1]["current_price"] == pytest.approx(200.0)
+    assert statuses[1].status == QUOTE_STATUS_STALE
+    assert statuses[1].error_message == "가격 조회 시간 제한"
+
+
 def test_korea_display_name_lookup_success_and_failure():
     listing = pd.DataFrame({"Code": ["005930"], "Name": ["삼성전자"]})
     provider = FinanceDataReaderKoreaQuoteProvider(

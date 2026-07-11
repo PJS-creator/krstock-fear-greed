@@ -472,11 +472,14 @@ def test_kis_provider_tries_us_exchange_candidates_until_success():
         us_exchanges=("NAS", "NYS"),
     )
     quote = provider.get_quote("QURE")
+    second_quote = provider.get_quote("QURE")
 
     assert quote.symbol == "QURE"
     assert quote.price == pytest.approx(41.25)
-    assert any("EXCD=NAS" in url for url in urls)
-    assert any("EXCD=NYS" in url for url in urls)
+    assert second_quote.price == pytest.approx(41.25)
+    assert sum(url.endswith("/oauth2/tokenP") for url in urls) == 1
+    assert sum("EXCD=NAS" in url for url in urls) == 1
+    assert sum("EXCD=NYS" in url for url in urls) == 2
 
 
 def test_kis_domestic_futures_intraday_response_parsing_sorts_points():

@@ -468,7 +468,7 @@ def test_public_header_refresh_failure_keeps_app_shell(monkeypatch):
     def fail_refresh(*args, **kwargs):
         raise RuntimeError("provider down")
 
-    monkeypatch.setattr("portfolio.pricing.refresh_holding_quotes", fail_refresh)
+    monkeypatch.setattr("app.portfolio_dashboard.refresh_holding_quotes", fail_refresh)
     at = AppTest.from_file("app/public_portfolio_dashboard.py")
     at.session_state["is_authenticated"] = True
     at.session_state["authenticated_account_id"] = "demo@example.com"

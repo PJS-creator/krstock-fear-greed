@@ -873,10 +873,14 @@ __CSS_VARS__
         .st-key-public_section_tabs div[role="radiogroup"] label:has(input:checked)::after {
             background: var(--app-primary);
         }
-        .st-key-public_input_tabs {
+        .st-key-public_input_tabs,
+        .st-key-history_analysis_tabs,
+        .st-key-data_portability_tabs {
             margin: 0 0 var(--token-space-5);
         }
-        .st-key-public_input_tabs div[role="radiogroup"] {
+        .st-key-public_input_tabs div[role="radiogroup"],
+        .st-key-history_analysis_tabs div[role="radiogroup"],
+        .st-key-data_portability_tabs div[role="radiogroup"] {
             display: grid !important;
             grid-template-columns: repeat(4, minmax(0, 1fr));
             gap: 0;
@@ -885,7 +889,12 @@ __CSS_VARS__
             border-bottom: 1px solid var(--app-border);
             background: transparent;
         }
-        .st-key-public_input_tabs div[role="radiogroup"] label {
+        .st-key-data_portability_tabs div[role="radiogroup"] {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .st-key-public_input_tabs div[role="radiogroup"] label,
+        .st-key-history_analysis_tabs div[role="radiogroup"] label,
+        .st-key-data_portability_tabs div[role="radiogroup"] label {
             position: relative;
             width: 100%;
             min-width: 0;
@@ -900,7 +909,9 @@ __CSS_VARS__
             font-weight: 760;
             white-space: nowrap;
         }
-        .st-key-public_input_tabs div[role="radiogroup"] label::after {
+        .st-key-public_input_tabs div[role="radiogroup"] label::after,
+        .st-key-history_analysis_tabs div[role="radiogroup"] label::after,
+        .st-key-data_portability_tabs div[role="radiogroup"] label::after {
             content: "";
             position: absolute;
             left: 12%;
@@ -910,15 +921,21 @@ __CSS_VARS__
             border-radius: 999px 999px 0 0;
             background: transparent;
         }
-        .st-key-public_input_tabs div[role="radiogroup"] label:hover {
+        .st-key-public_input_tabs div[role="radiogroup"] label:hover,
+        .st-key-history_analysis_tabs div[role="radiogroup"] label:hover,
+        .st-key-data_portability_tabs div[role="radiogroup"] label:hover {
             background: transparent;
             color: var(--app-heading);
         }
-        .st-key-public_input_tabs div[role="radiogroup"] label:has(input:checked) {
+        .st-key-public_input_tabs div[role="radiogroup"] label:has(input:checked),
+        .st-key-history_analysis_tabs div[role="radiogroup"] label:has(input:checked),
+        .st-key-data_portability_tabs div[role="radiogroup"] label:has(input:checked) {
             background: transparent;
             color: var(--app-heading);
         }
-        .st-key-public_input_tabs div[role="radiogroup"] label:has(input:checked)::after {
+        .st-key-public_input_tabs div[role="radiogroup"] label:has(input:checked)::after,
+        .st-key-history_analysis_tabs div[role="radiogroup"] label:has(input:checked)::after,
+        .st-key-data_portability_tabs div[role="radiogroup"] label:has(input:checked)::after {
             background: var(--app-primary);
         }
         .app-header-panel {
@@ -1057,13 +1074,21 @@ __CSS_VARS__
                 letter-spacing: 0;
                 scroll-snap-align: start;
             }
-            .st-key-public_input_tabs {
+            .st-key-public_input_tabs,
+            .st-key-history_analysis_tabs,
+            .st-key-data_portability_tabs {
                 margin: 0 0 0.85rem;
             }
-            .st-key-public_input_tabs div[role="radiogroup"] {
+            .st-key-public_input_tabs div[role="radiogroup"],
+            .st-key-history_analysis_tabs div[role="radiogroup"] {
                 grid-template-columns: repeat(4, minmax(0, 1fr));
             }
-            .st-key-public_input_tabs div[role="radiogroup"] label {
+            .st-key-data_portability_tabs div[role="radiogroup"] {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .st-key-public_input_tabs div[role="radiogroup"] label,
+            .st-key-history_analysis_tabs div[role="radiogroup"] label,
+            .st-key-data_portability_tabs div[role="radiogroup"] label {
                 min-height: 2.16rem;
                 padding: 0 var(--token-space-1) var(--token-space-1);
                 font-size: clamp(0.72rem, 2.85vw, 0.82rem);

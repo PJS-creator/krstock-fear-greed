@@ -17,6 +17,13 @@ PERIOD_OPTIONS: dict[str, HistoryPeriod] = {
     "3개월": "3m",
     "전체": "all",
 }
+HISTORY_VIEW_KEY = "history_analysis_view"
+HISTORY_VIEW_LABELS = {
+    "actual": "실제 기록",
+    "performance": "성과분석",
+    "risk": "리스크분석",
+    "reconstructed": "과거 보유현황 재구성",
+}
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -44,10 +51,19 @@ def render_history_tab(
     current_total_value_krw: float | None = None,
     is_authenticated: bool = False,
 ) -> None:
-    actual_tab, performance_tab, risk_tab, reconstructed_tab = st.tabs(["실제 기록", "성과분석", "리스크분석", "과거 보유현황 재구성"])
-    with actual_tab:
+    with st.container(key="history_analysis_tabs"):
+        selected_view = st.radio(
+            "자산추이 화면",
+            list(HISTORY_VIEW_LABELS),
+            format_func=HISTORY_VIEW_LABELS.get,
+            key=HISTORY_VIEW_KEY,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+
+    if selected_view == "actual":
         _render_actual_history(owner_id=owner_id, portfolio_name=portfolio_name, history_store=history_store)
-    with performance_tab:
+    elif selected_view == "performance":
         render_performance_analysis(
             transactions=list(current_transactions or []),
             cash_ledger=list(current_cash_ledger or []),
@@ -55,7 +71,7 @@ def render_history_tab(
             usd_krw=current_usd_krw,
             current_total_value_krw=current_total_value_krw,
         )
-    with risk_tab:
+    elif selected_view == "risk":
         records = None
         load_error = None
         if history_store is not None and owner_id is not None:
@@ -64,7 +80,7 @@ def render_history_tab(
             except PortfolioHistoryStoreError as exc:
                 load_error = str(exc)
         render_risk_analysis(history_records=records, load_error=load_error)
-    with reconstructed_tab:
+    else:
         render_historical_reconstruction_tab(
             owner_id=owner_id,
             schedule_store=historical_schedule_store,
@@ -74,6 +90,10 @@ def render_history_tab(
             current_usd_krw=current_usd_krw,
             is_authenticated=is_authenticated,
         )
+
+
+def clear_history_cache() -> None:
+    _list_history_cached.clear()
 
 
 def _render_actual_history(
