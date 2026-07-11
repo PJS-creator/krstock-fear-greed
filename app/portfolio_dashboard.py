@@ -79,10 +79,15 @@ from portfolio.auth import (
     should_lock_manual_mode,
     verify_account,
 )
-from portfolio.history import build_history_record, build_supabase_history_store
+from portfolio.history import PortfolioHistoryStoreError, build_history_record, build_supabase_history_store
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
 from portfolio.market_indices import MarketWarningSpec, fetch_market_indices, fetch_market_warning_signals
+from portfolio.persistence import (
+    portfolio_payload_has_data,
+    recover_portfolio_payload_from_history,
+    save_portfolio_with_verification,
+)
 from portfolio.cash_ledger import (
     calculate_cash_balances,
     create_balance_adjustment_entries,
@@ -105,10 +110,12 @@ from portfolio.pricing import (
     refresh_usd_krw,
 )
 from portfolio.storage import (
+    PortfolioRecord,
     PortfolioStoreError,
     build_target_allocation_store,
     build_supabase_store,
     create_supabase_client,
+    deserialize_portfolio_payload_v2,
     has_supabase_credentials,
     save_target_allocations_if_available,
     serialize_portfolio_payload,
@@ -159,6 +166,9 @@ AUTO_PRICE_REFRESH_INTERVAL_SECONDS = 60
 AUTO_PRICE_REFRESH_COOLDOWN_SECONDS = 55
 PUBLIC_AUTH_SESSION_REFRESH_INTERVAL_SECONDS = 45 * 60
 AUTO_LOAD_ATTEMPTED_KEY = "account_auto_load_attempted"
+PORTFOLIO_LOAD_STATE_KEY = "account_portfolio_load_state"
+PORTFOLIO_LOAD_RETRY_SECONDS = 5.0
+PORTFOLIO_LOAD_READY_STATES = {"loaded", "missing", "recovered"}
 AUTO_PRICE_REFRESHED_KEY = "account_auto_price_refreshed"
 ACCOUNT_STATUS_KEY = "account_status_message"
 PUBLIC_SAVE_STATUS_KEY = "public_auto_save_status"
@@ -289,6 +299,38 @@ def _clean_portfolio_name(value: object) -> str:
     return str(value or "main").strip() or "main"
 
 
+def _portfolio_load_key(owner_id: object, portfolio_name: object) -> str:
+    return f"{str(owner_id or '').strip()}:{_clean_portfolio_name(portfolio_name)}"
+
+
+def _portfolio_load_state(owner_id: object, portfolio_name: object) -> dict[str, object] | None:
+    state = st.session_state.get(PORTFOLIO_LOAD_STATE_KEY)
+    if not isinstance(state, dict):
+        return None
+    if state.get("key") != _portfolio_load_key(owner_id, portfolio_name):
+        return None
+    return state
+
+
+def _portfolio_load_status(owner_id: object, portfolio_name: object) -> str:
+    state = _portfolio_load_state(owner_id, portfolio_name)
+    return str(state.get("status") or "pending") if state is not None else "pending"
+
+
+def _set_portfolio_load_state(
+    owner_id: object,
+    portfolio_name: object,
+    status: str,
+    *,
+    attempted_at: float | None = None,
+) -> None:
+    st.session_state[PORTFOLIO_LOAD_STATE_KEY] = {
+        "key": _portfolio_load_key(owner_id, portfolio_name),
+        "status": status,
+        "attempted_at": time.time() if attempted_at is None else float(attempted_at),
+    }
+
+
 def _current_portfolio_signature() -> str:
     return dirty_signature(_current_portfolio_state())
 
@@ -392,6 +434,7 @@ def _authenticate_account(account: AccountConfig) -> None:
     st.session_state[OWNER_ID_KEY] = account.owner_id
     st.session_state[DEFAULT_PORTFOLIO_KEY] = account.default_portfolio
     st.session_state.pop(AUTO_LOAD_ATTEMPTED_KEY, None)
+    st.session_state.pop(PORTFOLIO_LOAD_STATE_KEY, None)
     st.session_state.pop(AUTO_PRICE_REFRESHED_KEY, None)
     _reset_current_portfolio_state(account.default_portfolio)
 
@@ -434,6 +477,7 @@ def _logout(cookie_manager=None) -> None:
         SUPABASE_STORES_KEY,
         SUPABASE_STORES_CONFIG_KEY,
         AUTO_LOAD_ATTEMPTED_KEY,
+        PORTFOLIO_LOAD_STATE_KEY,
         AUTO_PRICE_REFRESHED_KEY,
         AUTO_PRICE_REFRESH_ENABLED_KEY,
         AUTO_PRICE_REFRESH_LAST_ATTEMPT_KEY,
@@ -1108,12 +1152,13 @@ def _current_portfolio_payload():
     )
 
 
-def _persist_current_portfolio(owner_id, store, target_allocation_store=None) -> None:
+def _persist_current_portfolio(owner_id, store, target_allocation_store=None) -> dict[str, object]:
     portfolio_name = _current_portfolio_name()
     target_allocations_changed = (
         st.session_state.get(SAVED_TARGET_ALLOCATIONS_SIGNATURE_KEY) != _current_target_allocations_signature()
     )
-    store.save_portfolio(owner_id, portfolio_name, _current_portfolio_payload())
+    payload = _current_portfolio_payload()
+    save_portfolio_with_verification(store, owner_id, portfolio_name, payload)
     if target_allocations_changed:
         save_target_allocations_if_available(
             target_allocation_store,
@@ -1122,7 +1167,9 @@ def _persist_current_portfolio(owner_id, store, target_allocation_store=None) ->
             st.session_state.get("target_allocations", []),
         )
     list_portfolios_cached.clear()
+    _set_portfolio_load_state(owner_id, portfolio_name, "loaded")
     _mark_portfolio_clean()
+    return payload
 
 
 def _save_history_snapshot_safely(history_store, record) -> bool:
@@ -1143,19 +1190,18 @@ def _save_current_portfolio(owner_id, store, target_allocation_store, history_st
         st.warning("Supabase 저장소가 설정되지 않아 저장할 수 없습니다.")
         return
     portfolio_name = _current_portfolio_name()
-    valuation_changed = st.session_state.get(SAVED_VALUATION_SIGNATURE_KEY) != _current_valuation_signature()
     try:
-        _persist_current_portfolio(owner_id, store, target_allocation_store)
-        if valuation_changed:
-            _save_history_snapshot_safely(
-                history_store,
-                build_history_record(
-                    owner_id=owner_id,
-                    portfolio_name=portfolio_name,
-                    event_type="portfolio_save",
-                    metrics=metrics,
-                )
+        payload = _persist_current_portfolio(owner_id, store, target_allocation_store)
+        _save_history_snapshot_safely(
+            history_store,
+            build_history_record(
+                owner_id=owner_id,
+                portfolio_name=portfolio_name,
+                event_type="portfolio_save",
+                metrics=metrics,
+                portfolio_payload=payload,
             )
+        )
         st.session_state[SAVE_STATUS_KEY] = f"{portfolio_name} 포트폴리오를 저장했습니다."
         request_app_rerun()
     except (PortfolioStoreError, ValueError) as exc:
@@ -1174,23 +1220,29 @@ def _auto_save_public_portfolio(owner_id, store, target_allocation_store, histor
     if owner_id is None or store is None:
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 실패: Supabase 저장소 설정이 필요합니다."
         return
-    if not _portfolio_is_dirty():
-        st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장됨"
+    load_status = _portfolio_load_status(owner_id, PUBLIC_PORTFOLIO_NAME)
+    if load_status not in PORTFOLIO_LOAD_READY_STATES:
+        if load_status == "error":
+            st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 대기: 기존 포트폴리오 불러오기 실패로 덮어쓰기를 차단했습니다."
+        else:
+            st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 대기: 기존 포트폴리오 확인 중"
         return
-    valuation_changed = st.session_state.get(SAVED_VALUATION_SIGNATURE_KEY) != _current_valuation_signature()
+    if not _portfolio_is_dirty():
+        st.session_state[PUBLIC_SAVE_STATUS_KEY] = "새 포트폴리오 입력 대기" if load_status == "missing" else "저장됨"
+        return
     try:
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 중"
-        _persist_current_portfolio(owner_id, store, target_allocation_store)
-        if valuation_changed:
-            _save_history_snapshot_safely(
-                history_store,
-                build_history_record(
-                    owner_id=owner_id,
-                    portfolio_name=PUBLIC_PORTFOLIO_NAME,
-                    event_type="portfolio_save",
-                    metrics=metrics,
-                )
+        payload = _persist_current_portfolio(owner_id, store, target_allocation_store)
+        _save_history_snapshot_safely(
+            history_store,
+            build_history_record(
+                owner_id=owner_id,
+                portfolio_name=PUBLIC_PORTFOLIO_NAME,
+                event_type="portfolio_save",
+                metrics=metrics,
+                portfolio_payload=payload,
             )
+        )
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장됨"
     except (PortfolioStoreError, ValueError) as exc:
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = f"저장 실패: {exc}"
@@ -1244,6 +1296,7 @@ def _refresh_price_rows(
                 portfolio_name=_current_portfolio_name(),
                 event_type="price_refresh",
                 metrics=metrics,
+                portfolio_payload=_current_portfolio_payload(),
             )
         )
     return True
@@ -1742,34 +1795,171 @@ def _render_cash_fx_tools(config: AppSecurityConfig, *, public_auth_enabled: boo
     _render_cash_ledger_table()
 
 
-def _load_portfolio_record_now(record, target_allocation_store=None) -> None:
-    queue_portfolio_record_load(record, target_allocation_store=target_allocation_store)
+def _load_portfolio_record_now(record, target_allocation_store=None, *, mark_clean: bool = True) -> None:
+    queue_portfolio_record_load(
+        record,
+        target_allocation_store=target_allocation_store,
+        mark_clean=mark_clean,
+    )
     _apply_pending_portfolio_state()
     if st.session_state.pop(MARK_CLEAN_KEY, False):
         _mark_portfolio_clean()
 
 
-def _auto_load_account_portfolio(owner_id, store, target_allocation_store=None) -> None:
+def _recovery_record_from_history(owner_id, portfolio_name, history_store) -> PortfolioRecord | None:
+    if history_store is None:
+        return None
+    try:
+        records = history_store.list_history(owner_id, portfolio_name, period="all")
+    except PortfolioHistoryStoreError as exc:
+        raise PortfolioStoreError("포트폴리오 복구 기록 조회에 실패했습니다") from exc
+    payload = recover_portfolio_payload_from_history(
+        records,
+        owner_id=owner_id,
+        portfolio_name=portfolio_name,
+    )
+    if payload is None:
+        return None
+    return PortfolioRecord(
+        owner_id=owner_id,
+        portfolio_name=portfolio_name,
+        payload_json=payload,
+    )
+
+
+def _mark_portfolio_load_error(owner_id, portfolio_name, message: str, *, attempted_at: float) -> None:
+    st.session_state.pop(AUTO_LOAD_ATTEMPTED_KEY, None)
+    _set_portfolio_load_state(owner_id, portfolio_name, "error", attempted_at=attempted_at)
+    st.session_state[ACCOUNT_STATUS_KEY] = message
+
+
+def _finish_portfolio_load(
+    owner_id,
+    portfolio_name,
+    record,
+    target_allocation_store,
+    *,
+    status: str,
+    mark_clean: bool,
+    attempted_at: float,
+) -> bool:
+    try:
+        _load_portfolio_record_now(
+            record,
+            target_allocation_store,
+            mark_clean=mark_clean,
+        )
+    except (PortfolioStoreError, ValueError) as exc:
+        _mark_portfolio_load_error(
+            owner_id,
+            portfolio_name,
+            f"저장된 포트폴리오를 불러올 수 없습니다: {exc}",
+            attempted_at=attempted_at,
+        )
+        return False
+    st.session_state[AUTO_LOAD_ATTEMPTED_KEY] = _portfolio_load_key(owner_id, portfolio_name)
+    _set_portfolio_load_state(owner_id, portfolio_name, status, attempted_at=attempted_at)
+    st.session_state.pop(AUTO_PRICE_REFRESHED_KEY, None)
+    return True
+
+
+def _auto_load_account_portfolio(
+    owner_id,
+    store,
+    target_allocation_store=None,
+    history_store=None,
+    *,
+    now: float | None = None,
+) -> None:
     if owner_id is None or store is None:
         return
     portfolio_name = _current_portfolio_name()
-    attempt_key = f"{owner_id}:{portfolio_name}"
-    if st.session_state.get(AUTO_LOAD_ATTEMPTED_KEY) == attempt_key:
+    attempt_key = _portfolio_load_key(owner_id, portfolio_name)
+    current_time = time.time() if now is None else float(now)
+    load_state = _portfolio_load_state(owner_id, portfolio_name)
+    if load_state is not None and load_state.get("status") in PORTFOLIO_LOAD_READY_STATES:
+        st.session_state[AUTO_LOAD_ATTEMPTED_KEY] = attempt_key
         return
-    st.session_state[AUTO_LOAD_ATTEMPTED_KEY] = attempt_key
+    if load_state is not None and load_state.get("status") == "error":
+        last_attempt = float(load_state.get("attempted_at") or 0.0)
+        if current_time - last_attempt < PORTFOLIO_LOAD_RETRY_SECONDS:
+            return
+    _set_portfolio_load_state(owner_id, portfolio_name, "loading", attempted_at=current_time)
     try:
         record = store.get_portfolio(owner_id, portfolio_name)
     except PortfolioStoreError as exc:
-        st.session_state[ACCOUNT_STATUS_KEY] = f"저장된 포트폴리오 자동 불러오기에 실패했습니다: {exc}"
+        _mark_portfolio_load_error(
+            owner_id,
+            portfolio_name,
+            f"저장된 포트폴리오 자동 불러오기에 실패했습니다: {exc}",
+            attempted_at=current_time,
+        )
         return
-    if record is None:
-        return
+
+    payload_error: ValueError | None = None
+    if record is not None:
+        try:
+            clean_payload = deserialize_portfolio_payload_v2(record.payload_json)
+        except ValueError as exc:
+            payload_error = exc
+        else:
+            if portfolio_payload_has_data(clean_payload):
+                _finish_portfolio_load(
+                    owner_id,
+                    portfolio_name,
+                    record,
+                    target_allocation_store,
+                    status="loaded",
+                    mark_clean=True,
+                    attempted_at=current_time,
+                )
+                return
+
     try:
-        _load_portfolio_record_now(record, target_allocation_store)
-    except (PortfolioStoreError, ValueError) as exc:
-        st.session_state[ACCOUNT_STATUS_KEY] = f"저장된 포트폴리오를 불러올 수 없습니다: {exc}"
+        recovery_record = _recovery_record_from_history(owner_id, portfolio_name, history_store)
+    except PortfolioStoreError as exc:
+        _mark_portfolio_load_error(
+            owner_id,
+            portfolio_name,
+            f"저장된 포트폴리오와 복구 기록을 확인할 수 없습니다: {exc}",
+            attempted_at=current_time,
+        )
         return
-    st.session_state.pop(AUTO_PRICE_REFRESHED_KEY, None)
+
+    if recovery_record is not None:
+        if _finish_portfolio_load(
+            owner_id,
+            portfolio_name,
+            recovery_record,
+            target_allocation_store,
+            status="recovered",
+            mark_clean=False,
+            attempted_at=current_time,
+        ):
+            st.session_state[ACCOUNT_STATUS_KEY] = "최근 자산추이 백업에서 계정 포트폴리오를 복구했습니다. 복구 내용을 main에 다시 저장합니다."
+        return
+
+    if record is None:
+        st.session_state[AUTO_LOAD_ATTEMPTED_KEY] = attempt_key
+        _set_portfolio_load_state(owner_id, portfolio_name, "missing", attempted_at=current_time)
+        return
+    if payload_error is not None:
+        _mark_portfolio_load_error(
+            owner_id,
+            portfolio_name,
+            f"저장된 포트폴리오 형식이 올바르지 않고 복구 기록도 없습니다: {payload_error}",
+            attempted_at=current_time,
+        )
+        return
+    _finish_portfolio_load(
+        owner_id,
+        portfolio_name,
+        record,
+        target_allocation_store,
+        status="loaded",
+        mark_clean=True,
+        attempted_at=current_time,
+    )
 
 
 def _auto_refresh_loaded_prices(owner_id, store, target_allocation_store, history_store) -> None:
@@ -2266,7 +2456,7 @@ def run_dashboard(*, public_auth_enabled: bool | None = None) -> None:
 
     portfolio_store, history_store, historical_schedule_store, target_allocation_store = _build_stores(storage_config)
     owner_id = _resolve_owner_id(storage_config)
-    _auto_load_account_portfolio(owner_id, portfolio_store, target_allocation_store)
+    _auto_load_account_portfolio(owner_id, portfolio_store, target_allocation_store, history_store)
     if not public_auth_enabled:
         _auto_refresh_loaded_prices(owner_id, portfolio_store, target_allocation_store, history_store)
     _render_sidebar(security_config, owner_id, portfolio_store, public_auth_enabled=public_auth_enabled)

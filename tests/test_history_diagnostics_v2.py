@@ -4,6 +4,7 @@ from portfolio.chart_data import contribution_frame, currency_exposure_frame, hi
 from portfolio.diagnostics import calculate_diagnostics
 from portfolio.history import MemoryPortfolioHistoryStore, build_history_record
 from portfolio.holdings import build_portfolio_metrics
+from portfolio.storage import serialize_portfolio_payload
 
 
 def _metrics(quantity=2):
@@ -29,6 +30,53 @@ def test_history_snapshot_creation_and_fingerprint_deduplication():
     assert len(store.list_history("owner", "main")) == 1
     assert first.fingerprint
     assert first.total_value_krw > 0
+
+
+def test_history_snapshot_keeps_full_portfolio_backup_and_fingerprints_transactions():
+    metrics = _metrics()
+    base_payload = serialize_portfolio_payload(
+        [row.holding for row in metrics.rows],
+        usd_krw=metrics.usd_krw,
+        cash_krw=metrics.cash.cash_krw,
+        cash_usd=metrics.cash.cash_usd,
+    )
+    changed_payload = {
+        **base_payload,
+        "transactions": [
+            {
+                "transaction_type": "buy",
+                "ticker": "AAA",
+                "display_name": "AAA",
+                "market": "US",
+                "currency": "USD",
+                "unit_price": 8,
+                "quantity": 2,
+                "fee": 0,
+                "tax": 0,
+                "occurred_at": "2026-01-01",
+                "memo": "backup check",
+            }
+        ],
+    }
+
+    first = build_history_record(
+        owner_id="owner",
+        portfolio_name="main",
+        event_type="portfolio_save",
+        metrics=metrics,
+        portfolio_payload=base_payload,
+    )
+    changed = build_history_record(
+        owner_id="owner",
+        portfolio_name="main",
+        event_type="portfolio_save",
+        metrics=metrics,
+        portfolio_payload=changed_payload,
+    )
+
+    assert first.payload_json["schema_version"] == 2
+    assert first.payload_json["portfolio_backup"] == base_payload
+    assert first.fingerprint != changed.fingerprint
 
 
 def test_history_period_filter():
