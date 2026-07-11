@@ -2,14 +2,19 @@ from portfolio.holdings import build_portfolio_metrics
 from app.ui.investment_summary_card import (
     _allocation_rows,
     _cash_allocation_row,
+    _display_sector_groups,
     _heatmap_tiles,
     _holding_allocation_rows,
     _holding_sector,
     _holding_table_rows,
     _market_index_strip,
     _market_warning_strip,
+    _mobile_heatmap,
+    _mobile_heatmap_partition,
     _mobile_holding_summary_table,
+    _sector_group_layout,
     _sector_heatmap,
+    _sector_member_layout,
     _sparkline_html,
     render_investment_summary_card,
 )
@@ -127,6 +132,116 @@ def test_desktop_heatmap_groups_sectors_and_keeps_market_codes():
     assert "(KR)" in html
     assert "(US)" in html
     assert "면적 표시 원칙" not in html
+    assert "summary-sector-group-major" in html
+
+
+def test_desktop_sector_groups_use_value_weighted_widths():
+    groups = [
+        {"label": "A", "rows": [], "value_krw": 50, "weight": 0.50},
+        {"label": "B", "rows": [], "value_krw": 35, "weight": 0.35},
+        {"label": "그 외", "rows": [], "value_krw": 15, "weight": 0.15},
+    ]
+
+    layout = _sector_group_layout(groups)
+
+    assert layout[0]["width"] > layout[1]["width"]
+    assert layout[1]["width"] > layout[2]["width"]
+    assert all(round(group["height"], 6) == 100.0 for group in layout)
+    assert round(sum(group["width"] for group in layout), 6) == 100.0
+    assert round(layout[2]["width"], 6) == 16.0
+
+
+def test_minor_sectors_merge_into_other_but_keep_individual_holdings():
+    heat_color = get_active_theme().tokens()["profit"]
+    rows = [
+        {
+            "label": label,
+            "compact_label": label,
+            "sector": sector,
+            "value_krw": value,
+            "weight": weight,
+            "market_code": "US",
+            "day_change_pct": 0.01,
+            "heat_color": heat_color,
+        }
+        for label, sector, value, weight in [
+            ("BIO", "바이오", 50, 0.50),
+            ("CHIP", "반도체", 35, 0.35),
+            ("GOLD", "귀금속", 8, 0.08),
+            ("SHIP", "조선", 4, 0.04),
+            ("FIN", "금융", 3, 0.03),
+        ]
+    ]
+
+    groups = _display_sector_groups(rows)
+    html = _sector_heatmap(rows)
+
+    assert [group["label"] for group in groups] == ["바이오", "반도체", "그 외"]
+    assert [row["label"] for row in groups[2]["rows"]] == ["GOLD", "SHIP", "FIN"]
+    assert groups[2]["value_krw"] == 15
+    assert round(groups[2]["weight"], 6) == 0.15
+    assert "<strong>그 외</strong>" in html
+    assert all(label in html for label in ("GOLD", "SHIP", "FIN"))
+
+
+def test_independent_sectors_reorder_when_values_change():
+    rows = [
+        {"label": "A1", "sector": "A", "value_krw": 30, "weight": 0.30},
+        {"label": "B1", "sector": "B", "value_krw": 10, "weight": 0.10},
+        {"label": "C1", "sector": "C", "value_krw": 55, "weight": 0.55},
+        {"label": "D1", "sector": "D", "value_krw": 5, "weight": 0.05},
+    ]
+
+    groups = _display_sector_groups(rows)
+
+    assert [group["label"] for group in groups] == ["C", "A", "그 외"]
+    assert [row["label"] for row in groups[2]["rows"]] == ["B1", "D1"]
+
+
+def test_three_member_sector_uses_value_proportional_non_uniform_tiles():
+    rows = [
+        {"label": "삼성전자", "value_krw": 50},
+        {"label": "삼성전자우", "value_krw": 30},
+        {"label": "SK하이닉스", "value_krw": 20},
+    ]
+
+    layout = _sector_member_layout(rows, group_width=48.0, group_height=100.0)
+    areas = [float(row["width"]) * float(row["height"]) for row in layout]
+    total_area = sum(areas)
+
+    assert round(float(layout[0]["height"]), 6) == 100.0
+    assert round(float(layout[1]["x"]), 6) == round(float(layout[2]["x"]), 6)
+    assert round(float(layout[1]["height"]) + float(layout[2]["height"]), 6) == 100.0
+    assert [round(area / total_area, 2) for area in areas] == [0.50, 0.30, 0.20]
+
+
+def test_mobile_heatmap_moves_small_positions_into_readable_ticker_grid():
+    rows = [
+        {
+            "label": f"Holding {index}",
+            "compact_label": f"T{index:02d}",
+            "value_krw": value,
+            "weight": weight,
+            "day_change_pct": 0.01 if index % 2 else -0.01,
+            "market_code": "US",
+            "heat_color": get_active_theme().tokens()["profit" if index % 2 else "loss"],
+        }
+        for index, (value, weight) in enumerate(
+            [(40, 0.40), (25, 0.25), (15, 0.15), (8, 0.08), (3, 0.03), (2, 0.02), (1, 0.01)],
+            start=1,
+        )
+    ]
+
+    major, compact = _mobile_heatmap_partition(rows)
+    html = _mobile_heatmap(rows)
+
+    assert [row["compact_label"] for row in major] == ["T01", "T02", "T03", "T04"]
+    assert [row["compact_label"] for row in compact] == ["T05", "T06", "T07"]
+    assert "summary-mobile-heatmap-major" in html
+    assert "summary-mobile-compact-grid" in html
+    assert html.count("summary-mobile-compact-tile") == 3
+    for ticker in ("T05", "T06", "T07"):
+        assert f"<span>{ticker}</span>" in html
 
 
 def test_current_portfolio_tickers_cover_six_requested_sector_groups():
@@ -262,9 +377,12 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "border: 0;" in html
     assert ".summary-current-price.summary-up" in html
     assert ".summary-pnl-delta" in html
-    assert ".summary-heatmap-card {\n            padding: 18px;\n            min-height: 560px;" in html
+    assert ".summary-heatmap-card {\n            padding: 18px;\n            min-height: 0;" in html
     assert "summary-sector-heatmap" in html
     assert "summary-heatmap-mobile" in html
+    assert "height: clamp(276px, 22vw, 310px);" in html
+    assert "summary-mobile-compact-grid" in html
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in html
     assert ".summary-sector-heatmap { display: none; }" in html
     assert ".summary-heatmap-mobile { display: block; }" in html
     assert "면적 표시 원칙" not in html
