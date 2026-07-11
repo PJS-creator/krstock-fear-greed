@@ -4,10 +4,12 @@ from app.ui.investment_summary_card import (
     _cash_allocation_row,
     _heatmap_tiles,
     _holding_allocation_rows,
+    _holding_sector,
     _holding_table_rows,
     _market_index_strip,
     _market_warning_strip,
     _mobile_holding_summary_table,
+    _sector_heatmap,
     _sparkline_html,
     render_investment_summary_card,
 )
@@ -103,6 +105,53 @@ def test_summary_heatmap_rows_keep_every_holding_unaggregated():
     assert "Echo" in tiles
     assert "그 외" not in tiles
     assert "기타" not in tiles
+
+
+def test_summary_heatmap_rows_include_market_and_sector_metadata():
+    rows = {row["label"]: row for row in _holding_allocation_rows(_metrics())}
+
+    assert rows["삼성전자"]["market_code"] == "KR"
+    assert rows["삼성전자"]["sector"] == "반도체·전자"
+    assert rows["MU · Micron"]["market_code"] == "US"
+    assert rows["MU · Micron"]["sector"] == "기타"
+
+
+def test_desktop_heatmap_groups_sectors_and_keeps_market_codes():
+    html = _sector_heatmap(_holding_allocation_rows(_metrics()))
+
+    assert "summary-sector-heatmap" in html
+    assert "summary-heatmap-desktop" in html
+    assert "반도체·전자" in html
+    assert "기타" in html
+    assert "삼성전자" in html
+    assert "(KR)" in html
+    assert "(US)" in html
+    assert "면적 표시 원칙" not in html
+
+
+def test_current_portfolio_tickers_cover_six_requested_sector_groups():
+    expected = {
+        "QURE": "바이오·헬스케어",
+        "CGEM": "바이오·헬스케어",
+        "CMPS": "바이오·헬스케어",
+        "AVR": "바이오·헬스케어",
+        "CCCC": "바이오·헬스케어",
+        "GHRS": "바이오·헬스케어",
+        "CTMX": "바이오·헬스케어",
+        "VOR": "바이오·헬스케어",
+        "PSNL": "바이오·헬스케어",
+        "005930": "반도체·전자",
+        "005935": "반도체·전자",
+        "000660": "반도체·전자",
+        "AYA": "귀금속·광업",
+        "EXK": "귀금속·광업",
+        "MAKO": "귀금속·광업",
+        "009540": "조선·산업재",
+        "071050": "금융",
+        "239890": "디스플레이 소재",
+    }
+
+    assert {ticker: _holding_sector({"ticker": ticker}) for ticker in expected} == expected
 
 
 def test_summary_holding_table_restores_detailed_columns():
@@ -213,7 +262,12 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "border: 0;" in html
     assert ".summary-current-price.summary-up" in html
     assert ".summary-pnl-delta" in html
-    assert ".summary-heatmap-card {\n            padding: 18px;\n            min-height: 360px;" in html
+    assert ".summary-heatmap-card {\n            padding: 18px;\n            min-height: 560px;" in html
+    assert "summary-sector-heatmap" in html
+    assert "summary-heatmap-mobile" in html
+    assert ".summary-sector-heatmap { display: none; }" in html
+    assert ".summary-heatmap-mobile { display: block; }" in html
+    assert "면적 표시 원칙" not in html
     assert ".summary-heatmap-tile:hover" in html
     assert "filter: brightness(1.15) saturate(1.08);" in html
     assert "transform: translateZ(0) scale(1.1);" in html
