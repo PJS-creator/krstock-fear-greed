@@ -59,6 +59,7 @@ def queue_portfolio_record_load(
     record: PortfolioRecord,
     *,
     target_allocation_store: TargetAllocationStore | None = None,
+    mark_clean: bool = True,
 ) -> None:
     payload = deserialize_portfolio_payload_v2(record.payload_json)
     cash = payload["cash_balances"]
@@ -93,8 +94,30 @@ def queue_portfolio_record_load(
         fx_status=fx_metadata.get("status"),
         fx_error_message=fx_metadata.get("error_message"),
         fx_fetched_at=fx_metadata.get("fetched_at"),
+        mark_clean=mark_clean,
     )
     _set_storage_status(f"{record.portfolio_name} 포트폴리오를 불러왔습니다.")
+
+
+def _session_portfolio_payload() -> dict[str, object]:
+    return serialize_portfolio_payload(
+        st.session_state.get("holdings_rows", []),
+        usd_krw=st.session_state.get("usd_krw", 1380.0),
+        cash_krw=st.session_state.get("cash_krw", 0.0),
+        cash_usd=st.session_state.get("cash_usd", 0.0),
+        transactions=st.session_state.get("portfolio_transactions", []),
+        cash_ledger=st.session_state.get("cash_ledger_entries", []),
+        target_allocations=st.session_state.get("target_allocations", []),
+        journal_notes=st.session_state.get("journal_notes", []),
+        fx_metadata={
+            "rate_date": st.session_state.get("fx_rate_date"),
+            "as_of_timestamp": st.session_state.get("fx_as_of_timestamp"),
+            "source": st.session_state.get("fx_source"),
+            "status": st.session_state.get("fx_status"),
+            "error_message": st.session_state.get("fx_error_message"),
+            "fetched_at": st.session_state.get("fx_fetched_at"),
+        },
+    )
 
 
 def render_csv_tools() -> None:
@@ -145,24 +168,7 @@ def render_storage_tools(
             if not begin_ui_action("storage_save_portfolio", payload={"portfolio_name": clean_name}):
                 return
             try:
-                payload = serialize_portfolio_payload(
-                    st.session_state.get("holdings_rows", []),
-                    usd_krw=st.session_state.get("usd_krw", 1380.0),
-                    cash_krw=st.session_state.get("cash_krw", 0.0),
-                    cash_usd=st.session_state.get("cash_usd", 0.0),
-                    transactions=st.session_state.get("portfolio_transactions", []),
-                    cash_ledger=st.session_state.get("cash_ledger_entries", []),
-                    target_allocations=st.session_state.get("target_allocations", []),
-                    journal_notes=st.session_state.get("journal_notes", []),
-                    fx_metadata={
-                        "rate_date": st.session_state.get("fx_rate_date"),
-                        "as_of_timestamp": st.session_state.get("fx_as_of_timestamp"),
-                        "source": st.session_state.get("fx_source"),
-                        "status": st.session_state.get("fx_status"),
-                        "error_message": st.session_state.get("fx_error_message"),
-                        "fetched_at": st.session_state.get("fx_fetched_at"),
-                    },
-                )
+                payload = _session_portfolio_payload()
                 store.save_portfolio(owner_id, clean_name, payload)
                 save_target_allocations_if_available(
                     target_allocation_store,
@@ -178,6 +184,7 @@ def render_storage_tools(
                                 portfolio_name=clean_name,
                                 event_type="portfolio_save",
                                 metrics=metrics,
+                                portfolio_payload=payload,
                             )
                         )
                     except Exception:
@@ -278,6 +285,7 @@ def render_manual_capture(
                     portfolio_name=portfolio_name,
                     event_type="manual_capture",
                     metrics=metrics,
+                    portfolio_payload=_session_portfolio_payload(),
                 )
             )
             clear_history_cache()

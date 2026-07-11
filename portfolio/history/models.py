@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -77,20 +78,24 @@ def build_history_record(
     event_type: str,
     metrics: PortfolioMetrics,
     captured_at: str | None = None,
+    portfolio_payload: Mapping[str, Any] | None = None,
 ) -> PortfolioHistoryRecord:
     if event_type not in VALID_EVENT_TYPES:
         raise ValueError(f"Unsupported event_type: {event_type}")
     payload = history_payload_from_metrics(metrics)
-    fingerprint = build_history_fingerprint(
-        {
-            "portfolio_name": portfolio_name,
-            "total_value_krw": metrics.total_value_krw,
-            "total_position_value_krw": metrics.total_position_value_krw,
-            "cash_balances": metrics.cash.as_payload,
-            "usd_krw": metrics.usd_krw,
-            "holdings": payload["holdings"],
-        }
-    )
+    fingerprint_payload = {
+        "portfolio_name": portfolio_name,
+        "total_value_krw": metrics.total_value_krw,
+        "total_position_value_krw": metrics.total_position_value_krw,
+        "cash_balances": metrics.cash.as_payload,
+        "usd_krw": metrics.usd_krw,
+        "holdings": payload["holdings"],
+    }
+    if portfolio_payload is not None:
+        payload["schema_version"] = 2
+        payload["portfolio_backup"] = deepcopy(dict(portfolio_payload))
+        fingerprint_payload["portfolio_backup"] = payload["portfolio_backup"]
+    fingerprint = build_history_fingerprint(fingerprint_payload)
     return PortfolioHistoryRecord(
         owner_id=owner_id,
         portfolio_name=portfolio_name,
