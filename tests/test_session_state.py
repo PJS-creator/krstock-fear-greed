@@ -47,6 +47,8 @@ def test_theme_toggle_preserves_public_navigation_and_inputs():
     assert at.session_state["public_dashboard_section"] == "input"
     assert at.session_state["public_holdings_view"] == "cash_fx"
     assert at.session_state["cash_ledger_entries"][0]["amount"] == "10000"
+    assert at.dataframe
+    assert not any("이 영역을 불러오는 중 문제가 발생했습니다." in str(element.value) for element in at.markdown)
 
 
 def test_public_entrypoint_restores_public_auth_environment_flag():

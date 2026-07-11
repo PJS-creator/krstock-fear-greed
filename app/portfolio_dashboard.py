@@ -68,7 +68,7 @@ from app.ui.stability import (
     state_flag_is_stale,
 )
 from app.ui.styles import inject_public_cloud_chrome_guard, inject_styles
-from app.ui.theme import APP_THEME_KEY, DEFAULT_THEME_MODE, THEME_MODE_ALIAS_KEY, normalize_theme_mode
+from app.ui.theme import APP_THEME_KEY, DEFAULT_THEME_MODE, DIMENSIONS, THEME_MODE_ALIAS_KEY, normalize_theme_mode
 from app.ui.transactions import render_transaction_cashflow, render_transaction_editor
 from portfolio.auth import (
     AccountConfig,
