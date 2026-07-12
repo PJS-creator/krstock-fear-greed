@@ -401,27 +401,44 @@ def test_current_refresh_button_forces_all_quotes_and_fx_refresh():
     assert '"가격 새로고침 대상"' not in source
 
 
-def test_auto_quote_refresh_uses_one_minute_toggle_and_cooldown():
+def test_one_minute_auto_quote_refresh_is_removed_and_manual_refresh_remains():
     source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
     styles_source = Path("app/ui/styles.py").read_text(encoding="utf-8")
     guide_source = Path("docs/app_user_guide.md").read_text(encoding="utf-8")
 
-    assert 'AUTO_PRICE_REFRESH_INTERVAL_SECONDS = 60' in source
-    assert 'AUTO_PRICE_REFRESH_COOLDOWN_SECONDS = 55' in source
-    assert '"auto_price_refresh_enabled"' in source
-    assert 'st.checkbox(\n        "1분 자동갱신"' in source
-    assert "_render_auto_refresh_controls()\n    if actions[\"refresh\"]" in source
-    assert "_render_sidebar_auto_refresh_status()" in source
-    assert "자동갱신은 상단의 1분 자동갱신" in source
-    assert ".st-key-auto_price_refresh_enabled" in styles_source
-    assert "모바일 앱/WebView에서도 같은 상단 토글" in guide_source
-    assert '@st.fragment(run_every=f"{AUTO_PRICE_REFRESH_INTERVAL_SECONDS}s")' in source
-    assert '"auto_price_refresh"' in source
-    assert "show_progress=False" in source
-    assert "quiet=True" in source
+    for removed_text in (
+        "AUTO_PRICE_REFRESH_INTERVAL_SECONDS",
+        "AUTO_PRICE_REFRESH_COOLDOWN_SECONDS",
+        "auto_price_refresh_enabled",
+        "1분 자동갱신",
+        "_render_auto_refresh_controls",
+        "_render_sidebar_auto_refresh_status",
+        "_render_auto_refresh_runner",
+        "_maybe_run_periodic_price_refresh",
+        "periodic_price_refresh_failed",
+        '@st.fragment(run_every=',
+    ):
+        assert removed_text not in source
+    assert ".st-key-auto_price_refresh_enabled" not in styles_source
+    assert "1분 자동갱신은 제공하지 않습니다" in guide_source
+    assert 'st.button("가격·환율 갱신"' in Path("app/ui/components.py").read_text(encoding="utf-8")
+    assert "현재가 갱신은 보유 중인 모든 종목과 USD/KRW 환율을 캐시 없이 다시 조회합니다." in source
     assert "KIS 설정" in source
     assert "최근 주식 조회 출처" in source
     assert "한국투자 Open API" in source
+
+
+def test_public_app_renders_manual_refresh_without_auto_refresh_toggle():
+    at = AppTest.from_file("app/public_portfolio_dashboard.py")
+    at.session_state["is_authenticated"] = True
+    at.session_state["authenticated_account_id"] = "demo@example.com"
+    at.session_state["authenticated_owner_id"] = "user-demo-id"
+    at.session_state["authenticated_default_portfolio"] = "main"
+    at.run(timeout=20)
+
+    assert not at.exception
+    assert all(getattr(checkbox, "label", "") != "1분 자동갱신" for checkbox in at.checkbox)
+    assert len([button for button in at.button if getattr(button, "label", "") == "가격·환율 갱신"]) == 1
 
 
 def test_public_header_refresh_does_not_call_fx_api_without_assets(monkeypatch):
