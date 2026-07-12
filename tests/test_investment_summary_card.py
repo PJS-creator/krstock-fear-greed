@@ -2,6 +2,8 @@ from portfolio.holdings import build_portfolio_metrics
 from app.ui.investment_summary_card import (
     _allocation_rows,
     _cash_allocation_row,
+    _desktop_sector_partition,
+    _desktop_sector_rows,
     _display_sector_groups,
     _heatmap_tiles,
     _holding_allocation_rows,
@@ -14,6 +16,7 @@ from app.ui.investment_summary_card import (
     _mobile_heatmap_partition,
     _mobile_holding_summary_table,
     _sector_group_layout,
+    _sector_group_html,
     _sector_heatmap,
     _sector_member_layout,
     _sparkline_html,
@@ -136,7 +139,7 @@ def test_desktop_heatmap_groups_sectors_and_keeps_market_codes():
     assert "summary-sector-group-major" in html
 
 
-def test_desktop_sector_groups_use_value_weighted_widths():
+def test_desktop_sector_groups_use_value_weighted_nested_areas():
     groups = [
         {"label": "A", "rows": [], "value_krw": 50, "weight": 0.50},
         {"label": "B", "rows": [], "value_krw": 35, "weight": 0.35},
@@ -144,12 +147,54 @@ def test_desktop_sector_groups_use_value_weighted_widths():
     ]
 
     layout = _sector_group_layout(groups)
+    areas = [float(group["width"]) * float(group["height"]) for group in layout]
+    total_area = sum(areas)
 
-    assert layout[0]["width"] > layout[1]["width"]
-    assert layout[1]["width"] > layout[2]["width"]
-    assert all(round(group["height"], 6) == 100.0 for group in layout)
-    assert round(sum(group["width"] for group in layout), 6) == 100.0
-    assert round(layout[2]["width"], 6) == 16.0
+    assert [round(area / total_area, 2) for area in areas] == [0.50, 0.35, 0.15]
+    assert round(float(layout[0]["height"]), 6) == 100.0
+    assert round(float(layout[1]["width"]), 6) == round(float(layout[2]["width"]), 6)
+    assert round(float(layout[1]["height"]) + float(layout[2]["height"]), 6) == 100.0
+
+
+def test_desktop_sector_layout_preserves_minimum_area_for_readable_other_group():
+    groups = [
+        {"label": "A", "rows": [], "value_krw": 60, "weight": 0.60},
+        {"label": "B", "rows": [], "value_krw": 37, "weight": 0.37},
+        {"label": "그 외", "rows": [], "value_krw": 3, "weight": 0.03},
+    ]
+
+    layout = _sector_group_layout(groups)
+    areas = [float(group["width"]) * float(group["height"]) for group in layout]
+    total_area = sum(areas)
+
+    assert round(areas[2] / total_area, 2) == 0.12
+    assert [group["value_krw"] for group in layout] == [60, 37, 3]
+    assert all("actual_value_krw" not in group for group in layout)
+
+
+def test_short_desktop_sector_uses_inline_compact_member_layout():
+    heat_color = get_active_theme().tokens()["profit"]
+    group = {
+        "label": "그 외",
+        "rows": [
+            {"label": "HD한국조선해양", "compact_label": "009540", "value_krw": 2, "weight": 0.02, "day_change_pct": 0.01, "market_code": "KR", "heat_color": heat_color},
+            {"label": "한국금융지주", "compact_label": "071050", "value_krw": 1, "weight": 0.01, "day_change_pct": -0.01, "market_code": "KR", "heat_color": heat_color},
+        ],
+        "value_krw": 3,
+        "weight": 0.03,
+        "x": 45,
+        "y": 78,
+        "width": 55,
+        "height": 22,
+    }
+
+    html = _sector_group_html(group)
+
+    assert "summary-sector-group-compact" in html
+    assert "HD한국조선해양" in html
+    assert "한국금융지주" in html
+    assert "+1.0%" in html
+    assert "-1.0%" in html
 
 
 def test_minor_sectors_merge_into_other_but_keep_individual_holdings():
@@ -214,6 +259,46 @@ def test_three_member_sector_uses_value_proportional_non_uniform_tiles():
     assert round(float(layout[1]["x"]), 6) == round(float(layout[2]["x"]), 6)
     assert round(float(layout[1]["height"]) + float(layout[2]["height"]), 6) == 100.0
     assert [round(area / total_area, 2) for area in areas] == [0.50, 0.30, 0.20]
+
+
+def test_desktop_sector_groups_small_members_into_weighted_other_tile():
+    rows = [
+        {
+            "label": f"Holding {index}",
+            "compact_label": f"T{index:02d}",
+            "sector": "바이오·헬스케어",
+            "value_krw": value,
+            "weight": weight,
+            "day_change_pct": 0.01 if index % 2 else -0.01,
+            "market_code": "US",
+            "heat_color": get_active_theme().tokens()["profit" if index % 2 else "loss"],
+        }
+        for index, (value, weight) in enumerate(
+            [(36, 0.36), (24, 0.24), (14, 0.14), (9, 0.09), (6, 0.06), (4, 0.04), (2, 0.02), (1, 0.01)],
+            start=1,
+        )
+    ]
+    group = {
+        "label": "바이오·헬스케어",
+        "rows": rows,
+        "value_krw": 96,
+        "weight": 0.96,
+    }
+
+    individual, grouped = _desktop_sector_partition(rows)
+    display_rows = _desktop_sector_rows(group)
+    html = _sector_heatmap(rows)
+
+    assert [row["compact_label"] for row in individual] == ["T01", "T02", "T03", "T04", "T05", "T06"]
+    assert [row["compact_label"] for row in grouped] == ["T07", "T08"]
+    assert display_rows[-1]["label"] == "기타 2종목"
+    assert display_rows[-1]["value_krw"] == 3
+    assert round(display_rows[-1]["weight"], 6) == 0.03
+    assert display_rows[-1]["market_code"] == "US"
+    assert "summary-sector-tile-aggregate" in html
+    assert "기타 2종목" in html
+    assert "포함 종목: T07, T08" in html
+    assert "8종목" in html
 
 
 def test_mobile_heatmap_groups_small_positions_into_one_weighted_other_tile():
@@ -426,6 +511,12 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "Bollinger Band(180, 2.0)" not in html
     assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in html
     assert "overflow-x: hidden;" in html
+    assert '<span class="flat">보합</span>' in html
+    assert ".summary-sector-tile-aggregate" in html
+    assert "box-shadow: inset 0 0 0 1px var(--summary-heatmap-tile-border);" in html
+    assert ".summary-warning-card {\n            min-width: 0;\n            min-height: 41px;" in html
+    assert "border: 1px solid var(--app-border);" in html
+    assert "font-size: clamp(0.68rem, 2.7vw, 0.74rem);" in html
     assert "color-mix(in srgb, var(--token-overlay) 36%, transparent)" in html
     for col_class in (
         "summary-col-name",
@@ -504,6 +595,7 @@ def test_market_warning_strip_renders_only_index_names_and_status_badges():
     assert "NASDAQ 100 선물" in html
     assert "매수 금지" in html
     assert "매도 금지" in html
+    assert html.count("class='summary-warning-card ") == 2
     for removed_text in (
         "매수&매도 경고",
         "상단 이탈",

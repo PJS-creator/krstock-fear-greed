@@ -696,7 +696,13 @@ def _mobile_heatmap_partition(
     return ordered[:individual_count], ordered[individual_count:]
 
 
-def _mobile_other_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _aggregate_heatmap_rows(
+    rows: list[dict[str, Any]],
+    *,
+    label_prefix: str,
+    kind: str,
+    sector: str,
+) -> dict[str, Any] | None:
     if not rows:
         return None
     total_value = sum(float(row.get("value_krw") or 0.0) for row in rows)
@@ -715,9 +721,11 @@ def _mobile_other_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
     previous_total = total_value - total_change
     change_pct = total_change / previous_total if previous_total > 0 else None
     labels = [str(row.get("compact_label") or row.get("label") or "-") for row in rows]
+    market_codes = {str(row.get("market_code") or "-") for row in rows}
+    market_code = next(iter(market_codes)) if len(market_codes) == 1 else "-"
     return {
-        "label": f"그 외 {len(rows)}종목",
-        "compact_label": "그 외",
+        "label": f"{label_prefix} {len(rows)}종목",
+        "compact_label": f"{label_prefix} {len(rows)}",
         "detail": f"{len(rows)}개 소형 비중 종목 합산",
         "heatmap_detail": f"포함 종목: {', '.join(labels)}",
         "value_krw": total_value,
@@ -726,11 +734,67 @@ def _mobile_other_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
         "heat_color": _heatmap_tone(change_pct),
         "day_change_pct": change_pct,
         "day_change_krw": total_change,
-        "kind": "other",
+        "kind": kind,
         "currency": "-",
-        "market_code": "-",
-        "sector": "그 외",
+        "market_code": market_code,
+        "sector": sector,
     }
+
+
+def _mobile_other_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    other_row = _aggregate_heatmap_rows(
+        rows,
+        label_prefix="그 외",
+        kind="other",
+        sector="그 외",
+    )
+    if other_row is not None:
+        other_row["compact_label"] = "그 외"
+        other_row["market_code"] = "-"
+    return other_row
+
+
+def _desktop_sector_partition(
+    rows: list[dict[str, Any]],
+    *,
+    other_weight_threshold: float = 0.015,
+    minimum_individual_items: int = 3,
+    maximum_visible_tiles: int = 7,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    ordered = sorted(rows, key=_sort_key, reverse=True)
+    if len(ordered) <= minimum_individual_items:
+        return ordered, []
+    threshold_count = sum(
+        1 for row in ordered if float(row.get("weight") or 0.0) >= other_weight_threshold
+    )
+    maximum_individual_items = max(minimum_individual_items, maximum_visible_tiles - 1)
+    individual_count = min(
+        len(ordered),
+        maximum_individual_items,
+        max(minimum_individual_items, threshold_count),
+    )
+    grouped_count = len(ordered) - individual_count
+    if grouped_count == 1:
+        if len(ordered) <= maximum_visible_tiles:
+            return ordered, []
+        if individual_count > minimum_individual_items:
+            individual_count -= 1
+    return ordered[:individual_count], ordered[individual_count:]
+
+
+def _desktop_sector_rows(group: Mapping[str, Any]) -> list[dict[str, Any]]:
+    individual_rows, grouped_rows = _desktop_sector_partition(list(group.get("rows") or []))
+    other_row = _aggregate_heatmap_rows(
+        grouped_rows,
+        label_prefix="기타",
+        kind="sector_other",
+        sector=str(group.get("label") or "기타"),
+    )
+    return sorted(
+        [*individual_rows, *([other_row] if other_row is not None else [])],
+        key=_sort_key,
+        reverse=True,
+    )
 
 
 def _mobile_heatmap(rows: list[dict[str, Any]]) -> str:
@@ -790,7 +854,7 @@ def _display_sector_groups(rows: list[dict[str, Any]], *, standalone_sector_limi
     return [*standalone, other_group]
 
 
-def _bounded_proportions(values: list[float], *, minimum: float) -> list[float]:
+def _bounded_group_proportions(values: list[float], *, minimum: float) -> list[float]:
     if not values:
         return []
     floor = min(max(minimum, 0.0), 1.0 / len(values))
@@ -800,27 +864,27 @@ def _bounded_proportions(values: list[float], *, minimum: float) -> list[float]:
         return [1.0 / len(values)] * len(values)
 
     result = [0.0] * len(values)
-    remaining_indices = set(range(len(values)))
+    remaining = set(range(len(values)))
     remaining_space = 1.0
-    while remaining_indices:
-        remaining_value = sum(positive[index] for index in remaining_indices)
+    while remaining:
+        remaining_value = sum(positive[index] for index in remaining)
         if remaining_value <= 0:
-            equal_share = remaining_space / len(remaining_indices)
-            for index in remaining_indices:
+            equal_share = remaining_space / len(remaining)
+            for index in remaining:
                 result[index] = equal_share
             break
         below_floor = [
             index
-            for index in remaining_indices
+            for index in remaining
             if remaining_space * positive[index] / remaining_value < floor
         ]
         if not below_floor:
-            for index in remaining_indices:
+            for index in remaining:
                 result[index] = remaining_space * positive[index] / remaining_value
             break
         for index in below_floor:
             result[index] = floor
-            remaining_indices.remove(index)
+            remaining.remove(index)
             remaining_space -= floor
     return result
 
@@ -828,25 +892,21 @@ def _bounded_proportions(values: list[float], *, minimum: float) -> list[float]:
 def _sector_group_layout(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not groups:
         return []
-    minimum_width = 0.28 if len(groups) == 2 else min(0.16, 1.0 / len(groups))
-    widths = _bounded_proportions(
+    minimum_area = 0.18 if len(groups) == 2 else 0.12
+    layout_proportions = _bounded_group_proportions(
         [float(group.get("value_krw") or 0.0) for group in groups],
-        minimum=minimum_width,
+        minimum=minimum_area,
     )
-    layout = []
-    cursor = 0.0
-    for group, width in zip(groups, widths, strict=True):
-        layout.append(
-            {
-                **group,
-                "x": cursor * 100.0,
-                "y": 0.0,
-                "width": width * 100.0,
-                "height": 100.0,
-            }
-        )
-        cursor += width
-    return layout
+    layout_rows = [
+        {**group, "value_krw": proportion, "actual_value_krw": group.get("value_krw")}
+        for group, proportion in zip(groups, layout_proportions, strict=True)
+    ]
+    positioned = _balanced_treemap_layout(layout_rows, width=100.0, height=100.0)
+    restored = []
+    for group in positioned:
+        group["value_krw"] = group.pop("actual_value_krw")
+        restored.append(group)
+    return restored
 
 
 def _split_rows_by_balance(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -955,12 +1015,15 @@ def _sector_member_tile(row: dict[str, Any]) -> str:
     market_code = str(row.get("market_code") or "-")
     market_suffix = f" ({market_code})" if market_code != "-" else ""
     title = f"{row['label']}{market_suffix} · {change_text} · 비중 {percentage(weight, digits=2)}"
+    if row.get("heatmap_detail"):
+        title = f"{title} · {row['heatmap_detail']}"
     tile_width = float(row.get("width") or 0.0)
     tile_height = float(row.get("height") or 0.0)
     is_tiny = tile_width < 15.0 or tile_height < 18.0
     is_small = is_tiny or tile_width < 24.0 or tile_height < 29.0
     size_class = " summary-sector-tile-tiny" if is_tiny else " summary-sector-tile-small" if is_small else ""
-    tile_class = f"summary-sector-tile{size_class}"
+    aggregate_class = " summary-sector-tile-aggregate" if row.get("kind") == "sector_other" else ""
+    tile_class = f"summary-sector-tile{size_class}{aggregate_class}"
     display_label = row.get("compact_label") if is_small else row.get("label")
     market_html = (
         f" <span class='summary-heatmap-market'>({escape(market_code)})</span>"
@@ -979,10 +1042,11 @@ def _sector_member_tile(row: dict[str, Any]) -> str:
 
 
 def _sector_group_html(group: dict[str, Any]) -> str:
-    rows = list(group["rows"])
+    source_rows = list(group["rows"])
+    rows = _desktop_sector_rows(group)
     group_title = (
         f"{group['label']} · 비중 {percentage(float(group['weight']), digits=2)} · "
-        + ", ".join(str(row.get("compact_label") or row.get("label") or "-") for row in rows)
+        + ", ".join(str(row.get("compact_label") or row.get("label") or "-") for row in source_rows)
     )
     positioned = _sector_member_layout(
         rows,
@@ -990,13 +1054,14 @@ def _sector_group_html(group: dict[str, Any]) -> str:
         group_height=float(group.get("height") or 100.0),
     )
     tiles = "".join(_sector_member_tile(row) for row in positioned)
+    compact_class = " summary-sector-group-compact" if float(group.get("height") or 100.0) < 30.0 else ""
     return (
-        f"<section class='summary-sector-group summary-sector-group-major' title='{escape(group_title)}' "
+        f"<section class='summary-sector-group summary-sector-group-major{compact_class}' title='{escape(group_title)}' "
         f"style='left:{float(group['x']):.4f}%;top:{float(group['y']):.4f}%;"
         f"width:{float(group['width']):.4f}%;height:{float(group['height']):.4f}%'>"
         "<div class='summary-sector-group-head'>"
         f"<div class='summary-sector-group-name'><strong>{escape(str(group['label']))}</strong>"
-        f"<span>{len(rows)}종목</span></div>"
+        f"<span>{len(source_rows)}종목</span></div>"
         f"<div class='summary-sector-group-weight'>{escape(percentage(float(group['weight']), digits=2))}</div>"
         "</div>"
         f"<div class='summary-sector-members'>{tiles}</div>"
@@ -1419,6 +1484,7 @@ def _render_styles() -> None:
             margin-right: 5px;
         }
         .summary-heatmap-legend .up:before { background: var(--app-profit); }
+        .summary-heatmap-legend .flat:before { background: var(--token-neutral-value); }
         .summary-heatmap-legend .down:before { background: var(--app-loss); }
         .summary-heatmap-area {
             position: relative;
@@ -1513,16 +1579,16 @@ def _render_styles() -> None:
             min-height: 0;
             display: flex;
             flex-direction: column;
-            padding: 6px;
-            border: 3px solid var(--summary-heatmap-bg);
-            border-radius: 8px;
+            padding: 5px;
+            border: 2px solid var(--summary-heatmap-bg);
+            border-radius: 7px;
             background: var(--summary-heatmap-bg);
             box-shadow: inset 0 0 0 1px var(--summary-heatmap-border);
             overflow: hidden;
         }
         .summary-sector-group-head {
             flex: 0 0 auto;
-            min-height: 27px;
+            min-height: 25px;
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -1582,9 +1648,33 @@ def _render_styles() -> None:
         }
         .summary-sector-tile:hover {
             z-index: 4;
-            filter: brightness(1.14) saturate(1.04);
-            transform: translateZ(0) scale(1.025);
+            filter: brightness(1.18) saturate(1.06);
+            transform: translateZ(0) scale(1.035);
             box-shadow: var(--app-shadow-sm);
+        }
+        .summary-sector-tile-aggregate {
+            box-shadow: inset 0 0 0 1px var(--summary-heatmap-tile-border);
+        }
+        .summary-sector-group-compact .summary-sector-tile {
+            flex-direction: row;
+            justify-content: space-between;
+            gap: 4px;
+            padding: 2px 6px;
+        }
+        .summary-sector-group-compact .summary-sector-tile-name {
+            min-width: 0;
+            font-size: 0.64rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .summary-sector-group-compact .summary-sector-tile-change {
+            flex: 0 0 auto;
+            font-size: 0.64rem;
+        }
+        .summary-sector-group-compact .summary-sector-tile-weight,
+        .summary-sector-group-compact .summary-heatmap-market {
+            display: none;
         }
         .summary-sector-tile-name {
             max-width: 100%;
@@ -1721,12 +1811,17 @@ def _render_styles() -> None:
         }
         .summary-warning-card {
             min-width: 0;
+            min-height: 41px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 8px;
-            padding: 2px 0;
+            padding: 7px;
+            border: 1px solid var(--app-border);
+            border-radius: 6px;
+            background: var(--app-surface);
             color: var(--app-text);
+            box-sizing: border-box;
         }
         .summary-warning-label {
             min-width: 0;
@@ -2196,6 +2291,22 @@ def _render_styles() -> None:
             .summary-index-change {
                 font-size: 1em;
             }
+            .summary-warning-cards {
+                gap: 6px;
+            }
+            .summary-warning-card {
+                min-height: 36px;
+                gap: 4px;
+                padding: 6px;
+            }
+            .summary-warning-label {
+                font-size: clamp(0.68rem, 2.7vw, 0.74rem);
+            }
+            .summary-warning-badge {
+                min-height: 22px;
+                padding: 3px 6px;
+                font-size: clamp(0.62rem, 2.55vw, 0.68rem);
+            }
             .summary-mobile-holdings {
                 display: block;
                 margin-top: 12px;
@@ -2540,7 +2651,7 @@ def render_investment_summary_card(
             <div class="summary-panel summary-heatmap-card">
                 <div class="summary-heatmap-head">
                     <h3>구성·성과</h3>
-                    <div class="summary-heatmap-legend"><span class="up">상승</span><span class="down">하락</span></div>
+                    <div class="summary-heatmap-legend"><span class="up">상승</span><span class="flat">보합</span><span class="down">하락</span></div>
                 </div>
                 {desktop_heatmap}
                 <div class="summary-heatmap-mobile">{mobile_heatmap}</div>
