@@ -5,7 +5,13 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from portfolio.holdings import HOLDING_COLUMNS, PortfolioMetrics, merge_quick_rows_with_existing, normalize_holding_rows
+from portfolio.holdings import (
+    HOLDING_COLUMNS,
+    HOLDING_METADATA_FIELDS,
+    PortfolioMetrics,
+    merge_quick_rows_with_existing,
+    normalize_holding_rows,
+)
 from portfolio.symbols import (
     SIMPLE_PORTFOLIO_COLUMNS,
     build_input_preview,
@@ -159,6 +165,29 @@ def _advanced_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
         if column in frame.columns:
             frame[column] = frame[column].fillna("").astype(str)
     return frame
+
+
+def _preserve_holding_metadata(
+    edited_rows: list[dict[str, object]],
+    existing_rows: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    existing_by_key = {
+        (str(row.get("market") or "").strip().upper(), str(row.get("ticker") or row.get("symbol") or "").strip().upper()): row
+        for row in existing_rows
+    }
+    merged_rows: list[dict[str, object]] = []
+    for edited_row in edited_rows:
+        merged = dict(edited_row)
+        key = (
+            str(merged.get("market") or "").strip().upper(),
+            str(merged.get("ticker") or merged.get("symbol") or "").strip().upper(),
+        )
+        existing = existing_by_key.get(key, {})
+        for field in HOLDING_METADATA_FIELDS:
+            if field not in merged and existing.get(field) is not None:
+                merged[field] = existing[field]
+        merged_rows.append(merged)
+    return merged_rows
 
 
 def _preview_frame(records: list[dict[str, object]]) -> pd.DataFrame:
@@ -364,10 +393,14 @@ def render_holdings_editor() -> None:
             },
         )
         if st.button("고급 설정 적용"):
-            if not begin_ui_action("apply_advanced_holdings", payload=advanced.to_dict("records")):
+            edited_rows = _preserve_holding_metadata(
+                advanced.to_dict("records"),
+                list(st.session_state.get("holdings_rows", [])),
+            )
+            if not begin_ui_action("apply_advanced_holdings", payload=edited_rows):
                 return
             try:
-                st.session_state.holdings_rows = normalize_holding_rows(advanced.to_dict("records"))
+                st.session_state.holdings_rows = normalize_holding_rows(edited_rows)
                 request_app_rerun()
             except ValueError as exc:
                 finish_ui_action(success=False)

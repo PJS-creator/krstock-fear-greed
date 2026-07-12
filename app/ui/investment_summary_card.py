@@ -10,43 +10,12 @@ import streamlit as st
 
 from portfolio.holdings import PortfolioMetrics
 from portfolio.market_indices import DEFAULT_MARKET_WARNING_SPECS, MarketIndexQuote, MarketWarningSignal
+from portfolio.security_metadata import resolve_holding_sector
 from portfolio.transactions import normalize_transaction_rows
 
 from .components import render_empty_state
 from .formatters import KST, format_kst, format_number, format_price, instrument_label, percentage, signed_krw, signed_percentage
 from .theme import SEMANTIC_COLORS, get_active_theme
-
-
-_SECTOR_BY_TICKER = {
-    "000660": "반도체·전자",
-    "005930": "반도체·전자",
-    "005935": "반도체·전자",
-    "009540": "조선·산업재",
-    "071050": "금융",
-    "239890": "디스플레이 소재",
-    "AYA": "귀금속·광업",
-    "AVR": "바이오·헬스케어",
-    "CCCC": "바이오·헬스케어",
-    "CGEM": "바이오·헬스케어",
-    "CMPS": "바이오·헬스케어",
-    "CTMX": "바이오·헬스케어",
-    "EXK": "귀금속·광업",
-    "GHRS": "바이오·헬스케어",
-    "MAKO": "귀금속·광업",
-    "PSNL": "바이오·헬스케어",
-    "QURE": "바이오·헬스케어",
-    "VOR": "바이오·헬스케어",
-}
-
-_SECTOR_BY_NAME = {
-    "HD한국조선해양": "조선·산업재",
-    "SK하이닉스": "반도체·전자",
-    "삼성전자": "반도체·전자",
-    "삼성전자우": "반도체·전자",
-    "삼성전자우선주": "반도체·전자",
-    "피엔에이치테크": "디스플레이 소재",
-    "한국금융지주": "금융",
-}
 
 
 def _krw(value: float | None) -> str:
@@ -149,14 +118,7 @@ def _market_code(holding: Mapping[str, Any]) -> str:
 
 
 def _holding_sector(holding: Mapping[str, Any]) -> str:
-    explicit_sector = str(holding.get("sector") or holding.get("sector_name") or "").strip()
-    if explicit_sector:
-        return explicit_sector
-    ticker = str(holding.get("ticker") or holding.get("symbol") or "").strip().upper()
-    if ticker in _SECTOR_BY_TICKER:
-        return _SECTOR_BY_TICKER[ticker]
-    display_name = str(holding.get("display_name") or holding.get("name") or "").strip()
-    return _SECTOR_BY_NAME.get(display_name, "기타")
+    return resolve_holding_sector(holding)
 
 
 def _currency_badge(value: object) -> str:

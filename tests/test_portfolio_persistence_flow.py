@@ -223,6 +223,33 @@ def test_saved_account_portfolio_survives_a_fresh_session(monkeypatch):
     assert fresh_session[dashboard.PORTFOLIO_LOAD_STATE_KEY]["status"] == "loaded"
 
 
+def test_security_metadata_enrichment_updates_loaded_holdings(monkeypatch):
+    state = _state()
+    _install_streamlit(monkeypatch, state)
+    state.holdings_rows = [_holding("AAPL")]
+    provider = object()
+    monkeypatch.setattr(dashboard, "build_yfinance_security_metadata_provider", lambda: provider)
+
+    def enrich(rows, selected_provider):
+        assert selected_provider is provider
+        enriched = [dict(row) for row in rows]
+        enriched[0].update(
+            {
+                "sector": "정보기술",
+                "metadata_source": "yfinance",
+                "metadata_fetched_at": "2026-07-11T00:00:00+00:00",
+            }
+        )
+        return enriched
+
+    monkeypatch.setattr(dashboard, "enrich_holding_metadata", enrich)
+
+    dashboard._enrich_security_metadata_if_needed()
+
+    assert state.holdings_rows[0]["sector"] == "정보기술"
+    assert state.holdings_rows[0]["metadata_source"] == "yfinance"
+
+
 def test_save_is_not_marked_clean_when_read_after_write_cannot_verify(monkeypatch):
     state = _state()
     _install_streamlit(monkeypatch, state)

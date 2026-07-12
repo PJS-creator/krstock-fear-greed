@@ -109,6 +109,7 @@ from portfolio.pricing import (
     refresh_holding_quotes,
     refresh_usd_krw,
 )
+from portfolio.security_metadata import build_yfinance_security_metadata_provider, enrich_holding_metadata
 from portfolio.storage import (
     PortfolioRecord,
     PortfolioStoreError,
@@ -1170,6 +1171,22 @@ def _persist_current_portfolio(owner_id, store, target_allocation_store=None) ->
     _set_portfolio_load_state(owner_id, portfolio_name, "loaded")
     _mark_portfolio_clean()
     return payload
+
+
+def _enrich_security_metadata_if_needed() -> None:
+    rows = list(st.session_state.get("holdings_rows") or [])
+    if not rows:
+        return
+    try:
+        enriched_rows = enrich_holding_metadata(
+            rows,
+            build_yfinance_security_metadata_provider(),
+        )
+    except Exception:
+        LOGGER.exception("Security metadata enrichment failed")
+        return
+    if enriched_rows != rows:
+        st.session_state.holdings_rows = enriched_rows
 
 
 def _save_history_snapshot_safely(history_store, record) -> bool:
@@ -2457,6 +2474,7 @@ def run_dashboard(*, public_auth_enabled: bool | None = None) -> None:
     portfolio_store, history_store, historical_schedule_store, target_allocation_store = _build_stores(storage_config)
     owner_id = _resolve_owner_id(storage_config)
     _auto_load_account_portfolio(owner_id, portfolio_store, target_allocation_store, history_store)
+    _enrich_security_metadata_if_needed()
     if not public_auth_enabled:
         _auto_refresh_loaded_prices(owner_id, portfolio_store, target_allocation_store, history_store)
     _render_sidebar(security_config, owner_id, portfolio_store, public_auth_enabled=public_auth_enabled)
