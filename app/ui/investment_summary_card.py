@@ -965,6 +965,100 @@ def _balanced_treemap_layout(
     )
 
 
+def _treemap_worst_aspect_ratio(areas: list[float], side: float) -> float:
+    positive = [area for area in areas if area > 0]
+    if not positive or side <= 0:
+        return float("inf")
+    area_sum = sum(positive)
+    side_squared = side * side
+    return max(
+        side_squared * max(positive) / (area_sum * area_sum),
+        (area_sum * area_sum) / (side_squared * min(positive)),
+    )
+
+
+def _layout_treemap_strip(
+    items: list[tuple[dict[str, Any], float]],
+    *,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+) -> tuple[list[dict[str, Any]], tuple[float, float, float, float]]:
+    strip_area = sum(area for _, area in items)
+    positioned: list[dict[str, Any]] = []
+    if width >= height:
+        strip_width = strip_area / height if height > 0 else 0.0
+        cursor_y = y
+        for index, (row, area) in enumerate(items):
+            tile_height = height if strip_width <= 0 else area / strip_width
+            if index == len(items) - 1:
+                tile_height = y + height - cursor_y
+            positioned.append(
+                {**row, "x": x, "y": cursor_y, "width": strip_width, "height": max(tile_height, 0.0)}
+            )
+            cursor_y += tile_height
+        return positioned, (x + strip_width, y, max(width - strip_width, 0.0), height)
+
+    strip_height = strip_area / width if width > 0 else 0.0
+    cursor_x = x
+    for index, (row, area) in enumerate(items):
+        tile_width = width if strip_height <= 0 else area / strip_height
+        if index == len(items) - 1:
+            tile_width = x + width - cursor_x
+        positioned.append(
+            {**row, "x": cursor_x, "y": y, "width": max(tile_width, 0.0), "height": strip_height}
+        )
+        cursor_x += tile_width
+    return positioned, (x, y + strip_height, width, max(height - strip_height, 0.0))
+
+
+def _squarified_treemap_layout(
+    rows: list[dict[str, Any]],
+    *,
+    x: float = 0.0,
+    y: float = 0.0,
+    width: float = 100.0,
+    height: float = 100.0,
+) -> list[dict[str, Any]]:
+    if not rows:
+        return []
+    positive_values = [max(float(row.get("value_krw") or 0.0), 0.0) for row in rows]
+    total_value = sum(positive_values)
+    if total_value <= 0:
+        positive_values = [1.0] * len(rows)
+        total_value = float(len(rows))
+    canvas_area = max(width, 0.0) * max(height, 0.0)
+    pending = [
+        (dict(row), value / total_value * canvas_area)
+        for row, value in zip(rows, positive_values, strict=True)
+        if value > 0
+    ]
+    positioned: list[dict[str, Any]] = []
+    remaining_x, remaining_y, remaining_width, remaining_height = x, y, width, height
+
+    # Build strips only while adding the next tile improves the strip's worst aspect ratio.
+    while pending and remaining_width > 0 and remaining_height > 0:
+        side = min(remaining_width, remaining_height)
+        strip = [pending.pop(0)]
+        while pending:
+            current_areas = [area for _, area in strip]
+            next_areas = [*current_areas, pending[0][1]]
+            if _treemap_worst_aspect_ratio(next_areas, side) > _treemap_worst_aspect_ratio(current_areas, side):
+                break
+            strip.append(pending.pop(0))
+        laid_out, remaining = _layout_treemap_strip(
+            strip,
+            x=remaining_x,
+            y=remaining_y,
+            width=remaining_width,
+            height=remaining_height,
+        )
+        positioned.extend(laid_out)
+        remaining_x, remaining_y, remaining_width, remaining_height = remaining
+    return positioned
+
+
 def _sector_member_layout(rows: list[dict[str, Any]], *, group_width: float, group_height: float) -> list[dict[str, Any]]:
     if len(rows) == 3:
         values = [max(float(row.get("value_krw") or 0.0), 0.0) for row in rows]
@@ -995,7 +1089,7 @@ def _sector_member_layout(rows: list[dict[str, Any]], *, group_width: float, gro
 
     virtual_width = max(group_width, 1.0) * 10.0
     virtual_height = max(group_height * 2.56 - 30.0, 28.0)
-    positioned = _balanced_treemap_layout(rows, width=virtual_width, height=virtual_height)
+    positioned = _squarified_treemap_layout(rows, width=virtual_width, height=virtual_height)
     return [
         {
             **row,

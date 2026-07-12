@@ -301,6 +301,33 @@ def test_desktop_sector_groups_small_members_into_weighted_other_tile():
     assert "8종목" in html
 
 
+def test_dense_healthcare_sector_uses_readable_squarified_tiles():
+    values = [36, 24, 14, 9, 6, 4, 3]
+    rows = [
+        {"label": f"BIO{index}", "value_krw": value}
+        for index, value in enumerate(values, start=1)
+    ]
+    group_width = 55.0
+    group_height = 100.0
+
+    layout = _sector_member_layout(rows, group_width=group_width, group_height=group_height)
+    virtual_width = group_width * 10.0
+    virtual_height = group_height * 2.56 - 30.0
+    aspect_ratios = []
+    for tile in layout:
+        tile_width = float(tile["width"]) / 100.0 * virtual_width
+        tile_height = float(tile["height"]) / 100.0 * virtual_height
+        aspect_ratios.append(max(tile_width / tile_height, tile_height / tile_width))
+
+    areas = [float(tile["width"]) * float(tile["height"]) for tile in layout]
+    total_area = sum(areas)
+    assert all(
+        abs(area / total_area - value / sum(values)) < 1e-9
+        for area, value in zip(areas, values, strict=True)
+    )
+    assert max(aspect_ratios) < 2.0
+
+
 def test_mobile_heatmap_groups_small_positions_into_one_weighted_other_tile():
     rows = [
         {
