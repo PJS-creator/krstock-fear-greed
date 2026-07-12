@@ -618,9 +618,23 @@ def _treemap_layout(
     )
 
 
-def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
+def _heatmap_tiles(
+    rows: list[dict[str, Any]],
+    *,
+    aspect_ratio: float = 1.0,
+    balanced: bool = False,
+) -> str:
     tiles = []
-    for row in _treemap_layout(rows):
+    safe_aspect_ratio = max(float(aspect_ratio), 0.1)
+    canvas_height = 100.0 / safe_aspect_ratio
+    layout_function = _balanced_treemap_layout if balanced else _treemap_layout
+    positioned_rows = layout_function(rows, width=100.0, height=canvas_height)
+    for positioned in positioned_rows:
+        row = {
+            **positioned,
+            "y": float(positioned["y"]) / canvas_height * 100.0,
+            "height": float(positioned["height"]) / canvas_height * 100.0,
+        }
         weight = float(row.get("weight") or 0.0)
         change_pct = row.get("day_change_pct")
         change_text = signed_percentage(change_pct) if change_pct is not None else "-"
@@ -632,6 +646,8 @@ def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
         market_code = str(row.get("market_code") or "-")
         market_suffix = f" ({market_code})" if market_code != "-" else ""
         title = f"{row['label']}{market_suffix} · {change_text} · 비중 {percentage(weight, digits=2)}"
+        if row.get("heatmap_detail"):
+            title = f"{title} · {row['heatmap_detail']}"
         market_html = (
             f" <span class='summary-heatmap-market'>({escape(market_code)})</span>" if market_code != "-" else ""
         )
@@ -655,32 +671,66 @@ def _heatmap_tiles(rows: list[dict[str, Any]]) -> str:
 def _mobile_heatmap_partition(
     rows: list[dict[str, Any]],
     *,
-    compact_weight_threshold: float = 0.035,
-    minimum_major_items: int = 4,
+    other_weight_threshold: float = 0.035,
+    minimum_individual_items: int = 4,
+    maximum_visible_tiles: int = 8,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     ordered = sorted(rows, key=_sort_key, reverse=True)
-    if len(ordered) <= minimum_major_items:
+    if len(ordered) <= minimum_individual_items:
         return ordered, []
-    major_count = sum(1 for row in ordered if float(row.get("weight") or 0.0) >= compact_weight_threshold)
-    major_count = max(minimum_major_items, major_count)
-    return ordered[:major_count], ordered[major_count:]
-
-
-def _mobile_compact_tile(row: dict[str, Any]) -> str:
-    weight = float(row.get("weight") or 0.0)
-    change_pct = row.get("day_change_pct")
-    change_text = signed_percentage(change_pct) if change_pct is not None else "-"
-    market_code = str(row.get("market_code") or "-")
-    market_suffix = f" ({market_code})" if market_code != "-" else ""
-    title = f"{row['label']}{market_suffix} · {change_text} · 비중 {percentage(weight, digits=2)}"
-    compact_label = str(row.get("compact_label") or row.get("label") or "-")
-    return (
-        "<div class='summary-mobile-compact-tile' "
-        f"title='{escape(title)}' aria-label='{escape(title)}' "
-        f"style='background:{row['heat_color']}'>"
-        f"<span>{escape(compact_label)}</span>"
-        "</div>"
+    threshold_count = sum(
+        1 for row in ordered if float(row.get("weight") or 0.0) >= other_weight_threshold
     )
+    maximum_individual_items = max(minimum_individual_items, maximum_visible_tiles - 1)
+    individual_count = min(
+        len(ordered),
+        maximum_individual_items,
+        max(minimum_individual_items, threshold_count),
+    )
+    grouped_count = len(ordered) - individual_count
+    if grouped_count == 1:
+        if len(ordered) <= maximum_visible_tiles:
+            return ordered, []
+        if individual_count > minimum_individual_items:
+            individual_count -= 1
+    return ordered[:individual_count], ordered[individual_count:]
+
+
+def _mobile_other_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not rows:
+        return None
+    total_value = sum(float(row.get("value_krw") or 0.0) for row in rows)
+    total_change = 0.0
+    for row in rows:
+        explicit_change = row.get("day_change_krw")
+        if explicit_change is not None:
+            total_change += float(explicit_change)
+            continue
+        value = float(row.get("value_krw") or 0.0)
+        change_pct = row.get("day_change_pct")
+        if change_pct is None or float(change_pct) <= -1.0:
+            continue
+        previous_value = value / (1.0 + float(change_pct))
+        total_change += value - previous_value
+    previous_total = total_value - total_change
+    change_pct = total_change / previous_total if previous_total > 0 else None
+    labels = [str(row.get("compact_label") or row.get("label") or "-") for row in rows]
+    return {
+        "label": f"그 외 {len(rows)}종목",
+        "compact_label": "그 외",
+        "detail": f"{len(rows)}개 소형 비중 종목 합산",
+        "heatmap_detail": f"포함 종목: {', '.join(labels)}",
+        "value_krw": total_value,
+        "weight": sum(float(row.get("weight") or 0.0) for row in rows),
+        "color": _movement_dot_color(change_pct),
+        "heat_color": _heatmap_tone(change_pct),
+        "day_change_pct": change_pct,
+        "day_change_krw": total_change,
+        "kind": "other",
+        "currency": "-",
+        "market_code": "-",
+        "sector": "그 외",
+    }
 
 
 def _mobile_heatmap(rows: list[dict[str, Any]]) -> str:
@@ -689,16 +739,16 @@ def _mobile_heatmap(rows: list[dict[str, Any]]) -> str:
             "<div class='summary-mobile-heatmap-layout summary-mobile-heatmap-empty'>"
             "보유자산 없음</div>"
         )
-    major_rows, compact_rows = _mobile_heatmap_partition(rows)
-    layout_class = "summary-mobile-heatmap-layout-has-compact" if compact_rows else "summary-mobile-heatmap-layout-major-only"
-    compact_grid = ""
-    if compact_rows:
-        compact_tiles = "".join(_mobile_compact_tile(row) for row in compact_rows)
-        compact_grid = f"<div class='summary-mobile-compact-grid'>{compact_tiles}</div>"
+    individual_rows, grouped_rows = _mobile_heatmap_partition(rows)
+    other_row = _mobile_other_row(grouped_rows)
+    display_rows = sorted(
+        [*individual_rows, *([other_row] if other_row is not None else [])],
+        key=_sort_key,
+        reverse=True,
+    )
     return (
-        f"<div class='summary-mobile-heatmap-layout {layout_class}'>"
-        f"<div class='summary-mobile-heatmap-major'>{_heatmap_tiles(major_rows)}</div>"
-        f"{compact_grid}"
+        "<div class='summary-mobile-heatmap-layout'>"
+        f"<div class='summary-mobile-heatmap-major'>{_heatmap_tiles(display_rows, aspect_ratio=4 / 3, balanced=True)}</div>"
         "</div>"
     )
 
@@ -995,10 +1045,8 @@ def _market_index_cell(row: MarketIndexQuote | Mapping[str, Any]) -> str:
         title_parts.append(symbol)
     if error_message:
         title_parts.append(str(error_message))
-    is_gold = "XAU" in symbol.upper() or "금" in label
-    cell_class = "summary-index-cell summary-index-cell-gold" if is_gold else "summary-index-cell"
     return (
-        f"<div class='{cell_class}' title='{escape(' · '.join(title_parts))}'>"
+        f"<div class='summary-index-cell' title='{escape(' · '.join(title_parts))}'>"
         f"<span class='summary-index-name'>{escape(label)}</span>"
         "<span class='summary-index-quote'>"
         f"<span class='summary-index-value'>{escape(_market_index_value(value))}</span>"
@@ -1578,48 +1626,17 @@ def _render_styles() -> None:
             background: var(--summary-heatmap-bg);
         }
         .summary-mobile-heatmap-layout {
-            display: grid;
-            gap: 4px;
+            display: block;
         }
         .summary-mobile-heatmap-major {
             position: relative;
-            min-height: 232px;
+            min-height: 0;
+            aspect-ratio: 4 / 3;
             overflow: hidden;
             border: 1px solid var(--summary-heatmap-border);
             border-radius: 7px;
             background: var(--summary-heatmap-bg);
             box-shadow: var(--app-shadow);
-        }
-        .summary-mobile-heatmap-layout-has-compact .summary-mobile-heatmap-major {
-            min-height: 188px;
-        }
-        .summary-mobile-compact-grid {
-            display: grid;
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-            grid-auto-rows: 30px;
-            gap: 4px;
-        }
-        .summary-mobile-compact-tile {
-            min-width: 0;
-            min-height: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 2px 3px;
-            border: 1px solid var(--summary-heatmap-tile-border);
-            border-radius: 5px;
-            color: var(--token-chart-tooltip-text);
-            overflow: hidden;
-            box-shadow: inset 0 -6px 14px color-mix(in srgb, var(--token-overlay) 24%, transparent);
-        }
-        .summary-mobile-compact-tile span {
-            max-width: 100%;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            font-size: clamp(0.62rem, 2.7vw, 0.72rem);
-            font-weight: 850;
-            line-height: 1;
         }
         .summary-mobile-heatmap-empty {
             min-height: 232px;
@@ -1689,16 +1706,6 @@ def _render_styles() -> None:
         .summary-index-change {
             font-size: 0.72rem;
             font-weight: 820;
-        }
-        .summary-index-cell-gold {
-            border-color: var(--token-warning);
-            background:
-                linear-gradient(180deg, color-mix(in srgb, var(--token-warning-soft) 42%, transparent), transparent 115%),
-                var(--app-surface);
-        }
-        .summary-index-cell-gold .summary-index-name,
-        .summary-index-cell-gold .summary-index-change {
-            color: var(--token-warning);
         }
         .summary-index-empty {
             color: var(--app-muted);

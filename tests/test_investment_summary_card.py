@@ -10,6 +10,7 @@ from app.ui.investment_summary_card import (
     _market_index_strip,
     _market_warning_strip,
     _mobile_heatmap,
+    _mobile_other_row,
     _mobile_heatmap_partition,
     _mobile_holding_summary_table,
     _sector_group_layout,
@@ -215,7 +216,7 @@ def test_three_member_sector_uses_value_proportional_non_uniform_tiles():
     assert [round(area / total_area, 2) for area in areas] == [0.50, 0.30, 0.20]
 
 
-def test_mobile_heatmap_moves_small_positions_into_readable_ticker_grid():
+def test_mobile_heatmap_groups_small_positions_into_one_weighted_other_tile():
     rows = [
         {
             "label": f"Holding {index}",
@@ -232,16 +233,44 @@ def test_mobile_heatmap_moves_small_positions_into_readable_ticker_grid():
         )
     ]
 
-    major, compact = _mobile_heatmap_partition(rows)
+    individual, grouped = _mobile_heatmap_partition(rows)
+    other = _mobile_other_row(grouped)
     html = _mobile_heatmap(rows)
 
-    assert [row["compact_label"] for row in major] == ["T01", "T02", "T03", "T04"]
-    assert [row["compact_label"] for row in compact] == ["T05", "T06", "T07"]
+    assert [row["compact_label"] for row in individual] == ["T01", "T02", "T03", "T04"]
+    assert [row["compact_label"] for row in grouped] == ["T05", "T06", "T07"]
+    assert other is not None
+    assert other["label"] == "그 외 3종목"
+    assert other["value_krw"] == 6
+    assert round(other["weight"], 6) == 0.06
     assert "summary-mobile-heatmap-major" in html
-    assert "summary-mobile-compact-grid" in html
-    assert html.count("summary-mobile-compact-tile") == 3
-    for ticker in ("T05", "T06", "T07"):
-        assert f"<span>{ticker}</span>" in html
+    assert "summary-mobile-compact-grid" not in html
+    assert html.count("summary-heatmap-tile") == 5
+    assert "그 외 3종목" in html
+    assert "포함 종목: T05, T06, T07" in html
+
+
+def test_mobile_heatmap_limits_total_tiles_even_when_many_positions_exceed_threshold():
+    rows = [
+        {
+            "label": f"Holding {index}",
+            "compact_label": f"T{index:02d}",
+            "value_krw": 5,
+            "weight": 0.05,
+            "day_change_pct": 0.01,
+            "market_code": "US",
+            "heat_color": get_active_theme().tokens()["profit"],
+        }
+        for index in range(1, 13)
+    ]
+
+    individual, grouped = _mobile_heatmap_partition(rows)
+    html = _mobile_heatmap(rows)
+
+    assert len(individual) == 7
+    assert len(grouped) == 5
+    assert html.count("summary-heatmap-tile") == 8
+    assert "그 외 5종목" in html
 
 
 def test_current_portfolio_tickers_cover_six_requested_sector_groups():
@@ -381,8 +410,8 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "summary-sector-heatmap" in html
     assert "summary-heatmap-mobile" in html
     assert "height: clamp(276px, 22vw, 310px);" in html
-    assert "summary-mobile-compact-grid" in html
-    assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in html
+    assert "summary-mobile-compact-grid" not in html
+    assert "aspect-ratio: 4 / 3;" in html
     assert ".summary-sector-heatmap { display: none; }" in html
     assert ".summary-heatmap-mobile { display: block; }" in html
     assert "면적 표시 원칙" not in html
@@ -438,7 +467,8 @@ def test_market_index_strip_renders_requested_compact_row():
     assert "(+0.8%)" in html
     assert "금 지수" in html
     assert "XAU/USD" in html
-    assert "summary-index-cell-gold" in html
+    assert html.count("class='summary-index-cell'") == 2
+    assert "summary-index-cell-gold" not in html
     assert "신규" not in html
 
 
