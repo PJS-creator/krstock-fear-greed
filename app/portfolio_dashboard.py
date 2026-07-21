@@ -83,6 +83,7 @@ from portfolio.history import PortfolioHistoryStoreError, build_history_record, 
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
 from portfolio.market_indices import MarketWarningSpec, fetch_market_indices, fetch_market_warning_signals
+from portfolio.meta_strategy import fetch_meta_strategy, retain_previous_meta_strategy_result
 from portfolio.persistence import (
     portfolio_payload_has_data,
     recover_portfolio_payload_from_history,
@@ -156,6 +157,7 @@ PRICE_REFRESH_IN_PROGRESS_KEY = "price_refresh_in_progress"
 PRICE_REFRESH_STARTED_AT_KEY = "price_refresh_started_at"
 PRICE_REFRESH_STALE_SECONDS = 180.0
 PRICE_REFRESH_BUDGET_SECONDS = 24.0
+META_STRATEGY_RESULT_KEY = "meta_strategy_result"
 KIS_REQUEST_TIMEOUT_SECONDS = 3.0
 YFINANCE_REQUEST_TIMEOUT_SECONDS = 5.0
 INTRADAY_REQUEST_TIMEOUT_SECONDS = 3.0
@@ -419,6 +421,7 @@ def _reset_current_portfolio_state(portfolio_name: str = "main") -> None:
         "fx_error_message": None,
         "price_update_statuses": [],
         "last_price_refresh_at": None,
+        META_STRATEGY_RESULT_KEY: None,
         "mark_clean": True,
     }
 
@@ -780,6 +783,7 @@ def _apply_pending_portfolio_state() -> None:
         "fx_error_message",
         "price_update_statuses",
         "last_price_refresh_at",
+        META_STRATEGY_RESULT_KEY,
     ):
         if key in pending_state:
             st.session_state[key] = pending_state[key]
@@ -830,6 +834,7 @@ def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     st.session_state.setdefault("fx_error_message", None)
     st.session_state.setdefault("price_update_statuses", [])
     st.session_state.setdefault("last_price_refresh_at", None)
+    st.session_state.setdefault(META_STRATEGY_RESULT_KEY, None)
     st.session_state.setdefault(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
     st.session_state.setdefault(PRICE_REFRESH_IN_PROGRESS_KEY, False)
     st.session_state.setdefault(PRICE_REFRESH_STARTED_AT_KEY, 0.0)
@@ -1080,6 +1085,12 @@ def _cached_market_warning_signals(refresh_key: str | None) -> list:
 
 def _read_market_warning_signals(refresh_key: str | None) -> list:
     return _cached_market_warning_signals(str(refresh_key or ""))
+
+
+def _refresh_meta_strategy_state() -> None:
+    current = fetch_meta_strategy()
+    previous = st.session_state.get(META_STRATEGY_RESULT_KEY)
+    st.session_state[META_STRATEGY_RESULT_KEY] = retain_previous_meta_strategy_result(previous, current)
 
 
 def _resolve_owner_id(storage_config) -> str | None:
@@ -1367,6 +1378,15 @@ def _run_price_refresh(
             LOGGER.exception("price_refresh_failed type=%s message=%s", type(exc).__name__, exc)
             st.session_state[ACCOUNT_STATUS_KEY] = f"가격·환율 갱신 실패: {exc}. 기존 값을 유지했습니다."
         finally:
+            has_portfolio_assets = bool(st.session_state.get("holdings_rows")) or any(
+                float(st.session_state.get(key) or 0.0) > 0 for key in ("cash_krw", "cash_usd")
+            )
+            if has_portfolio_assets:
+                try:
+                    _refresh_meta_strategy_state()
+                    should_rerun = True
+                except Exception as exc:
+                    LOGGER.exception("meta_strategy_refresh_failed type=%s message=%s", type(exc).__name__, exc)
             st.session_state[PRICE_REFRESH_IN_PROGRESS_KEY] = False
             st.session_state.pop(PRICE_REFRESH_STARTED_AT_KEY, None)
             finish_ui_action(success=True)
@@ -2162,6 +2182,7 @@ def _render_summary_card_section(metrics) -> None:
         transactions=list(st.session_state.get("portfolio_transactions", [])),
         market_indices=_cached_market_indices(str(last_refresh or "")),
         market_warnings=_read_market_warning_signals(str(last_refresh or "")),
+        meta_strategy=st.session_state.get(META_STRATEGY_RESULT_KEY),
     )
 
 

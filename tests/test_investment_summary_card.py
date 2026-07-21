@@ -10,6 +10,7 @@ from app.ui.investment_summary_card import (
     _holding_sector,
     _holding_table_rows,
     _market_index_strip,
+    _meta_strategy_panel,
     _market_warning_strip,
     _mobile_heatmap,
     _mobile_other_row,
@@ -534,6 +535,10 @@ def test_investment_summary_keeps_detailed_holding_table_below_mobile_summary(mo
     assert "summary-index-strip" in html
     assert "주요 지수변동" in html
     assert "summary-warning-strip" in html
+    assert "summary-meta-strategy" in html
+    assert "시장구간" in html
+    assert "활성화 전략" in html
+    assert "적용티커" in html
     assert "매수&매도 경고" not in html
     assert "Bollinger Band(180, 2.0)" not in html
     assert "grid-template-columns: repeat(3, minmax(0, 1fr));" in html
@@ -686,6 +691,43 @@ def test_market_warning_strip_keeps_required_kis_failure_on_kis_source():
     assert "KIS 조회 실패" not in html
     assert "KIS temporary failure" not in html
     assert "Yahoo 60분봉" not in html
+
+
+def test_meta_strategy_panel_shows_requested_three_results_and_diagnostics():
+    html = _meta_strategy_panel(
+        {
+            "status": "updated",
+            "market_regime": "mixed",
+            "market_regime_label": "혼재장",
+            "active_strategy": "comparison3",
+            "active_strategy_label": "비교3 · RSI 전환",
+            "applied_ticker": "QLD",
+            "qqq_as_of_date": "2026-07-20",
+            "liquidity_as_of_date": "2026-07-17",
+            "liquidity_percentile": 61.25,
+            "trend200": "UP",
+            "recovery": False,
+        }
+    )
+
+    assert "summary-meta-strategy" in html
+    assert "시장구간" in html
+    assert "혼재장" in html
+    assert "활성화 전략" in html
+    assert "비교3 · RSI 전환" in html
+    assert "적용티커" in html
+    assert "QLD" in html
+    assert "P 61.2" in html
+    assert "추세 UP" in html
+    assert "자동 매매가 아닙니다" in html
+
+
+def test_meta_strategy_panel_has_safe_pending_state_before_refresh():
+    html = _meta_strategy_panel(None)
+
+    assert "갱신 대기" in html
+    assert "가격·환율 갱신 시" in html
+    assert "<strong>-</strong>" in html
 
 
 def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_exclude_cash():

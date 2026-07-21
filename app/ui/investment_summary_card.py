@@ -10,6 +10,7 @@ import streamlit as st
 
 from portfolio.holdings import PortfolioMetrics
 from portfolio.market_indices import DEFAULT_MARKET_WARNING_SPECS, MarketIndexQuote, MarketWarningSignal
+from portfolio.meta_strategy import MetaStrategyResult
 from portfolio.transactions import normalize_transaction_rows
 
 from .components import render_empty_state
@@ -1269,6 +1270,65 @@ def _market_warning_strip(rows: list[MarketWarningSignal | Mapping[str, Any]] | 
     )
 
 
+def _meta_strategy_attr(result: MetaStrategyResult | Mapping[str, Any] | None, key: str, default: Any = None) -> Any:
+    if result is None:
+        return default
+    if isinstance(result, Mapping):
+        return result.get(key, default)
+    return getattr(result, key, default)
+
+
+def _meta_strategy_panel(result: MetaStrategyResult | Mapping[str, Any] | None) -> str:
+    status = str(_meta_strategy_attr(result, "status", "pending") or "pending")
+    regime = str(_meta_strategy_attr(result, "market_regime", "") or "")
+    regime_label = str(_meta_strategy_attr(result, "market_regime_label", "갱신 대기") or "갱신 대기")
+    strategy_label = str(_meta_strategy_attr(result, "active_strategy_label", "-") or "-")
+    ticker = str(_meta_strategy_attr(result, "applied_ticker", "-") or "-")
+    status_labels = {
+        "updated": "최신 판정",
+        "previous": "이전 판정",
+        "insufficient": "데이터 부족",
+        "failed": "조회 실패",
+        "pending": "갱신 대기",
+    }
+    tone = regime if regime in {"bull", "mixed", "bear"} else "neutral"
+    details: list[str] = []
+    qqq_date = _meta_strategy_attr(result, "qqq_as_of_date")
+    liquidity_date = _meta_strategy_attr(result, "liquidity_as_of_date")
+    percentile = _meta_strategy_attr(result, "liquidity_percentile")
+    trend = str(_meta_strategy_attr(result, "trend200", "") or "")
+    recovery = _meta_strategy_attr(result, "recovery")
+    if qqq_date:
+        details.append(f"QQQ {qqq_date}")
+    if liquidity_date:
+        details.append(f"유동성 {liquidity_date}")
+    if isinstance(percentile, (int, float)) and math.isfinite(float(percentile)):
+        details.append(f"P {float(percentile):.1f}")
+    if trend:
+        details.append(f"추세 {trend}")
+    if recovery is not None:
+        details.append("회복 ON" if bool(recovery) else "회복 OFF")
+    detail_text = " · ".join(details) if details else "가격·환율 갱신 시 FRED 유동성과 QQQ 일봉을 함께 조회합니다."
+    return (
+        f"<div class='summary-meta-strategy summary-meta-{tone}' aria-label='시장구간 전략 분석'>"
+        "<div class='summary-meta-head'>"
+        "<strong>메타전략</strong>"
+        f"<span>{escape(status_labels.get(status, '판정 상태'))}</span>"
+        "</div>"
+        "<div class='summary-meta-grid'>"
+        "<div class='summary-meta-cell'><small>시장구간</small>"
+        f"<strong>{escape(regime_label)}</strong></div>"
+        "<div class='summary-meta-cell'><small>활성화 전략</small>"
+        f"<strong>{escape(strategy_label)}</strong></div>"
+        "<div class='summary-meta-cell summary-meta-ticker'><small>적용티커</small>"
+        f"<strong>{escape(ticker)}</strong></div>"
+        "</div>"
+        f"<div class='summary-meta-detail'>{escape(detail_text)}</div>"
+        "<div class='summary-meta-note'>다음 미국 거래일 시가 기준 · 규칙 기반 판정이며 자동 매매가 아닙니다.</div>"
+        "</div>"
+    )
+
+
 def _market_index_strip(rows: list[MarketIndexQuote | Mapping[str, Any]] | None) -> str:
     index_rows = list(rows or [])
     if not index_rows:
@@ -1957,6 +2017,78 @@ def _render_styles() -> None:
             color: var(--token-success);
             background: var(--token-success-soft);
         }
+        .summary-meta-strategy {
+            margin-top: 10px;
+            padding: 11px;
+            border: 1px solid var(--app-border);
+            border-radius: 7px;
+            background: var(--app-surface);
+            color: var(--app-text);
+        }
+        .summary-meta-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .summary-meta-head strong {
+            color: var(--app-heading);
+            font-size: 0.86rem;
+            font-weight: 900;
+        }
+        .summary-meta-head span {
+            color: var(--app-muted);
+            font-size: 0.68rem;
+            font-weight: 800;
+        }
+        .summary-meta-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 7px;
+        }
+        .summary-meta-cell {
+            min-width: 0;
+            min-height: 52px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 4px;
+            padding: 7px 9px;
+            border: 1px solid var(--app-border);
+            border-radius: 6px;
+            background: var(--app-surface-alt);
+        }
+        .summary-meta-cell small {
+            color: var(--app-muted);
+            font-size: 0.66rem;
+            font-weight: 800;
+        }
+        .summary-meta-cell strong {
+            overflow: hidden;
+            color: var(--app-heading);
+            font-size: 0.84rem;
+            font-weight: 900;
+            line-height: 1.2;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .summary-meta-ticker strong {
+            color: var(--app-primary);
+            font-size: 1rem;
+            letter-spacing: 0;
+        }
+        .summary-meta-bull .summary-meta-cell:first-child { border-left: 3px solid var(--token-success); }
+        .summary-meta-mixed .summary-meta-cell:first-child { border-left: 3px solid var(--token-warning); }
+        .summary-meta-bear .summary-meta-cell:first-child { border-left: 3px solid var(--token-loss); }
+        .summary-meta-detail,
+        .summary-meta-note {
+            margin-top: 7px;
+            color: var(--app-muted);
+            font-size: 0.66rem;
+            line-height: 1.35;
+        }
+        .summary-meta-note { margin-top: 3px; }
         .summary-mobile-holdings { display: none; }
         .summary-table-wrap { margin-top: 16px; overflow: hidden; }
         .summary-table-wrap h3 { padding: 16px 20px; margin: 0; border-bottom: 1px solid var(--app-border); }
@@ -2401,6 +2533,29 @@ def _render_styles() -> None:
                 padding: 3px 6px;
                 font-size: clamp(0.62rem, 2.55vw, 0.68rem);
             }
+            .summary-meta-strategy {
+                margin-top: 7px;
+                padding: 8px;
+            }
+            .summary-meta-head { margin-bottom: 6px; }
+            .summary-meta-head strong { font-size: 0.76rem; }
+            .summary-meta-head span { font-size: 0.6rem; }
+            .summary-meta-grid { gap: 4px; }
+            .summary-meta-cell {
+                min-height: 50px;
+                gap: 3px;
+                padding: 6px;
+            }
+            .summary-meta-cell small { font-size: 0.58rem; }
+            .summary-meta-cell strong {
+                font-size: clamp(0.66rem, 2.65vw, 0.74rem);
+                text-overflow: clip;
+                white-space: normal;
+                word-break: keep-all;
+            }
+            .summary-meta-ticker strong { font-size: 0.9rem; }
+            .summary-meta-detail,
+            .summary-meta-note { font-size: 0.58rem; }
             .summary-mobile-holdings {
                 display: block;
                 margin-top: 12px;
@@ -2643,6 +2798,7 @@ def render_investment_summary_card(
     transactions: list[dict[str, Any]] | None = None,
     market_indices: list[MarketIndexQuote | Mapping[str, Any]] | None = None,
     market_warnings: list[MarketWarningSignal | Mapping[str, Any]] | None = None,
+    meta_strategy: MetaStrategyResult | Mapping[str, Any] | None = None,
 ) -> None:
     _render_styles()
     if metrics.holdings_count == 0 and metrics.cash_total_krw <= 0:
@@ -2704,6 +2860,7 @@ def render_investment_summary_card(
     mobile_heatmap = _mobile_heatmap(holding_allocation_rows)
     market_index_strip = _market_index_strip(market_indices)
     market_warning_strip = _market_warning_strip(market_warnings)
+    meta_strategy_panel = _meta_strategy_panel(meta_strategy)
     mobile_holding_summary = _mobile_holding_summary_table(metrics)
     table_rows = "".join(_holding_table_rows(metrics, transactions=transactions, as_of_date=as_of_date))
     cash_detail = f"KRW {_krw(metrics.cash.cash_krw)} · USD ${format_number(metrics.cash.cash_usd)}"
@@ -2751,6 +2908,7 @@ def render_investment_summary_card(
                 <div class="summary-heatmap-mobile">{mobile_heatmap}</div>
                 {market_index_strip}
                 {market_warning_strip}
+                {meta_strategy_panel}
             </div>
         </div>
         <div class="summary-split-grid">
