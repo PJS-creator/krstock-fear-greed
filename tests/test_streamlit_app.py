@@ -396,6 +396,8 @@ def test_current_refresh_button_forces_all_quotes_and_fx_refresh():
     assert "PRICE_REFRESH_IN_PROGRESS_KEY" in source
     assert "cache = TTLFxCache() if force_refresh else None" in source
     assert "_fetch_fx_rate(public_auth_enabled=public_auth_enabled, force_refresh=True)" in source
+    assert "_refresh_meta_strategy_state()" in source
+    assert "meta_strategy_refresh_failed" in source
     assert "_run_price_refresh(config, owner_id, history_store, public_auth_enabled=public_auth_enabled)" in source
     assert 'mode="실패 종목만", refresh_fx=False' in source
     assert '"가격 새로고침 대상"' not in source
@@ -486,6 +488,7 @@ def test_public_header_refresh_failure_keeps_app_shell(monkeypatch):
         raise RuntimeError("provider down")
 
     monkeypatch.setattr("app.portfolio_dashboard.refresh_holding_quotes", fail_refresh)
+    monkeypatch.setattr("app.portfolio_dashboard._refresh_meta_strategy_state", lambda: None)
     at = AppTest.from_file("app/public_portfolio_dashboard.py")
     at.session_state["is_authenticated"] = True
     at.session_state["authenticated_account_id"] = "demo@example.com"
