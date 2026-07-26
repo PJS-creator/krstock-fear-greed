@@ -151,3 +151,21 @@
 - [ ] 사용자 A의 `cash_ledger`를 사용자 B가 조회할 수 없다.
 - [ ] 사용자 A의 `target_allocations`를 사용자 B가 수정할 수 없다.
 - [ ] 로그아웃 또는 anon role에서 사용자 데이터 테이블을 조회할 수 없다.
+
+## 메타전략 공식 일일 파이프라인
+
+- [ ] GitHub Actions secret `TIINGO_API_TOKEN`이 설정되어 있다.
+- [ ] 07:37 KST 본 실행과 07:57 KST 재시도 schedule이 등록되어 있다.
+- [ ] 수동 실행 후 `meta-strategy-data` 브랜치에 `signals/latest_validated.json`이 생성된다.
+- [ ] `runs/latest_run.json`이 `VALIDATED` 상태와 같은 판정 거래일을 표시한다.
+- [ ] 원 Tiingo/FRED 응답은 저장소가 아니라 Actions artifact에만 생성된다.
+- [ ] 같은 거래일 재실행은 공식 signal을 바꾸지 않고 `NO_NEW_SESSION` 이력을 남긴다.
+- [ ] 원자료 또는 검증 실패 시 직전 `signals/latest_validated.json`이 유지된다.
+- [ ] 유동성 P에 `rank_less`, `rank_equal`, 분모 260, 원천 주간, 적용 주간이 표시된다.
+- [ ] Router 목표자산과 전체 실행 목표자산이 별도 필드로 표시된다.
+- [ ] QLD와 SMA50 상방이격률 5%를 모두 충족할 때만 신규 자금 50/50 가정이 표시된다.
+- [ ] 60거래일 유예 기준일은 최초 예정 실행 거래일을 인덱스 0으로 계산한다.
+- [ ] RSI14 60 이상 경고가 목표자산 계산에는 영향을 주지 않는다.
+- [ ] Streamlit 메타전략 카드에 `Actions 공식`과 앱 미리보기 값이 구분되어 표시된다.
+- [ ] PC 사이드바 데이터 정보에서 메타전략 공식 공급자와 기준일을 확인할 수 있다.
+- [ ] 다음 거래일 시가는 공식 판정 시점에 `PENDING_NEXT_OPEN`으로 표시된다.

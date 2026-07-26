@@ -1,0 +1,111 @@
+name: Meta strategy daily signal
+
+on:
+  schedule:
+    - cron: "37 7 * * *"
+      timezone: "Asia/Seoul"
+    - cron: "57 7 * * *"
+      timezone: "Asia/Seoul"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: meta-strategy-daily
+  cancel-in-progress: false
+
+jobs:
+  update-signal:
+    name: Build validated signal
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout application source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: source
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: source/requirements-meta-strategy.txt
+
+      - name: Install official pipeline dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r source/requirements-meta-strategy.txt
+
+      - name: Prepare persistent data branch
+        shell: bash
+        run: |
+          git -C source fetch origin meta-strategy-data || true
+          if git -C source show-ref --verify --quiet refs/remotes/origin/meta-strategy-data; then
+            git -C source worktree add --force ../meta-strategy-data origin/meta-strategy-data
+          else
+            git -C source worktree add --force --detach ../meta-strategy-data HEAD
+            git -C meta-strategy-data switch --orphan meta-strategy-data
+            git -C meta-strategy-data rm -rf .
+          fi
+
+      - name: Resolve run slot
+        id: slot
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "value=manual" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT_SCHEDULE" == "37 7 * * *" ]]; then
+            echo "value=primary-0737-kst" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=retry-0757-kst" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Calculate and validate signal
+        id: update
+        shell: bash
+        env:
+          TIINGO_API_TOKEN: ${{ secrets.TIINGO_API_TOKEN }}
+        run: |
+          set +e
+          python source/scripts/update_meta_strategy.py \
+            --output-root meta-strategy-data \
+            --audit-dir meta-strategy-audit \
+            --run-slot "${{ steps.slot.outputs.value }}"
+          result=$?
+          echo "exit_code=$result" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Commit durable calculation outputs
+        shell: bash
+        run: |
+          git -C meta-strategy-data config user.name "github-actions[bot]"
+          git -C meta-strategy-data config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C meta-strategy-data add -A
+          if git -C meta-strategy-data diff --cached --quiet; then
+            echo "No durable output changes."
+          else
+            git -C meta-strategy-data commit -m "Update meta strategy signal"
+            git -C meta-strategy-data push origin HEAD:meta-strategy-data
+          fi
+
+      - name: Upload raw-source audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta-strategy-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: meta-strategy-audit/
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Fail workflow after preserving diagnostics
+        if: steps.update.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          echo "Official meta-strategy update failed with exit code ${{ steps.update.outputs.exit_code }}."
+          exit "${{ steps.update.outputs.exit_code }}"
