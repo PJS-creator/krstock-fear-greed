@@ -47,8 +47,8 @@ jobs:
             git -C source worktree add --force ../meta-strategy-data origin/meta-strategy-data
           else
             git -C source worktree add --force --detach ../meta-strategy-data HEAD
+            # switch --orphan already removes tracked files from the new worktree.
             git -C meta-strategy-data switch --orphan meta-strategy-data
-            git -C meta-strategy-data rm -rf .
           fi
 
       - name: Resolve run slot

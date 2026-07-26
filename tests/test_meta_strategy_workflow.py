@@ -14,6 +14,8 @@ def test_daily_workflow_has_kst_primary_retry_and_data_branch():
     assert "TIINGO_API_TOKEN" in source
     assert "upload-artifact@v4" in source
     assert "retention-days: 90" in source
+    assert "switch --orphan meta-strategy-data" in source
+    assert "git -C meta-strategy-data rm -rf ." not in source
 
 
 def test_public_app_keeps_preview_and_loads_official_snapshot():
