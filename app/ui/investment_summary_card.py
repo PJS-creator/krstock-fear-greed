@@ -1280,6 +1280,7 @@ def _meta_strategy_attr(result: MetaStrategyResult | Mapping[str, Any] | None, k
 
 def _meta_strategy_panel(result: MetaStrategyResult | Mapping[str, Any] | None) -> str:
     status = str(_meta_strategy_attr(result, "status", "pending") or "pending")
+    data_mode = str(_meta_strategy_attr(result, "data_mode", "preview") or "preview")
     regime = str(_meta_strategy_attr(result, "market_regime", "") or "")
     regime_label = str(_meta_strategy_attr(result, "market_regime_label", "갱신 대기") or "갱신 대기")
     strategy_label = str(_meta_strategy_attr(result, "active_strategy_label", "-") or "-")
@@ -1291,6 +1292,8 @@ def _meta_strategy_panel(result: MetaStrategyResult | Mapping[str, Any] | None) 
         "failed": "조회 실패",
         "pending": "갱신 대기",
     }
+    if data_mode == "official" and status == "updated":
+        status_labels["updated"] = "Actions 공식"
     tone = regime if regime in {"bull", "mixed", "bear"} else "neutral"
     details: list[str] = []
     qqq_date = _meta_strategy_attr(result, "qqq_as_of_date")
@@ -1309,6 +1312,43 @@ def _meta_strategy_panel(result: MetaStrategyResult | Mapping[str, Any] | None) 
     if recovery is not None:
         details.append("회복 ON" if bool(recovery) else "회복 OFF")
     detail_text = " · ".join(details) if details else "가격·환율 갱신 시 FRED 유동성과 QQQ 일봉을 함께 조회합니다."
+    supplemental: list[str] = []
+    planned_execution = _meta_strategy_attr(result, "planned_execution_session")
+    if planned_execution:
+        supplemental.append(f"예정 실행일 {planned_execution}")
+    router_target = _meta_strategy_attr(result, "router_target")
+    if router_target:
+        supplemental.append(f"Router {router_target}")
+    entry = _meta_strategy_attr(result, "entry_advice")
+    if isinstance(entry, Mapping):
+        mode = str(entry.get("mode") or "")
+        distance = entry.get("qqq_sma50_upper_distance_pct")
+        if mode == "SPLIT_50_50":
+            supplemental.append(f"신규자금 50% 즉시 · 50% {entry.get('deferred_due_session') or '60거래일 후'}")
+        elif mode == "IMMEDIATE_100":
+            supplemental.append("신규자금 100% 즉시")
+        if isinstance(distance, (int, float)) and math.isfinite(float(distance)):
+            supplemental.append(f"SMA50 이격 {float(distance):+.1f}%")
+    rsi_reference = _meta_strategy_attr(result, "rsi_reference")
+    if isinstance(rsi_reference, Mapping) and rsi_reference.get("latest_rsi14") is not None:
+        rsi_value = float(rsi_reference["latest_rsi14"])
+        rsi_label = str(rsi_reference.get("trend_label") or "")
+        warning = " · 참고 경고" if rsi_reference.get("warning") else ""
+        supplemental.append(f"RSI14 {rsi_value:.1f} · {rsi_label}{warning}")
+    preview = _meta_strategy_attr(result, "preview")
+    if data_mode == "official" and preview is not None:
+        preview_ticker = str(_meta_strategy_attr(preview, "applied_ticker", "-") or "-")
+        preview_percentile = _meta_strategy_attr(preview, "liquidity_percentile")
+        preview_text = f"앱 미리보기 {preview_ticker}"
+        if isinstance(preview_percentile, (int, float)) and math.isfinite(float(preview_percentile)):
+            preview_text += f" · P {float(preview_percentile):.1f}"
+        supplemental.append(preview_text)
+    supplemental_text = " · ".join(supplemental)
+    supplemental_html = (
+        f"<div class='summary-meta-detail'>{escape(supplemental_text)}</div>"
+        if supplemental_text
+        else ""
+    )
     return (
         f"<div class='summary-meta-strategy summary-meta-{tone}' aria-label='시장구간 전략 분석'>"
         "<div class='summary-meta-head'>"
@@ -1324,6 +1364,7 @@ def _meta_strategy_panel(result: MetaStrategyResult | Mapping[str, Any] | None) 
         f"<strong>{escape(ticker)}</strong></div>"
         "</div>"
         f"<div class='summary-meta-detail'>{escape(detail_text)}</div>"
+        f"{supplemental_html}"
         "<div class='summary-meta-note'>다음 미국 거래일 시가 기준 · 규칙 기반 판정이며 자동 매매가 아닙니다.</div>"
         "</div>"
     )

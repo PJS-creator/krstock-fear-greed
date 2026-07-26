@@ -730,6 +730,43 @@ def test_meta_strategy_panel_has_safe_pending_state_before_refresh():
     assert "<strong>-</strong>" in html
 
 
+def test_meta_strategy_panel_distinguishes_official_preview_entry_filter_and_rsi_warning():
+    html = _meta_strategy_panel(
+        {
+            "status": "updated",
+            "data_mode": "official",
+            "market_regime": "bear",
+            "market_regime_label": "약세장",
+            "active_strategy_label": "RED Router-S1",
+            "applied_ticker": "GLD",
+            "router_target": "GLD",
+            "planned_execution_session": "2026-07-27",
+            "entry_advice": {
+                "mode": "SPLIT_50_50",
+                "deferred_due_session": "2026-10-20",
+                "qqq_sma50_upper_distance_pct": 5.4,
+            },
+            "rsi_reference": {
+                "latest_rsi14": 62.3,
+                "trend_label": "상승 둔화",
+                "warning": True,
+            },
+            "preview": {
+                "applied_ticker": "QLD",
+                "liquidity_percentile": 80.8,
+            },
+        }
+    )
+
+    assert "Actions 공식" in html
+    assert "Router GLD" in html
+    assert "신규자금 50% 즉시" in html
+    assert "2026-10-20" in html
+    assert "RSI14 62.3" in html
+    assert "참고 경고" in html
+    assert "앱 미리보기 QLD · P 80.8" in html
+
+
 def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_exclude_cash():
     tiles = _heatmap_tiles(_allocation_rows(_metrics()))
 

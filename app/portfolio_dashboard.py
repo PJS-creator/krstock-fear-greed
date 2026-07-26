@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from datetime import date
 from html import escape
 import logging
@@ -83,7 +84,13 @@ from portfolio.history import PortfolioHistoryStoreError, build_history_record, 
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
 from portfolio.market_indices import MarketWarningSpec, fetch_market_indices, fetch_market_warning_signals
-from portfolio.meta_strategy import fetch_meta_strategy, retain_previous_meta_strategy_result
+from portfolio.meta_strategy import MetaStrategyResult, fetch_meta_strategy, retain_previous_meta_strategy_result
+from portfolio.meta_strategy_snapshot import (
+    DEFAULT_OFFICIAL_SIGNAL_URL,
+    OfficialSnapshotError,
+    fetch_official_snapshot,
+    official_snapshot_to_app_view,
+)
 from portfolio.persistence import (
     portfolio_payload_has_data,
     recover_portfolio_payload_from_history,
@@ -1087,10 +1094,51 @@ def _read_market_warning_signals(refresh_key: str | None) -> list:
     return _cached_market_warning_signals(str(refresh_key or ""))
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _cached_official_meta_strategy_snapshot(url: str) -> dict[str, object]:
+    return fetch_official_snapshot(url=url)
+
+
+def _official_meta_strategy_url() -> str:
+    return _secret_text("META_STRATEGY_SIGNAL_URL") or DEFAULT_OFFICIAL_SIGNAL_URL
+
+
+def _load_official_meta_strategy_state() -> None:
+    current = st.session_state.get(META_STRATEGY_RESULT_KEY)
+    if isinstance(current, Mapping) and current.get("data_mode") == "official":
+        return
+    try:
+        official = _cached_official_meta_strategy_snapshot(_official_meta_strategy_url())
+    except OfficialSnapshotError as exc:
+        LOGGER.info("official_meta_strategy_initial_load_skipped type=%s message=%s", type(exc).__name__, exc)
+        return
+    preview = current if isinstance(current, MetaStrategyResult) else None
+    st.session_state[META_STRATEGY_RESULT_KEY] = official_snapshot_to_app_view(
+        official,
+        preview=preview,
+    )
+
+
 def _refresh_meta_strategy_state() -> None:
-    current = fetch_meta_strategy()
+    preview = fetch_meta_strategy()
     previous = st.session_state.get(META_STRATEGY_RESULT_KEY)
-    st.session_state[META_STRATEGY_RESULT_KEY] = retain_previous_meta_strategy_result(previous, current)
+    try:
+        official = _cached_official_meta_strategy_snapshot(_official_meta_strategy_url())
+    except OfficialSnapshotError as exc:
+        LOGGER.warning("official_meta_strategy_snapshot_failed type=%s message=%s", type(exc).__name__, exc)
+        if isinstance(previous, Mapping) and previous.get("data_mode") == "official":
+            retained = dict(previous)
+            retained["preview"] = preview
+            retained["official_refresh_error"] = str(exc)
+            st.session_state[META_STRATEGY_RESULT_KEY] = retained
+            return
+        previous_preview = previous if isinstance(previous, MetaStrategyResult) else None
+        st.session_state[META_STRATEGY_RESULT_KEY] = retain_previous_meta_strategy_result(previous_preview, preview)
+        return
+    st.session_state[META_STRATEGY_RESULT_KEY] = official_snapshot_to_app_view(
+        official,
+        preview=preview,
+    )
 
 
 def _resolve_owner_id(storage_config) -> str | None:
@@ -2044,6 +2092,21 @@ def _render_data_source_info() -> None:
     st.caption(f"환율 출처: {_provider_display_name(st.session_state.get('fx_source') or 'manual')}")
     if st.session_state.get("fx_fetched_at"):
         st.caption(f"환율 조회 시각: {format_kst(st.session_state.get('fx_fetched_at'), compact=True)}")
+    meta_strategy = st.session_state.get(META_STRATEGY_RESULT_KEY)
+    if isinstance(meta_strategy, Mapping):
+        if meta_strategy.get("data_mode") == "official":
+            st.caption("메타전략 공식 판정: GitHub Actions · Tiingo adjusted + FRED")
+            st.caption(
+                "메타전략 기준일: "
+                f"{meta_strategy.get('decision_session') or meta_strategy.get('qqq_as_of_date') or '-'}"
+            )
+            preview = meta_strategy.get("preview")
+            if isinstance(preview, Mapping):
+                st.caption(f"앱 미리보기: {preview.get('source') or 'FRED + Yahoo chart'}")
+        else:
+            st.caption(f"메타전략 미리보기: {meta_strategy.get('source') or 'FRED + Yahoo chart'}")
+    elif isinstance(meta_strategy, MetaStrategyResult):
+        st.caption(f"메타전략 미리보기: {meta_strategy.source}")
 
 
 def _render_saved_portfolio_selector(owner_id, store) -> None:
@@ -2349,6 +2412,8 @@ def run_dashboard(*, public_auth_enabled: bool | None = None) -> None:
         _render_login_form(security_config)
     if public_auth_enabled:
         _handle_public_logout_query()
+    if public_auth_enabled and _is_authenticated():
+        _load_official_meta_strategy_state()
 
     portfolio_store, history_store, historical_schedule_store, target_allocation_store = _build_stores(storage_config)
     owner_id = _resolve_owner_id(storage_config)
