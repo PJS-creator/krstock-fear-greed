@@ -3,6 +3,7 @@ import math
 
 import pytest
 
+from portfolio import meta_strategy_official as official
 from portfolio.meta_strategy import DatedValue
 from portfolio.meta_strategy_official import (
     build_entry_advice,
@@ -47,6 +48,7 @@ def test_exact_liquidity_uses_same_wednesday_zero_rrp_and_one_week_lag():
     )
 
     latest = trace[-1]
+    source = trace[-2]
     assert latest["observation_date"].weekday() == 2
     assert latest["signal_label_date"] == latest["observation_date"] + timedelta(days=2)
     assert latest["effective_from_session"] == latest["signal_label_date"] + timedelta(days=3)
@@ -57,7 +59,12 @@ def test_exact_liquidity_uses_same_wednesday_zero_rrp_and_one_week_lag():
     assert latest["rank_denominator"] == 260
     assert latest["rank_less"] == 260
     assert latest["rank_equal"] == 0
+    assert latest["rank_less_raw"] == 260
+    assert latest["rank_equal_raw"] == 0
     assert latest["percentile_applied"] == pytest.approx(100.0)
+    assert latest["percentile_source_net_liquidity_billions"] == source["net_liquidity_billions"]
+    assert latest["percentile_source_growth_26w"] == source["growth_26w"]
+    assert latest["percentile_source_smooth_13w"] == source["smooth_13w"]
 
 
 def test_exclusive_percentile_reproduces_corrected_rank_lineage_values():
@@ -65,9 +72,42 @@ def test_exclusive_percentile_reproduces_corrected_rank_lineage_values():
 
     rank_210 = calculate_exclusive_percentile(history, 209.5)
     rank_213 = calculate_exclusive_percentile(history, 212.5)
+    rank_218 = calculate_exclusive_percentile(history, 217.5)
 
     assert rank_210 == (210, 0, pytest.approx(80.7692307692))
     assert rank_213 == (213, 0, pytest.approx(81.9230769231))
+    assert rank_218 == (218, 0, pytest.approx(83.8461538462))
+
+
+def test_exact_liquidity_preserves_each_raw_rank_before_applying_one_week_lag(monkeypatch):
+    dates = _wednesdays(330)
+    net_values = [1000.0 + index for index in range(len(dates))]
+    series = {
+        "WALCL": [DatedValue(item, value * 1000.0) for item, value in zip(dates, net_values)],
+        "WDTGAL": [DatedValue(item, 0.0) for item in dates],
+        "RRPONTSYD": [],
+    }
+    call_count = 0
+
+    def changing_rank(history, current):
+        nonlocal call_count
+        rank_less = (call_count * 7) % 260
+        call_count += 1
+        return rank_less, 0, rank_less / 260.0 * 100.0
+
+    monkeypatch.setattr(official, "calculate_exclusive_percentile", changing_rank)
+
+    trace = calculate_exact_liquidity_trace(series)
+
+    assert len(trace) > 2
+    assert any(
+        previous["rank_less_raw"] != current["rank_less_raw"]
+        for previous, current in zip(trace, trace[1:])
+    )
+    for previous, current in zip(trace, trace[1:]):
+        assert current["rank_less"] == previous["rank_less_raw"]
+        assert current["rank_equal"] == previous["rank_equal_raw"]
+        assert current["percentile_applied"] == previous["percentile_raw"]
 
 
 def test_exact_liquidity_does_not_cross_week_fill_treasury_series():
@@ -123,6 +163,35 @@ def test_declining_bear_red_router_falls_back_to_xlv_when_inputs_are_missing():
     assert latest["router_target"] == "XLV"
     assert latest["execution_target"] == "XLV"
     assert "ROUTER_REQUIRED_INPUT_MISSING" in latest["router_reason_codes"]
+
+
+def test_final_signal_row_uses_liquidity_effective_on_planned_execution_session():
+    qqq = _weekday_prices(280)
+    decision_session = qqq[-1].as_of_date
+    planned_execution_session = decision_session + timedelta(days=1)
+    liquidity_trace = [
+        {
+            "effective_from_session": qqq[0].as_of_date,
+            "state": "MIXED",
+            "percentile_applied": 81.9230769231,
+        },
+        {
+            "effective_from_session": planned_execution_session,
+            "state": "BULL",
+            "percentile_applied": 83.8461538462,
+        },
+    ]
+
+    decision_trace = build_technical_trace(qqq, liquidity_trace)
+    execution_trace = build_technical_trace(
+        qqq,
+        liquidity_trace,
+        final_liquidity_session=planned_execution_session,
+    )
+
+    assert decision_trace[-1]["liquidity"]["percentile_applied"] == pytest.approx(81.9230769231)
+    assert execution_trace[-2]["liquidity"]["percentile_applied"] == pytest.approx(81.9230769231)
+    assert execution_trace[-1]["liquidity"]["percentile_applied"] == pytest.approx(83.8461538462)
 
 
 def test_entry_advice_splits_only_qld_with_five_percent_upper_distance():
@@ -200,7 +269,10 @@ def test_official_signal_serializes_full_validated_contract():
     )
 
     assert signal["status"] == "VALIDATED"
+    assert signal["pipeline_version"] == "meta-strategy-daily-v2"
     assert signal["decision_session"] == decision.isoformat()
     assert signal["liquidity"]["rank_denominator"] == 260
+    assert signal["liquidity"]["current_row_rank_less_raw"] is not None
+    assert signal["liquidity"]["percentile_source_smooth_13w"] is not None
     assert signal["legacy_view"]["data_mode"] == "official"
     assert signal["legacy_view"]["source"] == "GitHub Actions · Tiingo adjusted + FRED"

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 from datetime import date, datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
 import sys
 import traceback
+from typing import Mapping
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -15,9 +17,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 from portfolio.meta_strategy import MetaStrategyError, MetaStrategyInsufficientData
-from portfolio.meta_strategy_artifacts import MetaStrategyArtifactStore
+from portfolio.meta_strategy_artifacts import MetaStrategyArtifactStore, canonical_json_bytes
 from portfolio.meta_strategy_calendar import TradingCalendarUnavailable, XNYSCalendar
-from portfolio.meta_strategy_official import build_official_meta_strategy_signal
+from portfolio.meta_strategy_official import (
+    PIPELINE_VERSION,
+    RULESET_VERSION,
+    build_official_meta_strategy_signal,
+)
 from portfolio.meta_strategy_sources import OfficialMetaStrategySourceClient, OfficialSourceBundle
 
 
@@ -61,6 +67,29 @@ def _latest_date(bundle: OfficialSourceBundle, symbol: str) -> date | None:
     return points[-1].as_of_date if points else None
 
 
+def _normalized_source_hashes(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(name): str(digest)
+        for name, digest in sorted(value.items(), key=lambda item: str(item[0]))
+    }
+
+
+def _composite_input_hash(
+    *,
+    decision_session: date,
+    source_hashes: Mapping[str, str],
+) -> str:
+    payload = {
+        "decision_session": decision_session.isoformat(),
+        "pipeline_version": PIPELINE_VERSION,
+        "ruleset_version": RULESET_VERSION,
+        "source_hashes": dict(source_hashes),
+    }
+    return hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+
+
 def run_update(
     *,
     output_root: Path,
@@ -75,16 +104,6 @@ def run_update(
     active_calendar = calendar or XNYSCalendar()
     active_decision_session = decision_session or active_calendar.latest_completed_session(now)
     previous = store.read_latest_signal()
-    if previous is not None and previous.get("decision_session") == active_decision_session.isoformat():
-        store.write_run(
-            status="NO_NEW_SESSION",
-            run_slot=run_slot,
-            decision_session=active_decision_session,
-            message="이미 같은 완료 거래일의 검증 완료 판정이 존재합니다.",
-            preserve_validated_latest=run_slot.startswith("retry-"),
-            generated_at=now,
-        )
-        return 0
 
     client = OfficialMetaStrategySourceClient(tiingo_token=tiingo_token)
     bundle = client.fetch_bundle(
@@ -93,6 +112,33 @@ def run_update(
         end_date=active_decision_session,
     )
     _write_raw_audit(bundle, audit_dir)
+    source_hashes = _normalized_source_hashes(bundle.source_metadata.get("source_hashes"))
+    composite_input_hash = _composite_input_hash(
+        decision_session=active_decision_session,
+        source_hashes=source_hashes,
+    )
+    previous_inputs = store.read_latest_inputs()
+    previous_input_hash = (
+        str(previous_inputs.get("composite_input_hash") or "")
+        if previous_inputs is not None
+        else ""
+    )
+    if (
+        previous is not None
+        and previous.get("decision_session") == active_decision_session.isoformat()
+        and previous_input_hash == composite_input_hash
+    ):
+        store.write_run(
+            status="NO_NEW_SESSION",
+            run_slot=run_slot,
+            decision_session=active_decision_session,
+            message="같은 완료 거래일의 공식 원자료와 계산 버전이 변경되지 않았습니다.",
+            details={"composite_input_hash": composite_input_hash},
+            preserve_validated_latest=run_slot.startswith("retry-"),
+            generated_at=now,
+        )
+        return 0
+
     qqq_latest = _latest_date(bundle, "QQQ")
     if qqq_latest != active_decision_session:
         raise MetaStrategyInsufficientData(
@@ -104,6 +150,8 @@ def run_update(
 
     planned_execution_session = active_calendar.next_session_after(active_decision_session)
     deferred_due_session = active_calendar.session_offset(planned_execution_session, 60)
+    source_metadata = dict(bundle.source_metadata)
+    source_metadata["composite_input_hash"] = composite_input_hash
     signal = build_official_meta_strategy_signal(
         qqq_points=bundle.prices["QQQ"],
         gld_points=bundle.prices["GLD"],
@@ -114,21 +162,29 @@ def run_update(
         deferred_due_session=deferred_due_session,
         next_session_after=active_calendar.next_session_after,
         generated_at=now,
-        source_metadata=bundle.source_metadata,
+        source_metadata=source_metadata,
     )
     liquidity = signal.get("liquidity") if isinstance(signal.get("liquidity"), dict) else {}
     normalized_inputs = {
         "generated_at_utc": now.isoformat(),
         "decision_session": active_decision_session.isoformat(),
+        "pipeline_version": PIPELINE_VERSION,
+        "ruleset_version": RULESET_VERSION,
+        "composite_input_hash": composite_input_hash,
         "latest_price_dates": {
             "QQQ": qqq_latest.isoformat() if qqq_latest else None,
             "GLD": gld_latest.isoformat() if gld_latest else None,
         },
-        "source_hashes": bundle.source_metadata.get("source_hashes"),
+        "source_hashes": source_hashes,
         "liquidity_lineage": {
             "observation_date": liquidity.get("observation_date"),
             "percentile_source_observation_date": liquidity.get("percentile_source_observation_date"),
             "percentile_source_label_date": liquidity.get("percentile_source_label_date"),
+            "percentile_source_net_liquidity_billions": liquidity.get(
+                "percentile_source_net_liquidity_billions"
+            ),
+            "percentile_source_growth_26w": liquidity.get("percentile_source_growth_26w"),
+            "percentile_source_smooth_13w": liquidity.get("percentile_source_smooth_13w"),
             "signal_label_date": liquidity.get("signal_label_date"),
             "rank_less": liquidity.get("rank_less"),
             "rank_equal": liquidity.get("rank_equal"),

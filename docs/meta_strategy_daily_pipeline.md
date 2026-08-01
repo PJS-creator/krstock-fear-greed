@@ -38,6 +38,8 @@ Streamlit 공개 앱에는 Tiingo 토큰을 넣지 않습니다. `TIINGO_API_TOK
 - 현재 주는 순위 모집단에서 제외하고 동률은 0.5 가중치로 계산합니다.
 - 계산된 P는 한 주 뒤 신호 행에 적용합니다.
 - `rank_less`, `rank_equal`, 분모 260을 산출물에 함께 기록합니다.
+- 원 P의 `rank_less_raw`, `rank_equal_raw`는 적용 행을 만드는 과정에서 덮어쓰지 않습니다.
+- 금요일 완료 거래일 판정은 다음 XNYS 거래일에 실행되므로, 최종 전략 행에는 그 예정 실행일부터 유효한 P를 사용합니다.
 
 검증 기준 예시는 다음과 같습니다.
 
@@ -45,6 +47,10 @@ Streamlit 공개 앱에는 Tiingo 토큰을 넣지 않습니다. `TIINGO_API_TOK
 - 2026-07-17 적용 행, 2026-07-20 거래일부터 사용
 - 2026-07-17 원 P: `213 / 260 * 100 = 81.9230769231`
 - 2026-07-24 적용 행, 2026-07-27 거래일부터 사용
+- 2026-07-24 원 P: `218 / 260 * 100 = 83.8461538462`
+- 2026-07-31 적용 행, 2026-08-03 거래일부터 사용
+
+따라서 2026-07-31 종가로 만든 2026-08-03 예정 실행 판정의 적용 P는 `83.8461538462`입니다. 2026-07-31 당일 장중에 유효했던 이전 P와 예정 실행일부터 유효한 P를 혼동하지 않습니다.
 
 ### RED Router-S1
 
@@ -95,7 +101,7 @@ latest_signal.md
 - 루트의 `latest_signal.*`: ChatGPT 작업과 기존 외부 소비자를 위한 호환 별칭
 - 원 응답 파일: 저장소에 커밋하지 않고 Actions artifact로 90일 보관
 
-`SOURCE_FAILED`, `VALIDATION_FAILED`, `CONFIG_FAILED` 실행은 `runs/history`에 남지만 `signals/latest_validated`를 덮어쓰지 않습니다. 07:57 재시도 시 같은 거래일의 검증 완료 결과가 이미 있으면 `NO_NEW_SESSION` 기록만 추가하고 `runs/latest_run.json`의 성공 상태를 유지합니다.
+`SOURCE_FAILED`, `VALIDATION_FAILED`, `CONFIG_FAILED` 실행은 `runs/history`에 남지만 `signals/latest_validated`를 덮어쓰지 않습니다. 같은 거래일 재실행도 원자료를 다시 조회하고 `normalized/latest_inputs.json`의 복합 입력 해시와 비교합니다. 원자료 해시와 계산 버전이 모두 같을 때만 `NO_NEW_SESSION`을 기록하며, FRED 수정치나 공급자 응답이 달라졌으면 같은 거래일이라도 전체 판정을 다시 계산합니다. 07:57 재시도가 `NO_NEW_SESSION`이면 `runs/latest_run.json`의 앞선 성공 상태를 유지합니다.
 
 ## 배포 설정
 
