@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 concurrency:
   group: meta-strategy-daily
@@ -102,6 +103,47 @@ jobs:
           path: meta-strategy-audit/
           if-no-files-found: ignore
           retention-days: 90
+
+      - name: Build daily GitHub notification
+        id: notification
+        if: always() && steps.slot.outputs.value != '' && steps.update.outputs.exit_code != ''
+        shell: bash
+        env:
+          RUN_SLOT: ${{ steps.slot.outputs.value }}
+          UPDATE_EXIT_CODE: ${{ steps.update.outputs.exit_code }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python source/scripts/render_meta_strategy_notification.py \
+            --data-root meta-strategy-data \
+            --run-slot "$RUN_SLOT" \
+            --update-exit-code "$UPDATE_EXIT_CODE" \
+            --repository "${{ github.repository }}" \
+            --run-url "$RUN_URL" \
+            --recipient "PJS-creator" \
+            --output meta-strategy-notification.md
+          if [[ -s meta-strategy-notification.md ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish daily GitHub notification
+        if: always() && steps.notification.outputs.publish == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          marker="$(head -n 1 meta-strategy-notification.md)"
+          gh api "repos/${{ github.repository }}/issues/127/comments" \
+            --paginate --jq '.[].body' > meta-strategy-existing-comments.txt
+          if grep -Fq -- "$marker" meta-strategy-existing-comments.txt; then
+            echo "The same daily notification was already published."
+          else
+            gh issue comment 127 \
+              --repo "${{ github.repository }}" \
+              --body-file meta-strategy-notification.md
+          fi
 
       - name: Fail workflow after preserving diagnostics
         if: steps.update.outputs.exit_code != '0'

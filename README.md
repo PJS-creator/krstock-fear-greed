@@ -544,6 +544,8 @@ TIINGO_API_TOKEN
 
 Tiingo 토큰은 Streamlit Secrets나 코드에 넣지 않습니다. 자세한 계산 기준, 실패 보존 정책, 산출물 경로와 최초 실행 절차는 [공식 일일 파이프라인 문서](docs/meta_strategy_daily_pipeline.md)를 참고합니다. ChatGPT 08:10 KST 설명 작업용 읽기 전용 프롬프트는 [작업 프롬프트](docs/chatgpt_meta_strategy_task_prompt.md)에 있습니다.
 
+매일 공식 판정은 [공식 메타전략 일일 알림 Issue #127](https://github.com/PJS-creator/krstock-fear-greed/issues/127)에 요약 댓글로도 게시됩니다. Issue의 **Subscribe**와 GitHub [알림 설정](https://github.com/settings/notifications)에서 `On GitHub` 및 `Email`을 활성화하면 GitHub 알림함과 이메일로 받을 수 있습니다.
+
 ## 향후 개선
 
 미국 주식 provider는 현재 yfinance 기반 무료 데이터 소스를 사용하고, 국내 주식 provider는 FinanceDataReader 기반 무료 데이터 소스를 사용합니다. 무료 데이터 소스는 구조가 바뀌거나 차단될 수 있습니다. 장기적으로는 한국투자증권 Open API, Finnhub, Polygon.io 같은 provider를 선택 옵션으로 추가할 수 있습니다. KIS appkey, appsecret, access token 같은 실제 인증 정보는 코드나 README에 넣지 않고 Streamlit Secrets 같은 비밀 저장소로만 관리해야 합니다.

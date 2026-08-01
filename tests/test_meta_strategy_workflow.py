@@ -16,6 +16,11 @@ def test_daily_workflow_has_kst_primary_retry_and_data_branch():
     assert "retention-days: 90" in source
     assert "switch --orphan meta-strategy-data" in source
     assert "git -C meta-strategy-data rm -rf ." not in source
+    assert "issues: write" in source
+    assert "render_meta_strategy_notification.py" in source
+    assert "gh issue comment 127" in source
+    assert "meta-strategy-notification" in source
+    assert "meta-strategy-existing-comments.txt" in source
 
 
 def test_public_app_keeps_preview_and_loads_official_snapshot():
