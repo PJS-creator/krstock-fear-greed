@@ -18,9 +18,11 @@ from portfolio.meta_strategy import (
 )
 
 
-PIPELINE_VERSION = "meta-strategy-daily-v1"
+PIPELINE_VERSION = "meta-strategy-daily-v2"
 RULESET_VERSION = "pdf-regime-meta-v1-red-router-s1-entry-filter-v4"
 SCHEMA_VERSION = "1.0"
+
+
 def _finite(value: object) -> float | None:
     try:
         number = float(value)
@@ -125,12 +127,17 @@ def calculate_exact_liquidity_trace(
                 "net_liquidity_billions": net_liquidity,
                 "growth_26w": None,
                 "smooth_13w": None,
+                "rank_less_raw": None,
+                "rank_equal_raw": None,
                 "rank_less": None,
                 "rank_equal": None,
                 "rank_denominator": 260,
                 "percentile_raw": None,
                 "percentile_applied": None,
                 "percentile_source_label_date": None,
+                "percentile_source_net_liquidity_billions": None,
+                "percentile_source_growth_26w": None,
+                "percentile_source_smooth_13w": None,
                 "state": None,
                 "effective_from_session": None,
             }
@@ -158,8 +165,8 @@ def calculate_exact_liquidity_trace(
             [float(value) for value in history],
             float(current),
         )
-        row["rank_less"] = rank_less
-        row["rank_equal"] = rank_equal
+        row["rank_less_raw"] = rank_less
+        row["rank_equal_raw"] = rank_equal
         row["percentile_raw"] = percentile
 
     state = LIQUIDITY_MIXED
@@ -176,8 +183,11 @@ def calculate_exact_liquidity_trace(
         row["percentile_applied"] = float(applied)
         row["percentile_source_label_date"] = source["signal_label_date"]
         row["percentile_source_observation_date"] = source["observation_date"]
-        row["rank_less"] = source["rank_less"]
-        row["rank_equal"] = source["rank_equal"]
+        row["percentile_source_net_liquidity_billions"] = source["net_liquidity_billions"]
+        row["percentile_source_growth_26w"] = source["growth_26w"]
+        row["percentile_source_smooth_13w"] = source["smooth_13w"]
+        row["rank_less"] = source["rank_less_raw"]
+        row["rank_equal"] = source["rank_equal_raw"]
         row["state"] = state
         row["effective_from_session"] = (
             effective_session_resolver(label_date) if effective_session_resolver is not None else label_date
@@ -315,6 +325,7 @@ def build_technical_trace(
     *,
     gld_points: Sequence[DatedValue] = (),
     router_series: Mapping[str, Sequence[DatedValue]] | None = None,
+    final_liquidity_session: date | None = None,
 ) -> list[dict[str, object]]:
     prices = sorted(_points_by_date(qqq_points).items())
     if len(prices) < 205:
@@ -374,9 +385,14 @@ def build_technical_trace(
     rows: list[dict[str, object]] = []
 
     for index, (as_of_date, close) in enumerate(prices):
+        liquidity_session = (
+            max(as_of_date, final_liquidity_session)
+            if final_liquidity_session is not None and index == len(prices) - 1
+            else as_of_date
+        )
         while liquidity_index < len(liquidity_sorted):
             effective = liquidity_sorted[liquidity_index].get("effective_from_session")
-            if not isinstance(effective, date) or effective > as_of_date:
+            if not isinstance(effective, date) or effective > liquidity_session:
                 break
             current_liquidity = liquidity_sorted[liquidity_index]
             liquidity_index += 1
@@ -644,6 +660,7 @@ def build_official_meta_strategy_signal(
         liquidity_trace,
         gld_points=gld_points,
         router_series=router_series,
+        final_liquidity_session=planned_execution_session,
     )
     latest = technical_trace[-1]
     if latest["as_of_date"] != decision_session:
@@ -686,10 +703,18 @@ def build_official_meta_strategy_signal(
             "rank_less": liquidity["rank_less"],
             "rank_equal": liquidity["rank_equal"],
             "rank_denominator": 260,
+            "current_row_percentile_raw": liquidity["percentile_raw"],
+            "current_row_rank_less_raw": liquidity["rank_less_raw"],
+            "current_row_rank_equal_raw": liquidity["rank_equal_raw"],
             "observation_date": liquidity["observation_date"],
             "signal_label_date": liquidity["signal_label_date"],
             "percentile_source_label_date": liquidity["percentile_source_label_date"],
             "percentile_source_observation_date": liquidity["percentile_source_observation_date"],
+            "percentile_source_net_liquidity_billions": liquidity[
+                "percentile_source_net_liquidity_billions"
+            ],
+            "percentile_source_growth_26w": liquidity["percentile_source_growth_26w"],
+            "percentile_source_smooth_13w": liquidity["percentile_source_smooth_13w"],
             "effective_from_session": liquidity["effective_from_session"],
             "net_liquidity_billions": liquidity["net_liquidity_billions"],
             "rrp_missing_assumed_zero": liquidity["rrp_missing_assumed_zero"],

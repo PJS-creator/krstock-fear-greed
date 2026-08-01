@@ -88,6 +88,9 @@ def render_signal_markdown(payload: Mapping[str, object]) -> str:
         f"- 원 관측일: {_markdown_value(liquidity.get('observation_date'))}",
         f"- P 원천 관측일: {_markdown_value(liquidity.get('percentile_source_observation_date'))}",
         f"- P 원천 주간: {_markdown_value(liquidity.get('percentile_source_label_date'))}",
+        f"- P 원천 NL: {_markdown_value(liquidity.get('percentile_source_net_liquidity_billions'))}",
+        f"- P 원천 g26: {_markdown_value(liquidity.get('percentile_source_growth_26w'))}",
+        f"- P 원천 S13: {_markdown_value(liquidity.get('percentile_source_smooth_13w'))}",
         f"- 적용 주간: {_markdown_value(liquidity.get('signal_label_date'))}",
         f"- 적용 시작 거래일: {_markdown_value(liquidity.get('effective_from_session'))}",
         "",
@@ -133,11 +136,18 @@ class MetaStrategyArtifactStore:
     def latest_run_path(self) -> Path:
         return self.root / "runs" / "latest_run.json"
 
+    @property
+    def latest_inputs_path(self) -> Path:
+        return self.root / "normalized" / "latest_inputs.json"
+
     def read_latest_signal(self) -> dict[str, object] | None:
         return _read_json(self.latest_signal_path)
 
     def read_latest_run(self) -> dict[str, object] | None:
         return _read_json(self.latest_run_path)
+
+    def read_latest_inputs(self) -> dict[str, object] | None:
+        return _read_json(self.latest_inputs_path)
 
     def write_validated(
         self,

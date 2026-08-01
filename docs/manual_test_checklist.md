@@ -159,9 +159,13 @@
 - [ ] 수동 실행 후 `meta-strategy-data` 브랜치에 `signals/latest_validated.json`이 생성된다.
 - [ ] `runs/latest_run.json`이 `VALIDATED` 상태와 같은 판정 거래일을 표시한다.
 - [ ] 원 Tiingo/FRED 응답은 저장소가 아니라 Actions artifact에만 생성된다.
-- [ ] 같은 거래일 재실행은 공식 signal을 바꾸지 않고 `NO_NEW_SESSION` 이력을 남긴다.
+- [ ] 같은 거래일 재실행도 공식 원자료를 다시 조회한다.
+- [ ] 같은 거래일의 원자료 해시와 계산 버전이 모두 같으면 signal을 바꾸지 않고 `NO_NEW_SESSION` 이력을 남긴다.
+- [ ] 같은 거래일이라도 FRED/Tiingo 원자료 해시가 달라지면 전체 판정을 다시 계산하고 `VALIDATED`를 기록한다.
 - [ ] 원자료 또는 검증 실패 시 직전 `signals/latest_validated.json`이 유지된다.
 - [ ] 유동성 P에 `rank_less`, `rank_equal`, 분모 260, 원천 주간, 적용 주간이 표시된다.
+- [ ] 적용 P `83.8461538462`는 `rank_less=218`, `rank_equal=0`, 분모 260과 일치한다.
+- [ ] 2026-07-24 원 P는 2026-07-31 적용 행과 2026-08-03 적용 시작 거래일로 표시된다.
 - [ ] Router 목표자산과 전체 실행 목표자산이 별도 필드로 표시된다.
 - [ ] QLD와 SMA50 상방이격률 5%를 모두 충족할 때만 신규 자금 50/50 가정이 표시된다.
 - [ ] 60거래일 유예 기준일은 최초 예정 실행 거래일을 인덱스 0으로 계산한다.

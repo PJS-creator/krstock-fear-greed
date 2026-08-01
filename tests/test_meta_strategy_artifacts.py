@@ -35,7 +35,11 @@ def _signal(decision_session: str = "2026-07-24") -> dict[str, object]:
 def test_validated_signal_writes_durable_and_compatibility_outputs(tmp_path):
     store = MetaStrategyArtifactStore(tmp_path)
 
-    written = store.write_validated(_signal(), normalized_inputs={"source_hashes": {"qqq": "abc"}})
+    normalized_inputs = {
+        "composite_input_hash": "input-abc",
+        "source_hashes": {"qqq": "abc"},
+    }
+    written = store.write_validated(_signal(), normalized_inputs=normalized_inputs)
 
     assert written["signal_hash"]
     assert (tmp_path / "signals" / "latest_validated.json").exists()
@@ -44,6 +48,7 @@ def test_validated_signal_writes_durable_and_compatibility_outputs(tmp_path):
     assert (tmp_path / "latest_signal.md").exists()
     assert (tmp_path / "state" / "latest_state.json").exists()
     assert (tmp_path / "normalized" / "latest_inputs.json").exists()
+    assert store.read_latest_inputs() == normalized_inputs
 
 
 def test_retry_no_new_session_preserves_latest_validated_run(tmp_path):
