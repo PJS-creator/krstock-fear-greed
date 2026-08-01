@@ -14,6 +14,8 @@
    - 사용자가 가격·환율 갱신을 누르면 앱 프로세스에서 별도로 계산합니다.
    - 공식 판정이 있으면 화면의 주 판정은 공식 결과를 사용하고 앱 계산은 `미리보기`로 표시합니다.
 
+공식 계산이 끝나면 [공식 메타전략 일일 알림 Issue](https://github.com/PJS-creator/krstock-fear-greed/issues/127)에 `@PJS-creator` 판정 요약을 게시합니다. 본 실행이 실패하면 07:57 재시도 결과까지 기다린 뒤 최종 상태를 알리고, 본 실행이 성공한 날의 재시도는 중복 알림을 만들지 않습니다.
+
 Streamlit 공개 앱에는 Tiingo 토큰을 넣지 않습니다. `TIINGO_API_TOKEN`은 GitHub 저장소의 **Settings > Secrets and variables > Actions**에만 저장합니다.
 
 ## 데이터 기준
@@ -119,6 +121,14 @@ ChatGPT 예약 작업은 08:10 KST에 먼저 아래 파일을 읽습니다.
 2. `signals/latest_validated.json`
 
 실행 실패 또는 신규 데이터 없음 상태를 먼저 설명하고, 마지막 검증 완료 신호를 임의로 새 계산하지 않습니다. 실제 작업 생성용 프롬프트는 `docs/chatgpt_meta_strategy_task_prompt.md`를 사용합니다.
+
+## GitHub 및 이메일 알림
+
+1. [공식 메타전략 일일 알림 Issue #127](https://github.com/PJS-creator/krstock-fear-greed/issues/127)를 엽니다.
+2. 우측의 **Subscribe**가 활성화되어 있는지 확인합니다.
+3. GitHub **Settings > Notifications**에서 `On GitHub`와 `Email`을 활성화합니다.
+
+워크플로는 별도 SMTP 비밀번호나 개인 액세스 토큰 없이 저장소 기본 `GITHUB_TOKEN`의 `issues: write` 권한으로 댓글을 게시합니다. 댓글에는 실행 상태, 판정일, 시장구간, 전략, 목표자산, P, 신규 자금 집행 방식, RSI 참고 경고와 상세 산출물 링크가 포함됩니다. 알림 댓글 게시가 실패하더라도 공식 신호 계산과 `meta-strategy-data` 저장은 유지됩니다.
 
 ## 장애 처리
 
