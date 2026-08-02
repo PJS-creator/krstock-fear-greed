@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 
 RUN_STATUSES = {
@@ -125,8 +125,14 @@ def render_signal_markdown(payload: Mapping[str, object]) -> str:
 
 
 class MetaStrategyArtifactStore:
-    def __init__(self, root: Path | str):
+    def __init__(
+        self,
+        root: Path | str,
+        *,
+        markdown_renderer: Callable[[Mapping[str, object]], str] | None = None,
+    ):
         self.root = Path(root)
+        self._markdown_renderer = markdown_renderer or render_signal_markdown
 
     @property
     def latest_signal_path(self) -> Path:
@@ -159,7 +165,7 @@ class MetaStrategyArtifactStore:
         signal["signal_hash"] = signal_hash(signal)
         decision_session = str(signal.get("decision_session") or "unknown")
         json_bytes = canonical_json_bytes(signal)
-        markdown_bytes = render_signal_markdown(signal).encode("utf-8")
+        markdown_bytes = self._markdown_renderer(signal).encode("utf-8")
         _atomic_write(self.latest_signal_path, json_bytes)
         _atomic_write(self.root / "signals" / "latest_validated.md", markdown_bytes)
         _atomic_write(self.root / "signals" / "history" / f"{decision_session}.json", json_bytes)
