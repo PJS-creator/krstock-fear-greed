@@ -113,3 +113,15 @@ def test_failed_run_does_not_overwrite_last_validated_signal(tmp_path):
     )
 
     assert (tmp_path / "signals" / "latest_validated.json").read_bytes() == before
+
+
+def test_store_can_use_a_separate_markdown_renderer(tmp_path):
+    store = MetaStrategyArtifactStore(
+        tmp_path,
+        markdown_renderer=lambda payload: f"# Alternative\n\n{payload['decision_session']}\n",
+    )
+
+    store.write_validated(_signal())
+
+    markdown = (tmp_path / "signals" / "latest_validated.md").read_text(encoding="utf-8")
+    assert markdown == "# Alternative\n\n2026-07-24\n"

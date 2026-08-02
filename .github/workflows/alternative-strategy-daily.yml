@@ -1,0 +1,152 @@
+name: Alternative shadow strategy daily signal
+
+on:
+  schedule:
+    - cron: "47 7 * * *"
+      timezone: "Asia/Seoul"
+    - cron: "7 8 * * *"
+      timezone: "Asia/Seoul"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: alternative-strategy-daily
+  cancel-in-progress: false
+
+jobs:
+  update-signal:
+    name: Build alternative shadow signal
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout application source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          path: source
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: source/requirements-meta-strategy.txt
+
+      - name: Install shared strategy dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r source/requirements-meta-strategy.txt
+
+      - name: Prepare separate persistent data branch
+        shell: bash
+        run: |
+          git -C source fetch origin alternative-strategy-data || true
+          if git -C source show-ref --verify --quiet refs/remotes/origin/alternative-strategy-data; then
+            git -C source worktree add --force ../alternative-strategy-data origin/alternative-strategy-data
+          else
+            git -C source worktree add --force --detach ../alternative-strategy-data HEAD
+            git -C alternative-strategy-data switch --orphan alternative-strategy-data
+          fi
+
+      - name: Resolve run slot
+        id: slot
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "value=manual" >> "$GITHUB_OUTPUT"
+          elif [[ "$EVENT_SCHEDULE" == "47 7 * * *" ]]; then
+            echo "value=primary-0747-kst" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=retry-0807-kst" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Calculate and validate alternative signal
+        id: update
+        shell: bash
+        env:
+          TIINGO_API_TOKEN: ${{ secrets.TIINGO_API_TOKEN }}
+        run: |
+          set +e
+          python source/scripts/update_alternative_strategy.py \
+            --output-root alternative-strategy-data \
+            --audit-dir alternative-strategy-audit \
+            --run-slot "${{ steps.slot.outputs.value }}"
+          result=$?
+          echo "exit_code=$result" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Commit separate durable outputs
+        shell: bash
+        run: |
+          git -C alternative-strategy-data config user.name "github-actions[bot]"
+          git -C alternative-strategy-data config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C alternative-strategy-data add -A
+          if git -C alternative-strategy-data diff --cached --quiet; then
+            echo "No durable output changes."
+          else
+            git -C alternative-strategy-data commit -m "Update alternative shadow signal"
+            git -C alternative-strategy-data push origin HEAD:alternative-strategy-data
+          fi
+
+      - name: Upload separate raw-source audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alternative-strategy-audit-${{ github.run_id }}-${{ github.run_attempt }}
+          path: alternative-strategy-audit/
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Build separate GitHub notification
+        id: notification
+        if: always() && steps.slot.outputs.value != '' && steps.update.outputs.exit_code != ''
+        shell: bash
+        env:
+          RUN_SLOT: ${{ steps.slot.outputs.value }}
+          UPDATE_EXIT_CODE: ${{ steps.update.outputs.exit_code }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python source/scripts/render_alternative_strategy_notification.py \
+            --data-root alternative-strategy-data \
+            --run-slot "$RUN_SLOT" \
+            --update-exit-code "$UPDATE_EXIT_CODE" \
+            --repository "${{ github.repository }}" \
+            --run-url "$RUN_URL" \
+            --recipient "PJS-creator" \
+            --output alternative-strategy-notification.md
+          if [[ -s alternative-strategy-notification.md ]]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish separate GitHub notification
+        if: always() && steps.notification.outputs.publish == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          marker="$(head -n 1 alternative-strategy-notification.md)"
+          gh api "repos/${{ github.repository }}/issues/130/comments" \
+            --paginate --jq '.[].body' > alternative-strategy-existing-comments.txt
+          if grep -Fq -- "$marker" alternative-strategy-existing-comments.txt; then
+            echo "The same alternative notification was already published."
+          else
+            gh issue comment 130 \
+              --repo "${{ github.repository }}" \
+              --body-file alternative-strategy-notification.md
+          fi
+
+      - name: Fail workflow after preserving diagnostics
+        if: steps.update.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          echo "Alternative shadow update failed with exit code ${{ steps.update.outputs.exit_code }}."
+          exit "${{ steps.update.outputs.exit_code }}"

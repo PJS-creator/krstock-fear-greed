@@ -177,3 +177,23 @@
 - [ ] 본 실행 성공 후 07:57 재시도는 중복 댓글을 게시하지 않는다.
 - [ ] 본 실행 실패 후 07:57 재시도는 최종 성공 또는 실패 상태를 게시한다.
 - [ ] Issue #127 구독 상태에서 GitHub 알림함과 설정된 이메일로 알림이 도착한다.
+
+## 대안 N1/V4 shadow 일일 파이프라인
+
+- [ ] 기존 공식 워크플로가 07:37/07:57 KST와 `meta-strategy-data`, Issue #127을 계속 사용한다.
+- [ ] 대안 워크플로가 07:47/08:07 KST에 별도로 실행된다.
+- [ ] 수동 실행 후 `alternative-strategy-data` 브랜치에 `signals/latest_validated.json`이 생성된다.
+- [ ] 대안 산출물의 `strategy_id`가 `qqq_meta_v1_red_router_s1_n1_v4_shadow_v2_1`이다.
+- [ ] `base_execution_target`, `n1_overlay.applied`, `resolved_execution_target`이 함께 기록된다.
+- [ ] BULL + 비교3 + base QLD + Router 비활성일 때만 resolved target이 QQQ로 바뀐다.
+- [ ] 신규진입 V4는 N1 전 base target QLD와 QQQ SMA50 상방이격률 5%를 기준으로 판정한다.
+- [ ] V4 발동 시 오늘 시작 가정 배분이 resolved target 50%, 현금 50%로 표시된다.
+- [ ] V4 미발동 시 resolved target 100%로 표시된다.
+- [ ] 60개 완료 공통 거래일 뒤 현금 유예분의 합류 예정일이 기록된다.
+- [ ] 대안 결과가 shadow 전용이며 자동 주문을 만들지 않는다.
+- [ ] 원자료 실패 시 직전 `signals/latest_validated.json`이 유지된다.
+- [ ] 원 Tiingo/FRED 응답은 저장소가 아니라 `alternative-strategy-audit-*` artifact에만 보관된다.
+- [ ] 본 실행 성공 시 Issue #130에 대안 판정 댓글이 한 번 게시된다.
+- [ ] 본 실행 성공 후 08:07 재시도는 중복 댓글을 게시하지 않는다.
+- [ ] Issue #130 구독 상태에서 GitHub 알림함과 설정된 이메일로 대안 알림이 도착한다.
+- [ ] 대안 실행 후 공식 `meta-strategy-data`와 Issue #127의 판정이 변경되지 않는다.
