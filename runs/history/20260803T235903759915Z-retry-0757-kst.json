@@ -1,0 +1,1 @@
+{"decision_session":"2026-08-03","details":{"composite_input_hash":"f33d175fb88575bb3df072ced04cabd82abb279d8f7886f4b93bf4b449e22bb0"},"generated_at_utc":"2026-08-03T23:59:03.759915+00:00","message":"같은 완료 거래일의 공식 원자료와 계산 버전이 변경되지 않았습니다.","run_slot":"retry-0757-kst","schema_version":"1.0","status":"NO_NEW_SESSION"}
