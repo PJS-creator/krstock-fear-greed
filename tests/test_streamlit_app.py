@@ -55,7 +55,7 @@ def test_dashboard_app_smoke_has_tabs_kpis_and_no_raw_iso():
 
     assert not at.exception
     text = _app_text(at)
-    for label in ("총괄현황", "세부내역", "사용자 입력", "자산추이", "성과분석", "리스크분석", "매매일지", "리밸런싱", "저장 관리"):
+    for label in ("총괄현황", "차트분석", "세부내역", "사용자 입력", "자산추이", "성과분석", "리스크분석", "매매일지", "리밸런싱", "저장 관리"):
         assert label in text
     for label in ("다크", "라이트"):
         assert label in text
@@ -126,7 +126,7 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert 'content: "?";' in source
     assert "content: none !important;" in source
     assert "gap: var(--token-space-1) !important;" in source
-    assert "grid-template-columns: repeat(6, minmax(0, 1fr));" in source
+    assert "grid-template-columns: repeat(7, minmax(0, 1fr));" in source
     assert "grid-template-columns: repeat(4, minmax(0, 1fr));" in source
     assert "border-bottom: 1px solid var(--app-border);" in source
     assert "label:has(input:checked)::after" in source
@@ -137,6 +137,15 @@ def test_theme_selector_does_not_set_widget_key_default_from_session_state():
 
     assert "st.session_state[APP_THEME_CHOICE_KEY] =" not in source
     assert 'radio_kwargs["index"] = None' in source
+
+
+def test_chart_analysis_is_the_second_public_navigation_tab():
+    source = Path("app/portfolio_dashboard.py").read_text(encoding="utf-8")
+
+    summary_position = source.index('"summary": "총괄현황"')
+    chart_position = source.index('"chart_analysis": "차트분석"')
+    details_position = source.index('"details": "세부내역"')
+    assert summary_position < chart_position < details_position
 
 
 def test_public_signup_uses_public_redirect_url_for_email_confirmation():

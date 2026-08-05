@@ -41,6 +41,7 @@ def _stop_if_unsupported_python_runtime() -> None:
 
 
 from app.ui.auth_persistence import delete_remember_cookie, get_cookie_manager, get_remember_cookie, set_remember_cookie
+from app.ui.chart_analysis import render_chart_analysis
 from app.ui.components import render_app_header, render_price_update_log, safe_render_section
 from app.ui.data_portability import render_data_portability_tools
 from app.ui.formatters import format_kst, format_number, format_price, full_krw
@@ -195,6 +196,7 @@ THEME_LABEL_BY_MODE = {"dark": "다크", "light": "라이트"}
 THEME_MODE_BY_LABEL = {label: mode for mode, label in THEME_LABEL_BY_MODE.items()}
 PUBLIC_SECTION_LABELS = {
     "summary": "총괄현황",
+    "chart_analysis": "차트분석",
     "details": "세부내역",
     "input": "사용자입력",
     "history": "자산추이",
@@ -204,6 +206,7 @@ PUBLIC_SECTION_LABELS = {
 PUBLIC_SECTION_LEGACY_MAP = {
     "투자 총괄 카드": "summary",
     "총괄현황": "summary",
+    "차트분석": "chart_analysis",
     "개요": "details",
     "세부내역": "details",
     "보유자산": "input",
@@ -2253,6 +2256,13 @@ def _render_overview_section(metrics) -> None:
     render_overview(metrics)
 
 
+def _render_chart_analysis_section(*, auto_load: bool) -> None:
+    render_chart_analysis(
+        list(st.session_state.get("holdings_rows", [])),
+        auto_load=auto_load,
+    )
+
+
 def _render_holdings_section(config: AppSecurityConfig, *, public_auth_enabled: bool) -> None:
     _render_cash_fx_tools(config, public_auth_enabled=public_auth_enabled)
     render_transaction_editor()
@@ -2346,9 +2356,13 @@ def _render_manage_section(owner_id, portfolio_store, target_allocation_store, h
 
 
 def _render_private_dashboard_sections(security_config, owner_id, portfolio_store, target_allocation_store, history_store, historical_schedule_store, metrics) -> None:
-    summary_card_tab, overview_tab, holdings_tab, history_tab, journal_tab, rebalancing_tab, manage_tab = st.tabs(["총괄현황", "세부내역", "사용자 입력", "자산추이", "매매일지", "리밸런싱", "저장 관리"])
+    summary_card_tab, chart_analysis_tab, overview_tab, holdings_tab, history_tab, journal_tab, rebalancing_tab, manage_tab = st.tabs(
+        ["총괄현황", "차트분석", "세부내역", "사용자 입력", "자산추이", "매매일지", "리밸런싱", "저장 관리"]
+    )
     with summary_card_tab:
         safe_render_section("총괄현황", lambda: _render_summary_card_section(metrics))
+    with chart_analysis_tab:
+        safe_render_section("차트분석", lambda: _render_chart_analysis_section(auto_load=False))
     with overview_tab:
         safe_render_section("세부내역", lambda: _render_overview_section(metrics))
     with holdings_tab:
@@ -2376,6 +2390,8 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
         )
     if selected_section == "summary":
         safe_render_section("총괄현황", lambda: _render_summary_card_section(metrics))
+    elif selected_section == "chart_analysis":
+        safe_render_section("차트분석", lambda: _render_chart_analysis_section(auto_load=True))
     elif selected_section == "details":
         safe_render_section("세부내역", lambda: _render_overview_section(metrics))
     elif selected_section == "input":
