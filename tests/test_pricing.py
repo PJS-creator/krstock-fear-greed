@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pandas as pd
 import pytest
@@ -480,6 +480,120 @@ def test_kis_provider_tries_us_exchange_candidates_until_success():
     assert sum(url.endswith("/oauth2/tokenP") for url in urls) == 1
     assert sum("EXCD=NAS" in url for url in urls) == 1
     assert sum("EXCD=NYS" in url for url in urls) == 2
+
+
+def test_kis_provider_loads_domestic_daily_rows_with_actual_traded_value_and_reuses_token():
+    calls = []
+
+    def response_loader(method, url, headers, body, timeout_seconds):
+        calls.append((method, url, headers, body, timeout_seconds))
+        if url.endswith("/oauth2/tokenP"):
+            return {"access_token": "token-value", "expires_in": 3600}
+        assert headers["authorization"] == "Bearer token-value"
+        if "/inquire-daily-itemchartprice" in url:
+            assert headers["tr_id"] == "FHKST03010100"
+            assert "FID_INPUT_ISCD=005930" in url
+            assert "FID_ORG_ADJ_PRC=0" in url
+            return {
+                "rt_cd": "0",
+                "output2": [
+                    {
+                        "stck_bsop_date": "20260707",
+                        "stck_oprc": "71000",
+                        "stck_hgpr": "73000",
+                        "stck_lwpr": "70000",
+                        "stck_clpr": "72000",
+                        "acml_vol": "1000000",
+                        "acml_tr_pbmn": "72000000000",
+                    },
+                    {
+                        "stck_bsop_date": "20260708",
+                        "stck_oprc": "72000",
+                        "stck_hgpr": "74000",
+                        "stck_lwpr": "71000",
+                        "stck_clpr": "73500",
+                        "acml_vol": "1100000",
+                        "acml_tr_pbmn": "80850000000",
+                    },
+                ],
+            }
+        assert "/inquire-price" in url
+        return {"rt_cd": "0", "output": {"stck_prpr": "73500", "stck_sdpr": "72000"}}
+
+    provider = KoreaInvestmentQuoteProvider(
+        app_key="app-key",
+        app_secret="secret",
+        response_loader=response_loader,
+        history_request_interval_seconds=0,
+    )
+    rows, source_symbol = provider.get_daily_history_rows(
+        "KR",
+        "005930",
+        max_rows=2,
+        end_date=date(2026, 7, 8),
+    )
+    quote = provider.get_quote("005930")
+
+    assert source_symbol == "005930"
+    assert [row["stck_bsop_date"] for row in rows] == ["20260707", "20260708"]
+    assert rows[-1]["acml_tr_pbmn"] == "80850000000"
+    assert quote.price == pytest.approx(73500)
+    assert sum(call[1].endswith("/oauth2/tokenP") for call in calls) == 1
+
+
+def test_kis_provider_loads_overseas_daily_rows_with_actual_traded_value():
+    calls = []
+
+    def response_loader(method, url, headers, body, timeout_seconds):
+        calls.append((method, url, headers, body, timeout_seconds))
+        if url.endswith("/oauth2/tokenP"):
+            return {"access_token": "token-value", "expires_in": 3600}
+        assert "/uapi/overseas-price/v1/quotations/dailyprice" in url
+        assert headers["tr_id"] == "HHDFS76240000"
+        assert "EXCD=NAS" in url
+        assert "SYMB=QURE" in url
+        assert "MODP=1" in url
+        return {
+            "rt_cd": "0",
+            "output2": [
+                {
+                    "xymd": "20260707",
+                    "open": "41.00",
+                    "high": "42.00",
+                    "low": "40.50",
+                    "clos": "41.80",
+                    "tvol": "100000",
+                    "tamt": "4180000",
+                },
+                {
+                    "xymd": "20260708",
+                    "open": "41.80",
+                    "high": "43.00",
+                    "low": "41.50",
+                    "clos": "42.50",
+                    "tvol": "120000",
+                    "tamt": "5100000",
+                },
+            ],
+        }
+
+    provider = KoreaInvestmentQuoteProvider(
+        app_key="app-key",
+        app_secret="secret",
+        response_loader=response_loader,
+        history_request_interval_seconds=0,
+    )
+    rows, source_symbol = provider.get_daily_history_rows(
+        "US",
+        "QURE",
+        max_rows=2,
+        end_date=date(2026, 7, 8),
+    )
+
+    assert source_symbol == "QURE@NAS"
+    assert [row["xymd"] for row in rows] == ["20260707", "20260708"]
+    assert rows[-1]["tamt"] == "5100000"
+    assert [call[0] for call in calls] == ["POST", "GET"]
 
 
 def test_kis_domestic_futures_intraday_response_parsing_sorts_points():

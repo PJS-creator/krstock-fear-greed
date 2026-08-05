@@ -5,10 +5,13 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from portfolio.chart_analysis import AnalysisInstrument
+from portfolio.chart_analysis import AnalysisInstrument, analyze_daily_history, validate_daily_bars
 from portfolio.chart_analysis_data import (
+    KIS_DAILY_PROVIDER,
+    fetch_daily_histories,
     fetch_yfinance_daily_histories,
     holdings_to_analysis_instruments,
+    standardize_kis_daily_rows,
     standardize_yfinance_daily_frame,
 )
 
@@ -25,6 +28,37 @@ def _source_frame(index: pd.DatetimeIndex, close: np.ndarray) -> pd.DataFrame:
         },
         index=index,
     )
+
+
+def _kis_rows(market: str, index: pd.DatetimeIndex) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for offset, timestamp in enumerate(index):
+        close = 100.0 + offset
+        if market == "KR":
+            rows.append(
+                {
+                    "stck_bsop_date": timestamp.strftime("%Y%m%d"),
+                    "stck_oprc": str(close - 1.0),
+                    "stck_hgpr": str(close + 2.0),
+                    "stck_lwpr": str(close - 2.0),
+                    "stck_clpr": str(close),
+                    "acml_vol": str(1_000 + offset),
+                    "acml_tr_pbmn": str(100_000_000 + offset),
+                }
+            )
+        else:
+            rows.append(
+                {
+                    "xymd": timestamp.strftime("%Y%m%d"),
+                    "open": str(close - 1.0),
+                    "high": str(close + 2.0),
+                    "low": str(close - 2.0),
+                    "clos": str(close),
+                    "tvol": str(1_000 + offset),
+                    "tamt": str(1_000_000 + offset),
+                }
+            )
+    return rows
 
 
 def test_holdings_conversion_keeps_positive_supported_positions_and_deduplicates():
@@ -76,6 +110,87 @@ def test_incomplete_current_us_session_is_excluded():
     )
 
     assert standardized["timestamp"].dt.date.astype(str).tolist() == ["2026-08-05"]
+
+
+def test_kis_domestic_rows_preserve_actual_traded_value():
+    index = pd.bdate_range("2024-01-02", periods=310)
+    instrument = AnalysisInstrument(market="KR", symbol="005930", display_name="삼성전자")
+
+    standardized = standardize_kis_daily_rows(
+        _kis_rows("KR", index),
+        instrument=instrument,
+        now=datetime(2026, 8, 6, 23, 0, tzinfo=timezone.utc),
+    )
+    validated, warnings = validate_daily_bars(standardized)
+
+    assert len(validated) == 310
+    assert validated["traded_value"].iloc[-1] == 100_000_309
+    assert "APPROXIMATED_TRADED_VALUE" not in warnings
+
+
+def test_kis_overseas_rows_preserve_actual_traded_value():
+    index = pd.bdate_range("2024-01-02", periods=310)
+    instrument = AnalysisInstrument(market="US", symbol="QURE", display_name="QURE")
+
+    standardized = standardize_kis_daily_rows(
+        _kis_rows("US", index),
+        instrument=instrument,
+        now=datetime(2026, 8, 6, 23, 0, tzinfo=timezone.utc),
+    )
+    result = analyze_daily_history(
+        fetch_daily_histories(
+            (instrument,),
+            kis_provider=_FakeKisHistoryProvider({instrument.key: _kis_rows("US", index)}),
+            now=datetime(2026, 8, 6, 23, 0, tzinfo=timezone.utc),
+        )[0]
+    )
+
+    assert standardized["traded_value"].iloc[-1] == 1_000_309
+    assert result.provider == KIS_DAILY_PROVIDER
+    assert result.quality_status == "PASS"
+    assert "APPROXIMATED_TRADED_VALUE" not in result.warnings
+
+
+class _FakeKisHistoryProvider:
+    def __init__(self, rows_by_key: dict[str, list[dict[str, str]]]) -> None:
+        self.rows_by_key = rows_by_key
+        self.calls: list[str] = []
+
+    def get_daily_history_rows(self, market, symbol, *, max_rows=500, end_date=None):
+        key = f"{market}:{symbol}"
+        self.calls.append(key)
+        if key not in self.rows_by_key:
+            raise RuntimeError("KIS unavailable")
+        return self.rows_by_key[key][-max_rows:], f"{symbol}@KIS"
+
+
+def test_kis_first_fetch_falls_back_only_for_failed_symbols_and_preserves_order():
+    index = pd.bdate_range("2024-01-02", periods=310)
+    kis_instrument = AnalysisInstrument(market="US", symbol="QURE", display_name="QURE")
+    fallback_instrument = AnalysisInstrument(market="US", symbol="AAPL", display_name="Apple")
+    provider = _FakeKisHistoryProvider({kis_instrument.key: _kis_rows("US", index)})
+    fallback = _source_frame(index, np.linspace(100.0, 150.0, len(index)))
+    loader_calls: list[dict[str, object]] = []
+
+    def loader(**kwargs):
+        loader_calls.append(kwargs)
+        return fallback
+
+    histories = fetch_daily_histories(
+        (kis_instrument, fallback_instrument),
+        kis_provider=provider,
+        loader=loader,
+        now=datetime(2026, 8, 6, 23, 0, tzinfo=timezone.utc),
+    )
+
+    assert provider.calls == [kis_instrument.key, fallback_instrument.key]
+    assert len(loader_calls) == 1
+    assert loader_calls[0]["tickers"] == ["AAPL"]
+    assert [history.instrument.key for history in histories] == [kis_instrument.key, fallback_instrument.key]
+    assert histories[0].provider == KIS_DAILY_PROVIDER
+    assert histories[0].warnings == ()
+    assert histories[1].provider == "Yahoo Finance (yfinance)"
+    assert "KIS_DAILY_FALLBACK" in histories[1].warnings
 
 
 def test_batch_fetch_selects_available_korean_exchange_candidate():

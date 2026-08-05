@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from datetime import datetime, time, timedelta, timezone
+from dataclasses import replace
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -18,6 +20,7 @@ from portfolio.chart_analysis import (
 
 YFINANCE_PROVIDER = "Yahoo Finance (yfinance)"
 FINANCE_DATAREADER_PROVIDER = "FinanceDataReader"
+KIS_DAILY_PROVIDER = "한국투자 Open API"
 HISTORY_PERIOD = "3y"
 HISTORY_INTERVAL = "1d"
 _MARKET_TIMEZONES = {
@@ -27,6 +30,39 @@ _MARKET_TIMEZONES = {
 _REGULAR_SESSION_FINALIZED_AT = {
     "KR": time(15, 45),
     "US": time(16, 15),
+}
+
+
+class KisDailyHistoryProvider(Protocol):
+    def get_daily_history_rows(
+        self,
+        market: str,
+        symbol: str,
+        *,
+        max_rows: int = RECOMMENDED_INPUT_ROWS,
+        end_date: date | None = None,
+    ) -> tuple[list[Mapping[str, Any]], str]: ...
+
+
+_KIS_COLUMN_MAP = {
+    "KR": {
+        "timestamp": "stck_bsop_date",
+        "open": "stck_oprc",
+        "high": "stck_hgpr",
+        "low": "stck_lwpr",
+        "close": "stck_clpr",
+        "volume": "acml_vol",
+        "traded_value": "acml_tr_pbmn",
+    },
+    "US": {
+        "timestamp": "xymd",
+        "open": "open",
+        "high": "high",
+        "low": "low",
+        "close": "clos",
+        "volume": "tvol",
+        "traded_value": "tamt",
+    },
 }
 
 
@@ -164,6 +200,111 @@ def fetch_yfinance_daily_histories(
                 )
             )
     return tuple(results)
+
+
+def fetch_daily_histories(
+    instruments: Iterable[AnalysisInstrument],
+    *,
+    kis_provider: KisDailyHistoryProvider | None = None,
+    loader: Callable[..., pd.DataFrame] | None = None,
+    korea_fallback_reader: Callable[..., pd.DataFrame] | None = None,
+    now: datetime | None = None,
+    timeout_seconds: float = 12.0,
+) -> tuple[DailyHistoryInput, ...]:
+    requested = tuple(instruments)
+    if not requested:
+        return ()
+    if kis_provider is None:
+        return fetch_yfinance_daily_histories(
+            requested,
+            loader=loader,
+            korea_fallback_reader=korea_fallback_reader,
+            now=now,
+            timeout_seconds=timeout_seconds,
+        )
+
+    results_by_key: dict[str, DailyHistoryInput] = {}
+    kis_errors: dict[str, str] = {}
+    fallback_instruments: list[AnalysisInstrument] = []
+    for instrument in requested:
+        try:
+            rows, source_symbol = kis_provider.get_daily_history_rows(
+                instrument.market,
+                instrument.symbol,
+                max_rows=RECOMMENDED_INPUT_ROWS,
+            )
+            frame = standardize_kis_daily_rows(rows, instrument=instrument, now=now)
+            validate_daily_bars(frame)
+            if frame.empty:
+                raise ChartAnalysisError("완료 일봉이 없습니다.")
+            results_by_key[instrument.key] = DailyHistoryInput(
+                instrument=instrument,
+                frame=frame,
+                provider=KIS_DAILY_PROVIDER,
+                adjustment_mode="KIS_ADJUSTED_OHLCV",
+                source_symbol=source_symbol,
+            )
+        except Exception as exc:
+            kis_errors[instrument.key] = f"{type(exc).__name__}: {exc}"
+            fallback_instruments.append(instrument)
+
+    if fallback_instruments:
+        fallback_results = fetch_yfinance_daily_histories(
+            fallback_instruments,
+            loader=loader,
+            korea_fallback_reader=korea_fallback_reader,
+            now=now,
+            timeout_seconds=timeout_seconds,
+        )
+        for fallback in fallback_results:
+            kis_error = kis_errors.get(fallback.instrument.key, "조회 실패")
+            if fallback.frame is not None and fallback.error is None:
+                results_by_key[fallback.instrument.key] = replace(
+                    fallback,
+                    warnings=tuple(dict.fromkeys((*fallback.warnings, "KIS_DAILY_FALLBACK"))),
+                )
+                continue
+            fallback_error = fallback.error or "대체 조회 결과 없음"
+            results_by_key[fallback.instrument.key] = replace(
+                fallback,
+                error=f"KIS 일봉 조회 실패: {kis_error} 대체 조회 실패: {fallback_error}",
+            )
+
+    return tuple(results_by_key[instrument.key] for instrument in requested)
+
+
+def standardize_kis_daily_rows(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    instrument: AnalysisInstrument,
+    now: datetime | None = None,
+) -> pd.DataFrame:
+    column_map = _KIS_COLUMN_MAP.get(instrument.market)
+    if column_map is None:
+        raise ValueError(f"KIS 일봉 변환을 지원하지 않는 시장입니다: {instrument.market}")
+    source = pd.DataFrame(list(rows))
+    if source.empty:
+        raise ValueError("KIS 일봉 데이터가 없습니다.")
+    missing = [source_name for source_name in column_map.values() if source_name not in source.columns]
+    if missing:
+        raise ValueError("KIS 일봉 필수 열 누락: " + ", ".join(missing))
+
+    timestamps = pd.to_datetime(
+        source[column_map["timestamp"]].astype(str).str.strip(),
+        format="%Y%m%d",
+        errors="coerce",
+    )
+    standardized = pd.DataFrame(index=pd.DatetimeIndex(timestamps))
+    for target in ("open", "high", "low", "close", "volume", "traded_value"):
+        standardized[target] = pd.to_numeric(source[column_map[target]], errors="coerce").to_numpy()
+    standardized = standardized[~standardized.index.isna()].sort_index(kind="stable")
+    standardized = standardized[~standardized.index.duplicated(keep="last")]
+    standardized = _completed_regular_sessions(standardized, market=instrument.market, now=now)
+    if len(standardized) > RECOMMENDED_INPUT_ROWS:
+        standardized = standardized.tail(RECOMMENDED_INPUT_ROWS)
+    standardized = standardized.reset_index(names="timestamp")
+    standardized["timestamp"] = pd.to_datetime(standardized["timestamp"]).dt.tz_localize(None)
+    return standardized
 
 
 def _extract_symbol_frame(raw: pd.DataFrame, symbol: str, *, single_symbol: bool) -> pd.DataFrame | None:

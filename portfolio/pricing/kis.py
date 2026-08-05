@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import time as time_module
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -24,13 +25,19 @@ KIS_REAL_BASE_URL = "https://openapi.koreainvestment.com:9443"
 KIS_VIRTUAL_BASE_URL = "https://openapivts.koreainvestment.com:29443"
 KIS_DOMESTIC_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-price"
 KIS_OVERSEAS_PRICE_PATH = "/uapi/overseas-price/v1/quotations/price"
+KIS_DOMESTIC_DAILY_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
+KIS_OVERSEAS_DAILY_PRICE_PATH = "/uapi/overseas-price/v1/quotations/dailyprice"
 KIS_DOMESTIC_FUTURES_TIME_CHART_PATH = "/uapi/domestic-futureoption/v1/quotations/inquire-time-futurechartprice"
 KIS_TOKEN_PATH = "/oauth2/tokenP"
 KIS_DOMESTIC_TR_ID = "FHKST01010100"
 KIS_OVERSEAS_TR_ID = "HHDFS00000300"
+KIS_DOMESTIC_DAILY_TR_ID = "FHKST03010100"
+KIS_OVERSEAS_DAILY_TR_ID = "HHDFS76240000"
 KIS_DOMESTIC_FUTURES_TIME_CHART_TR_ID = "FHKIF03020200"
 KIS_DEFAULT_US_EXCHANGES = ("NAS", "NYS", "AMS")
 KIS_TOKEN_REFRESH_MARGIN_SECONDS = 60
+KIS_DOMESTIC_HISTORY_WINDOW_DAYS = 120
+KIS_HISTORY_REQUEST_INTERVAL_SECONDS = 0.08
 US_SYMBOL_PATTERN = re.compile(r"^[A-Z][A-Z0-9.\-]{0,14}$")
 
 ResponseLoader = Callable[[str, str, Mapping[str, str], bytes | None, float], Mapping[str, Any]]
@@ -131,6 +138,23 @@ def _extract_output_rows(payload: Mapping[str, Any], context: str) -> list[Mappi
     if not normalized_rows:
         raise PriceProviderError(f"KIS {context} 응답에 유효한 분봉 데이터가 없습니다.")
     return normalized_rows
+
+
+def _extract_daily_history_rows(payload: Mapping[str, Any], context: str) -> list[Mapping[str, Any]]:
+    rt_cd = payload.get("rt_cd")
+    if rt_cd not in (None, "0", 0):
+        message = str(payload.get("msg1") or payload.get("msg_cd") or "알 수 없는 KIS 오류")
+        raise PriceProviderError(f"KIS {context} 응답 오류: {message}")
+    rows = payload.get("output2")
+    if isinstance(rows, Mapping):
+        rows = [rows]
+    if not isinstance(rows, list):
+        raise PriceProviderError(f"KIS {context} 응답에 일봉 데이터가 없습니다.")
+    return [row for row in rows if isinstance(row, Mapping)]
+
+
+def _history_row_date(row: Mapping[str, Any], keys: tuple[str, ...]) -> date | None:
+    return _parse_yyyymmdd(_first_present(row, keys))
 
 
 def parse_kis_domestic_futures_intraday_response(payload: Mapping[str, Any]) -> list[tuple[datetime | None, float]]:
@@ -279,6 +303,8 @@ class KoreaInvestmentQuoteProvider:
         timeout_seconds: float = 5.0,
         us_exchanges: tuple[str, ...] = KIS_DEFAULT_US_EXCHANGES,
         now_fn: Callable[[], datetime] | None = None,
+        sleep_fn: Callable[[float], None] | None = None,
+        history_request_interval_seconds: float = KIS_HISTORY_REQUEST_INTERVAL_SECONDS,
     ) -> None:
         self._app_key = str(app_key or "").strip()
         self._app_secret = str(app_secret or "").strip()
@@ -292,6 +318,8 @@ class KoreaInvestmentQuoteProvider:
         if not self._us_exchanges:
             self._us_exchanges = KIS_DEFAULT_US_EXCHANGES
         self._now_fn = now_fn or (lambda: datetime.now(timezone.utc))
+        self._sleep_fn = sleep_fn or time_module.sleep
+        self._history_request_interval_seconds = max(0.0, float(history_request_interval_seconds))
         self._access_token: str | None = None
         self._access_token_expires_at: datetime | None = None
         self._token_lock = Lock()
@@ -409,6 +437,154 @@ class KoreaInvestmentQuoteProvider:
             except PriceProviderError as exc:
                 errors.append(f"{exchange}: {exc}")
         raise PriceProviderError("; ".join(errors) or f"KIS 해외 주식 현재가 조회 실패: {normalized_symbol}")
+
+    def get_daily_history_rows(
+        self,
+        market: str,
+        symbol: str,
+        *,
+        max_rows: int = 500,
+        end_date: date | None = None,
+    ) -> tuple[list[Mapping[str, Any]], str]:
+        normalized_market = str(market or "").strip().upper()
+        row_limit = max(1, min(int(max_rows), 1_000))
+        if normalized_market == "KR":
+            normalized_symbol = normalize_korea_symbol(symbol)
+            rows = self._get_domestic_daily_history_rows(
+                normalized_symbol,
+                max_rows=row_limit,
+                end_date=end_date,
+            )
+            return rows, normalized_symbol
+        if normalized_market == "US":
+            normalized_symbol = normalize_kis_us_symbol(symbol)
+            return self._get_overseas_daily_history_rows(
+                normalized_symbol,
+                max_rows=row_limit,
+                end_date=end_date,
+            )
+        raise PriceProviderError(f"KIS 일봉 조회를 지원하지 않는 시장입니다: {normalized_market or '-'}")
+
+    def _wait_between_history_requests(self) -> None:
+        if self._history_request_interval_seconds > 0:
+            self._sleep_fn(self._history_request_interval_seconds)
+
+    def _get_domestic_daily_history_rows(
+        self,
+        symbol: str,
+        *,
+        max_rows: int,
+        end_date: date | None,
+    ) -> list[Mapping[str, Any]]:
+        current = self._now_fn()
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        window_end = end_date or current.astimezone(_kis_kst()).date()
+        rows_by_date: dict[date, Mapping[str, Any]] = {}
+        max_requests = max(2, math.ceil(max_rows / 70) + 2)
+
+        for request_index in range(max_requests):
+            window_start = window_end - timedelta(days=KIS_DOMESTIC_HISTORY_WINDOW_DAYS - 1)
+            payload = self._request_json(
+                "GET",
+                KIS_DOMESTIC_DAILY_PRICE_PATH,
+                headers=self._headers(KIS_DOMESTIC_DAILY_TR_ID),
+                query={
+                    "FID_COND_MRKT_DIV_CODE": "J",
+                    "FID_INPUT_ISCD": symbol,
+                    "FID_INPUT_DATE_1": window_start.strftime("%Y%m%d"),
+                    "FID_INPUT_DATE_2": window_end.strftime("%Y%m%d"),
+                    "FID_PERIOD_DIV_CODE": "D",
+                    "FID_ORG_ADJ_PRC": "0",
+                },
+            )
+            page_rows = _extract_daily_history_rows(payload, "국내 주식 일봉")
+            page_dates = [
+                parsed
+                for row in page_rows
+                if (parsed := _history_row_date(row, ("stck_bsop_date", "xymd", "date"))) is not None
+            ]
+            for row in page_rows:
+                parsed = _history_row_date(row, ("stck_bsop_date", "xymd", "date"))
+                if parsed is not None:
+                    rows_by_date[parsed] = row
+            if len(rows_by_date) >= max_rows or not page_dates:
+                break
+            next_end = min(window_start - timedelta(days=1), min(page_dates) - timedelta(days=1))
+            if next_end >= window_end:
+                break
+            window_end = next_end
+            if request_index + 1 < max_requests:
+                self._wait_between_history_requests()
+
+        if not rows_by_date:
+            raise PriceProviderError(f"KIS 국내 주식 일봉 조회 결과가 없습니다: {symbol}")
+        return [rows_by_date[session] for session in sorted(rows_by_date)[-max_rows:]]
+
+    def _get_overseas_daily_history_rows(
+        self,
+        symbol: str,
+        *,
+        max_rows: int,
+        end_date: date | None,
+    ) -> tuple[list[Mapping[str, Any]], str]:
+        current = self._now_fn()
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        initial_end = end_date or current.astimezone(timezone.utc).date()
+        resolved_exchange = self._resolved_exchange_by_symbol.get(symbol)
+        exchanges = tuple(
+            dict.fromkeys(([resolved_exchange] if resolved_exchange else []) + list(self._us_exchanges))
+        )
+        errors: list[str] = []
+        max_requests = max(2, math.ceil(max_rows / 80) + 2)
+
+        for exchange in exchanges:
+            rows_by_date: dict[date, Mapping[str, Any]] = {}
+            page_end = initial_end
+            try:
+                for request_index in range(max_requests):
+                    payload = self._request_json(
+                        "GET",
+                        KIS_OVERSEAS_DAILY_PRICE_PATH,
+                        headers=self._headers(KIS_OVERSEAS_DAILY_TR_ID),
+                        query={
+                            "AUTH": "",
+                            "EXCD": exchange,
+                            "SYMB": symbol,
+                            "GUBN": "0",
+                            "BYMD": page_end.strftime("%Y%m%d"),
+                            "MODP": "1",
+                        },
+                    )
+                    page_rows = _extract_daily_history_rows(payload, "해외 주식 일봉")
+                    page_dates = [
+                        parsed
+                        for row in page_rows
+                        if (parsed := _history_row_date(row, ("xymd", "stck_bsop_date", "date"))) is not None
+                    ]
+                    for row in page_rows:
+                        parsed = _history_row_date(row, ("xymd", "stck_bsop_date", "date"))
+                        if parsed is not None:
+                            rows_by_date[parsed] = row
+                    if len(rows_by_date) >= max_rows or not page_dates:
+                        break
+                    next_end = min(page_dates) - timedelta(days=1)
+                    if next_end >= page_end:
+                        break
+                    page_end = next_end
+                    if request_index + 1 < max_requests:
+                        self._wait_between_history_requests()
+            except PriceProviderError as exc:
+                errors.append(f"{exchange}: {exc}")
+                continue
+            if rows_by_date:
+                self._resolved_exchange_by_symbol[symbol] = exchange
+                rows = [rows_by_date[session] for session in sorted(rows_by_date)[-max_rows:]]
+                return rows, f"{symbol}@{exchange}"
+            errors.append(f"{exchange}: 일봉 데이터 없음")
+
+        raise PriceProviderError("; ".join(errors) or f"KIS 해외 주식 일봉 조회 실패: {symbol}")
 
     def get_domestic_futures_intraday_closes(
         self,
