@@ -808,7 +808,7 @@ __CSS_VARS__
         }
         .st-key-public_section_tabs div[role="radiogroup"] {
             display: grid !important;
-            grid-template-columns: repeat(6, minmax(0, 1fr));
+            grid-template-columns: repeat(7, minmax(0, 1fr));
             gap: 0;
             width: 100%;
             padding: 0;
