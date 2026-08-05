@@ -13,7 +13,11 @@ from portfolio.chart_analysis import (
     TOP_COMPONENT_IDS,
     analyze_daily_history,
 )
-from portfolio.chart_analysis_data import fetch_yfinance_daily_histories, holdings_to_analysis_instruments
+from portfolio.chart_analysis_data import (
+    KisDailyHistoryProvider,
+    fetch_daily_histories,
+    holdings_to_analysis_instruments,
+)
 
 
 _RESULTS_KEY = "chart_analysis_results"
@@ -24,16 +28,25 @@ _WARNING_LABELS = {
     "SPLIT_EVENTS_UNAVAILABLE": "분할 이벤트 확인 불가",
     "PROVIDER_ADJUSTMENT_UNVERIFIED": "공급원 조정 기준 미확인",
     "NO_COMPLETED_SESSION": "완료 일봉 없음",
+    "KIS_DAILY_FALLBACK": "KIS 일봉 실패로 대체 출처 사용",
 }
 
 
 @st.cache_data(ttl=30 * 60, show_spinner=False, max_entries=16)
-def _load_chart_analysis(payload: tuple[tuple[str, str, str], ...]) -> tuple[ChartAnalysisResult, ...]:
+def _load_chart_analysis(
+    payload: tuple[tuple[str, str, str], ...],
+    use_kis: bool,
+    _kis_provider: KisDailyHistoryProvider | None = None,
+) -> tuple[ChartAnalysisResult, ...]:
     instruments = tuple(
         AnalysisInstrument(market=market, symbol=symbol, display_name=display_name)
         for market, symbol, display_name in payload
     )
-    return tuple(analyze_daily_history(history) for history in fetch_yfinance_daily_histories(instruments))
+    provider = _kis_provider if use_kis else None
+    return tuple(
+        analyze_daily_history(history)
+        for history in fetch_daily_histories(instruments, kis_provider=provider)
+    )
 
 
 def chart_analysis_table_rows(results: Iterable[ChartAnalysisResult]) -> list[dict[str, object]]:
@@ -112,9 +125,15 @@ def _render_result_details(results: tuple[ChartAnalysisResult, ...]) -> None:
             key="chart_analysis_detail_symbol",
         )
         result = next(result for result in results if result.instrument.key == selected_key)
+        traded_value_mode = (
+            "추정 거래대금"
+            if "APPROXIMATED_TRADED_VALUE" in result.warnings
+            else "원자료 거래대금"
+        )
         st.caption(
             f"출처 {result.provider or '-'} · 조회 심볼 {result.source_symbol or '-'} · "
-            f"조정 {result.adjustment_mode or '-'} · 입력 {result.rows}개 · 적격 {result.eligible_rows}개"
+            f"조정 {result.adjustment_mode or '-'} · {traded_value_mode} · "
+            f"입력 {result.rows}개 · 적격 {result.eligible_rows}개"
         )
         if result.source_sha256:
             st.caption(f"원자료 해시 {result.source_sha256[:16]}…")
@@ -159,6 +178,7 @@ def render_chart_analysis(
     holdings: Iterable[Mapping[str, object]],
     *,
     auto_load: bool,
+    kis_provider: KisDailyHistoryProvider | None = None,
 ) -> None:
     st.subheader("차트분석")
     st.caption(
@@ -174,8 +194,9 @@ def render_chart_analysis(
         return
 
     payload = _payload(instruments)
-    if st.session_state.get(_SIGNATURE_KEY) != payload:
-        st.session_state[_SIGNATURE_KEY] = payload
+    signature = (payload, kis_provider is not None)
+    if st.session_state.get(_SIGNATURE_KEY) != signature:
+        st.session_state[_SIGNATURE_KEY] = signature
         st.session_state.pop(_RESULTS_KEY, None)
 
     action_label = "일봉 데이터 새로고침" if auto_load else "차트분석 실행"
@@ -190,7 +211,11 @@ def render_chart_analysis(
     should_load = action_clicked or (auto_load and _RESULTS_KEY not in st.session_state)
     if should_load:
         with st.spinner(f"보유종목 {len(instruments)}개의 완료 일봉을 조회하고 있습니다..."):
-            st.session_state[_RESULTS_KEY] = _load_chart_analysis(payload)
+            st.session_state[_RESULTS_KEY] = _load_chart_analysis(
+                payload,
+                kis_provider is not None,
+                kis_provider,
+            )
 
     results = st.session_state.get(_RESULTS_KEY)
     if not results:

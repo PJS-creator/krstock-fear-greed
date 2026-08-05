@@ -2260,6 +2260,7 @@ def _render_chart_analysis_section(*, auto_load: bool) -> None:
     render_chart_analysis(
         list(st.session_state.get("holdings_rows", [])),
         auto_load=auto_load,
+        kis_provider=_read_kis_quote_provider(),
     )
 
 
