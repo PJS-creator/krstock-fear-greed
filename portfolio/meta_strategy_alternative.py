@@ -6,16 +6,21 @@ import math
 from typing import Callable, Mapping, Sequence
 
 from portfolio.meta_strategy import DatedValue
-from portfolio.meta_strategy_official import build_official_meta_strategy_signal
+from portfolio.meta_strategy_official import (
+    build_official_meta_strategy_signal,
+    build_technical_trace,
+    calculate_exact_liquidity_trace,
+)
 
 
-ALTERNATIVE_PIPELINE_VERSION = "alternative-shadow-daily-v1"
-ALTERNATIVE_RULESET_VERSION = "qqq-meta-v1-red-router-s1-n1-v4-shadow-v2.1"
-ALTERNATIVE_SCHEMA_VERSION = "1.0"
-STRATEGY_ID = "qqq_meta_v1_red_router_s1_n1_v4_shadow_v2_1"
-STRATEGY_SPEC_VERSION = "2.1"
+ALTERNATIVE_PIPELINE_VERSION = "alternative-shadow-daily-v2"
+ALTERNATIVE_RULESET_VERSION = "qqq-meta-v1-red-router-s1-n1-a1-v4-shadow-v3.0"
+ALTERNATIVE_SCHEMA_VERSION = "2.0"
+STRATEGY_ID = "qqq_meta_v1_red_router_s1_n1_a1_v4_shadow_v3_0"
+STRATEGY_SPEC_VERSION = "3.0"
 ENTRY_DISTANCE_THRESHOLD_PCT = 5.0
 DEFERRED_COMPLETED_SESSIONS = 60
+A1_STATE_ANCHOR_DATE = date(2010, 2, 11)
 
 
 def _finite(value: object) -> float | None:
@@ -65,14 +70,211 @@ def apply_n1_overlay(
     }
 
 
+def classify_a1_state_subtype(row: Mapping[str, object]) -> str:
+    """Map the canonical regime fields to the v3.0 A1 state subtype."""
+
+    regime = str(row.get("market_regime") or "").upper()
+    trend = str(row.get("trend200") or "").upper()
+    if regime == "BULL":
+        return "BULL"
+    if regime == "BEAR":
+        return "BEAR"
+    if regime == "MIXED" and trend == "UP":
+        return "UP_MIXED"
+    if regime == "MIXED" and trend == "DOWN" and row.get("recovery") is True:
+        return "RECOVERY_MIXED"
+    return regime or "UNKNOWN"
+
+
+def advance_a1_overlay(
+    *,
+    as_of_date: date | str,
+    previous_state: Mapping[str, object] | None,
+    previous_subtype: str | None,
+    current_subtype: str,
+    previous_executed_target: str | None,
+    post_n1_target: str,
+    comparison3_target: str,
+    router_active: bool,
+) -> dict[str, object]:
+    """Advance the deterministic A1 latch by one completed session."""
+
+    prior = _mapping(previous_state)
+    was_active = prior.get("active") is True
+    was_blocked = prior.get("reentry_blocked") is True
+    entry_session = prior.get("entry_session")
+    last_release_session = prior.get("last_release_session")
+    event = "NONE"
+    active = was_active
+    reentry_blocked = was_blocked
+    resolved_target = post_n1_target
+    reason_codes: list[str] = []
+
+    release_conditions = {
+        "current_state_subtype_not_up_mixed": current_subtype != "UP_MIXED",
+        "comparison3_target_is_tqqq": comparison3_target == "TQQQ",
+        "router_latch_is_active": router_active,
+    }
+    enter_conditions = {
+        "previous_state_subtype_is_bull": previous_subtype == "BULL",
+        "current_state_subtype_is_up_mixed": current_subtype == "UP_MIXED",
+        "previous_executed_target_is_qqq": previous_executed_target == "QQQ",
+        "current_post_n1_target_is_qld": post_n1_target == "QLD",
+        "comparison3_target_is_qld": comparison3_target == "QLD",
+        "router_latch_is_inactive": not router_active,
+        "same_episode_reentry_is_allowed": not was_blocked,
+    }
+
+    if was_active:
+        triggered_releases = [name for name, matched in release_conditions.items() if matched]
+        if triggered_releases:
+            event = "RELEASE"
+            active = False
+            reentry_blocked = current_subtype == "UP_MIXED"
+            last_release_session = str(as_of_date)
+            reason_codes = [f"A1_RELEASE_{name.upper()}" for name in triggered_releases]
+        else:
+            event = "HOLD"
+            resolved_target = "QQQ"
+            reason_codes = ["A1_LATCH_ACTIVE"]
+    elif was_blocked:
+        if current_subtype != "UP_MIXED":
+            event = "REARM"
+            reentry_blocked = False
+            reason_codes = ["A1_NEW_UP_MIXED_EPISODE_REARMED"]
+        else:
+            event = "BLOCKED_REENTRY"
+            reason_codes = ["A1_SAME_UP_MIXED_EPISODE_REENTRY_BLOCKED"]
+    elif all(enter_conditions.values()):
+        event = "ENTER"
+        active = True
+        reentry_blocked = False
+        entry_session = str(as_of_date)
+        resolved_target = "QQQ"
+        reason_codes = ["A1_RISK_DOWNGRADE_BLOCK_RELEVERAGE"]
+    else:
+        reason_codes = [
+            f"A1_CONDITION_FAILED_{name.upper()}"
+            for name, matched in enter_conditions.items()
+            if not matched
+        ]
+
+    return {
+        "type": "BULL_EXIT_LEVERAGE_MONOTONICITY_LATCH",
+        "execution_scope": "SHADOW_RESEARCH_ONLY",
+        "evaluation_order": "AFTER_N1_BEFORE_ENTRY_FILTER_V4",
+        "event": event,
+        "status": "ACTIVE" if active else event,
+        "applied": active,
+        "active": active,
+        "reentry_blocked": reentry_blocked,
+        "entry_session": entry_session,
+        "last_release_session": last_release_session,
+        "previous_state_subtype": previous_subtype,
+        "current_state_subtype": current_subtype,
+        "previous_executed_target": previous_executed_target,
+        "post_n1_target": post_n1_target,
+        "comparison3_target": comparison3_target,
+        "router_active": router_active,
+        "latch_target": "QQQ",
+        "resolved_target": resolved_target,
+        "enter_conditions": enter_conditions,
+        "release_conditions": release_conditions,
+        "reason_codes": reason_codes,
+    }
+
+
+def replay_n1_a1_overlays(
+    technical_trace: Sequence[Mapping[str, object]],
+    *,
+    anchor_date: date = A1_STATE_ANCHOR_DATE,
+) -> dict[str, object]:
+    """Replay N1 and stateful A1 from the fixed v3.0 anchor."""
+
+    rows = [
+        row
+        for row in technical_trace
+        if isinstance(row.get("as_of_date"), date) and row["as_of_date"] >= anchor_date
+    ]
+    if not rows:
+        raise ValueError("A1 replay requires technical rows on or after the state anchor")
+
+    previous_subtype: str | None = None
+    previous_target: str | None = "QLD"
+    a1_state: Mapping[str, object] | None = None
+    latest: dict[str, object] | None = None
+    event_history: list[dict[str, object]] = []
+
+    for row in rows:
+        router_active = row.get("router_active") is True
+        base_target = str(row.get("execution_target") or "")
+        n1 = apply_n1_overlay(
+            market_regime=str(row.get("market_regime") or ""),
+            active_strategy=str(row.get("active_strategy") or ""),
+            base_target=base_target,
+            router_active=router_active,
+        )
+        post_n1_target = str(n1["resolved_target"])
+        current_subtype = classify_a1_state_subtype(row)
+        a1 = advance_a1_overlay(
+            as_of_date=row["as_of_date"],
+            previous_state=a1_state,
+            previous_subtype=previous_subtype,
+            current_subtype=current_subtype,
+            previous_executed_target=previous_target,
+            post_n1_target=post_n1_target,
+            comparison3_target=str(row.get("comparison3_ticker") or ""),
+            router_active=router_active,
+        )
+        event = str(a1.get("event") or "NONE")
+        if event in {"ENTER", "RELEASE", "REARM"}:
+            event_history.append(
+                {
+                    "as_of_date": str(row["as_of_date"]),
+                    "event": event,
+                    "previous_state_subtype": a1.get("previous_state_subtype"),
+                    "current_state_subtype": a1.get("current_state_subtype"),
+                    "previous_executed_target": a1.get("previous_executed_target"),
+                    "post_n1_target": a1.get("post_n1_target"),
+                    "resolved_target": a1.get("resolved_target"),
+                    "reason_codes": list(a1.get("reason_codes") or []),
+                }
+            )
+        latest = {
+            "as_of_date": str(row["as_of_date"]),
+            "base_target": base_target,
+            "post_n1_target": post_n1_target,
+            "resolved_target": str(a1["resolved_target"]),
+            "n1_overlay": n1,
+            "a1_overlay": a1,
+        }
+        a1_state = a1
+        previous_subtype = current_subtype
+        previous_target = str(a1["resolved_target"])
+
+    assert latest is not None
+    latest_a1 = dict(_mapping(latest["a1_overlay"]))
+    latest_a1.update(
+        {
+            "state_anchor_date": anchor_date.isoformat(),
+            "replayed_through_session": latest["as_of_date"],
+            "event_history": event_history,
+        }
+    )
+    latest["a1_overlay"] = latest_a1
+    return latest
+
+
 def build_shadow_entry_plan(
     *,
     base_target: str,
-    resolved_target: str,
     qqq_close: object,
     qqq_sma50: object,
     execution_session: date | str,
     deferred_due_session: date | str,
+    resolved_target: str | None = None,
+    post_n1_target: str | None = None,
+    post_a1_target: str | None = None,
 ) -> dict[str, object]:
     """Build the initial-capital-only V4 plan as a non-executable shadow view."""
 
@@ -81,24 +283,26 @@ def build_shadow_entry_plan(
     data_available = close is not None and sma50 is not None and sma50 > 0.0
     ratio = close / sma50 if data_available else None
     distance_pct = (ratio - 1.0) * 100.0 if ratio is not None else None
-    base_is_moderate = base_target == "QLD"
+    resolved_n1 = post_n1_target or resolved_target or base_target
+    resolved_a1 = post_a1_target or resolved_n1
+    post_a1_is_moderate = resolved_a1 == "QLD"
     threshold_met = distance_pct is not None and distance_pct >= ENTRY_DISTANCE_THRESHOLD_PCT
-    triggered = base_is_moderate and threshold_met
+    triggered = post_a1_is_moderate and threshold_met
 
     if triggered:
         mode = "SPLIT_50_50"
         immediate_weight = 50.0
         cash_weight = 50.0
         release_session: date | str | None = deferred_due_session
-        reason_codes = ["BASE_TARGET_QLD", "QQQ_SMA50_UPPER_DISTANCE_GTE_5"]
+        reason_codes = ["POST_A1_TARGET_QLD", "QQQ_SMA50_UPPER_DISTANCE_GTE_5"]
     else:
         mode = "IMMEDIATE_100"
         immediate_weight = 100.0
         cash_weight = 0.0
         release_session = None
         reason_codes = []
-        if not base_is_moderate:
-            reason_codes.append("BASE_TARGET_NOT_QLD")
+        if not post_a1_is_moderate:
+            reason_codes.append("POST_A1_TARGET_NOT_QLD")
         if not data_available:
             reason_codes.append("QQQ_SMA50_INPUT_UNAVAILABLE")
         elif not threshold_met:
@@ -113,26 +317,27 @@ def build_shadow_entry_plan(
         "triggered": triggered,
         "mode": mode,
         "base_target_before_n1": base_target,
-        "resolved_target_after_n1": resolved_target,
+        "resolved_target_after_n1": resolved_n1,
+        "resolved_target_after_a1": resolved_a1,
         "qqq_close": close,
         "qqq_sma50": sma50,
         "qqq_close_to_sma50_ratio": ratio,
         "qqq_sma50_upper_distance_pct": distance_pct,
         "trigger_threshold_pct": ENTRY_DISTANCE_THRESHOLD_PCT,
         "trigger_conditions": {
-            "base_target_is_moderate": base_is_moderate,
+            "post_a1_target_is_moderate": post_a1_is_moderate,
             "qqq_sma50_data_available": data_available,
             "qqq_sma50_upper_distance_gte_5": threshold_met,
         },
         "initial_execution_session": execution_session,
-        "immediate_target": resolved_target,
+        "immediate_target": resolved_a1,
         "immediate_weight_pct": immediate_weight,
         "cash_weight_pct": cash_weight,
         "deferred_weight_pct": cash_weight,
         "hold_completed_common_sessions": DEFERRED_COMPLETED_SESSIONS if triggered else 0,
-        "during_hold_policy": "ACTIVE_HALF_FOLLOWS_DAILY_RESOLVED_TARGET" if triggered else None,
+        "during_hold_policy": "ACTIVE_HALF_FOLLOWS_DAILY_POST_A1_TARGET" if triggered else None,
         "deferred_due_session": release_session,
-        "deferred_target_policy": "JOIN_THEN_CURRENT_RESOLVED_TARGET" if triggered else None,
+        "deferred_target_policy": "JOIN_THEN_CURRENT_POST_A1_TARGET" if triggered else None,
         "deferred_execution_timing": "NEXT_COMMON_US_SESSION_OPEN" if triggered else None,
         "reason_codes": reason_codes,
     }
@@ -151,7 +356,7 @@ def build_alternative_meta_strategy_signal(
     generated_at: datetime | None = None,
     source_metadata: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Derive the separate N1/V4 shadow signal from the canonical official result."""
+    """Derive the separate N1/A1/V4 shadow signal from the official inputs."""
 
     canonical = build_official_meta_strategy_signal(
         qqq_points=qqq_points,
@@ -166,19 +371,30 @@ def build_alternative_meta_strategy_signal(
         source_metadata=source_metadata,
     )
     payload = deepcopy(canonical)
-    router = _mapping(payload.get("red_router"))
     qqq = _mapping(payload.get("qqq"))
-    base_target = str(payload.get("overall_execution_target") or "")
-    n1 = apply_n1_overlay(
-        market_regime=str(payload.get("market_regime") or ""),
-        active_strategy=str(payload.get("active_strategy") or ""),
-        base_target=base_target,
-        router_active=router.get("active") is True,
+    liquidity_trace = calculate_exact_liquidity_trace(
+        liquidity_series,
+        effective_session_resolver=next_session_after,
     )
-    resolved_target = str(n1["resolved_target"])
+    technical_trace = build_technical_trace(
+        qqq_points,
+        liquidity_trace,
+        gld_points=gld_points,
+        router_series=router_series,
+        final_liquidity_session=planned_execution_session,
+    )
+    overlay_result = replay_n1_a1_overlays(technical_trace)
+    if overlay_result.get("as_of_date") != decision_session.isoformat():
+        raise ValueError("A1 replay did not end on the completed decision session")
+    base_target = str(overlay_result["base_target"])
+    post_n1_target = str(overlay_result["post_n1_target"])
+    resolved_target = str(overlay_result["resolved_target"])
+    n1 = _mapping(overlay_result["n1_overlay"])
+    a1 = _mapping(overlay_result["a1_overlay"])
     entry_plan = build_shadow_entry_plan(
         base_target=base_target,
-        resolved_target=resolved_target,
+        post_n1_target=post_n1_target,
+        post_a1_target=resolved_target,
         qqq_close=qqq.get("close"),
         qqq_sma50=qqq.get("sma50"),
         execution_session=str(payload.get("planned_execution_session")),
@@ -197,15 +413,18 @@ def build_alternative_meta_strategy_signal(
             "execution_scope": "SHADOW_RESEARCH_ONLY",
             "automated_ordering": False,
             "base_execution_target": base_target,
+            "post_n1_execution_target": post_n1_target,
             "resolved_execution_target": resolved_target,
             "overall_execution_target": resolved_target,
-            "n1_overlay": n1,
+            "n1_overlay": dict(n1),
+            "a1_overlay": dict(a1),
             "entry_filter_v4": entry_plan,
             "entry_advice": entry_plan,
             "canonical_reference": {
                 "pipeline_version": canonical.get("pipeline_version"),
                 "ruleset_version": canonical.get("ruleset_version"),
                 "base_execution_target": base_target,
+                "post_n1_execution_target": post_n1_target,
                 "canonical_entry_advice": canonical.get("entry_advice"),
             },
             "cost_assumptions": {
@@ -242,6 +461,7 @@ def render_alternative_signal_markdown(payload: Mapping[str, object]) -> str:
     liquidity = _mapping(payload.get("liquidity"))
     qqq = _mapping(payload.get("qqq"))
     n1 = _mapping(payload.get("n1_overlay"))
+    a1 = _mapping(payload.get("a1_overlay"))
     entry = _mapping(payload.get("entry_filter_v4"))
     rsi = _mapping(payload.get("rsi_reference"))
     return "\n".join(
@@ -255,7 +475,14 @@ def render_alternative_signal_markdown(payload: Mapping[str, object]) -> str:
             f"- 활성화 전략: {_markdown_value(payload.get('active_strategy_label'))}",
             f"- N1 전 기준 목표: **{_markdown_value(payload.get('base_execution_target'))}**",
             f"- N1 적용: **{_markdown_value(n1.get('status'))}**",
-            f"- 대안 resolved target: **{_markdown_value(payload.get('resolved_execution_target'))}**",
+            f"- N1 후 목표: **{_markdown_value(payload.get('post_n1_execution_target'))}**",
+            f"- A1 이벤트: **{_markdown_value(a1.get('event'))}**",
+            f"- A1 상태: **{_markdown_value(a1.get('status'))}**",
+            (
+                f"- A1 상태 전이: {_markdown_value(a1.get('previous_state_subtype'))}"
+                f" → {_markdown_value(a1.get('current_state_subtype'))}"
+            ),
+            f"- v3.0 최종 shadow target: **{_markdown_value(payload.get('resolved_execution_target'))}**",
             "",
             "## 신규진입 V4 · 오늘 시작 가정",
             "",

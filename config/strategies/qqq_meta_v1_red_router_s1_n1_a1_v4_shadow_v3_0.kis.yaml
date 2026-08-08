@@ -1,0 +1,275 @@
+version: "3.0"
+
+metadata:
+  name: "메타전략 v1.0 · RED Router-S1 · N1 · A1 · 신규진입 V4 · shadow v3.0"
+  description: >-
+    canonical Meta-v1.0 RED Router-S1, N1 및 신규진입 V4의 고정 임계값을
+    유지하면서 A1 레버리지 단조성 latch를 N1 뒤·V4 앞에 추가한다.
+    BULL에서 N1으로 QQQ를 보유하다 유동성 약화로 UP_MIXED가 되면,
+    비교3 목표가 QLD여도 위험 상태 악화와 동시에 QQQ 1배에서 QLD 2배로
+    재레버리지하지 않고 QQQ를 유지한다. UP_MIXED 이탈, 비교3 TQQQ 전환,
+    또는 RED Router 활성화 때 해제하며 같은 UP_MIXED episode에는 재진입하지
+    않는다. V4는 N1·A1 적용 후 최종 목표가 QLD일 때만 최초 자본에 적용한다.
+    편도 수수료 0.25%, 편도 슬리피지 0.10%, 세금 0%의 LEAN backtest/shadow
+    연구 전용 계약이며 실제 주문 또는 브로커 자동화 기능은 포함하지 않는다.
+  author: "user"
+  tags:
+    - qqq
+    - qld
+    - tqqq
+    - gld
+    - xlv
+    - regime_meta_rotation
+    - pdf_regime_meta_v1
+    - red_router_s1
+    - n1_overlay
+    - a1_leverage_monotonicity_latch
+    - entry_filter_v4
+    - initial_capital_only
+    - lean_backtest_only
+    - shadow_research
+    - no_tax_netting
+    - commission_025
+
+portfolio:
+  mode: regime_meta_rotation
+  provider: tiingo
+  price_adjustment: adjusted
+  signal_symbol: QQQ
+  defensive_asset: QQQ
+  moderate_asset: QLD
+  aggressive_asset: TQQQ
+  target_weight: 1.0
+  rebalance_timing: next_open
+  ruleset_version: pdf-regime-meta-v1-red-router-s1
+
+  state_initialization:
+    mode: from_anchor
+    history_start_date: 2005-03-28
+    anchor_date: 2010-02-11
+    initial_asset: moderate
+    capital_initialization: first_requested_open
+
+  regime:
+    type: pdf_regime_meta_v1
+
+    trend200:
+      sma_period: 200
+      confirmation_weeks: 2
+      week_sample: last_exchange_session
+      comparison: strict
+      equality_action: hold
+
+    recovery:
+      sma_period: 20
+      above_operator: close_gt_sma
+      above_confirmation_days: 5
+      slope_lookback_days: 5
+      slope_operator: sma_gt_lookback
+      failure_operator: close_lte_sma
+      failure_confirmation_days: 2
+      same_bar_priority: new_down
+
+    liquidity:
+      source:
+        provider: fred
+        walcl_series: WALCL
+        walcl_unit: million_usd
+        walcl_scale: divide_by_1000
+        wdtgal_series: WDTGAL
+        wdtgal_unit: million_usd
+        wdtgal_scale: divide_by_1000
+        rrp_series: RRPONTSYD
+        rrp_unit: billion_usd
+        rrp_scale: identity
+        observation_weekday: wednesday
+        signal_label_weekday: friday
+        rrp_missing: zero
+        vintage: latest_available
+
+      p:
+        net_liquidity_formula: walcl_minus_wdtgal_minus_rrp
+        growth_lookback_weeks: 26
+        growth_transform: log
+        smoothing_weeks: 13
+        percentile_lookback_weeks: 260
+        exclude_current: true
+        tie_weight: 0.5
+        applied_lag_weeks: 1
+
+      hysteresis:
+        initial_state: WARMUP
+        bull_enter_gte: 75
+        bull_exit_below: 65
+        bear_enter_lte: 25
+        bear_exit_above: 35
+
+    bull_policy: rsi_aggressive_immediate
+    mixed_policy: rsi_aggressive_immediate
+    bear_policy: trend_2d
+
+  policies:
+    trend_2d:
+      type: trend_three_state
+      fast_sma_period: 50
+      slow_sma_period: 200
+      confirmation_days: 2
+      equality_action: yellow
+      green_asset: aggressive
+      yellow_asset: moderate
+      red_asset: defensive
+
+    rsi_aggressive_immediate:
+      type: rsi_aggressive_two_state
+      sma_period: 200
+      rsi_period: 14
+      rsi_method: ewm_wilder_adjust_false
+      entry_cross_above: 40
+      exit_cross_above: 80
+      entry_requires_close_below_sma: true
+      same_bar_priority: exit
+      risk_asset: aggressive
+      standby_asset: moderate
+
+  red_router:
+    type: red_router_s1
+
+    activation:
+      final_regime: BEAR
+      policy: trend_2d
+      confirmed_state: RED
+      confirmation_days: 2
+      evaluation: entry_only
+
+    source:
+      provider: fred
+      vix_series: VIXCLS
+      hy_oas_series: BAMLH0A0HYM2
+      hy_oas_history:
+        provider: internet_archive_fred_snapshot
+        snapshot_timestamp: "20251104204105"
+        original_series: FRED/BAMLH0A0HYM2
+        merge_policy: history_then_fred_current_wins
+        overlap_validation: exact
+        usage: internal_research_only
+      real_yield_series: DFII10
+      broad_dollar_series: DTWEXBGS
+      vix_alignment: same_session_close
+      macro_alignment: ffill_then_shift_1_trading_session
+      vintage: latest_available
+
+    qqq:
+      asset: QQQ
+      vix_lookback_sessions: 10
+      vix_operator: current_lt_lookback
+      hy_oas_lookback_sessions: 20
+      hy_oas_operator: current_lte_lookback
+      qqq_momentum_lookback_sessions: 5
+      qqq_operator: current_close_gt_lookback
+      logic: all
+
+    gld:
+      asset: GLD
+      sma_period: 20
+      price_operator: close_gt_sma
+      real_yield_lookback_sessions: 20
+      real_yield_operator: current_lt_lookback
+      broad_dollar_lookback_sessions: 20
+      broad_dollar_operator: current_lt_lookback
+      macro_logic: or
+      logic: price_and_macro
+
+    execution:
+      timing: close_decision_next_common_session_open
+      target_weight: 1.0
+      fractional_shares: true
+      cash_buffer_weight: 0.0
+      commission_rate: 0.0025
+      slippage_rate: 0.001
+      tax_rate: 0.0
+
+    candidate_precedence: QQQ>GLD>XLV
+    fallback_asset: XLV
+    missing_data_action: fallback_xlv_if_any_required_metric_missing
+    latch_mode: hold_entry_choice
+    exit_condition: leave_confirmed_red_or_final_bear
+    lookback_unit: trading_sessions
+
+  n1_overlay:
+    type: bull_rsi_moderate_to_defensive
+    required_regime: BULL
+    required_policy: rsi_aggressive_immediate
+    base_target_role: moderate
+    replacement_target_role: defensive
+    application: next_open
+
+  experimental_overlay:
+    enabled: true
+    id: a1_leverage_monotonicity_latch
+    research_name: A1
+    type: bull_exit_leverage_monotonicity_latch
+    execution_scope: lean_backtest_only
+    evaluation_order: after_n1_before_entry_filter_v4
+    principle: when_risk_state_deteriorates_execution_leverage_must_not_increase
+    risk_transition:
+      previous_state_subtype: BULL
+      current_state_subtype: UP_MIXED
+    enter_when_all:
+      - previous_executed_target_is_QQQ
+      - current_post_n1_execution_target_is_QLD
+      - comparison3_target_is_QLD
+      - router_latch_is_inactive
+      - requested_leverage_gt_previous_executed_leverage
+    action:
+      latch_target: QQQ
+      target_weight: 1.0
+    release_when_any:
+      - current_state_subtype_not_UP_MIXED
+      - comparison3_target_is_TQQQ
+      - router_latch_becomes_active
+    same_up_mixed_episode_reentry: false
+    additional_confirmation_days: 0
+    reason_code: A1_RISK_DOWNGRADE_BLOCK_RELEVERAGE
+
+  entry_filter_v4:
+    type: state_aware_initial_entry_v4
+    enabled: true
+    execution_scope: lean_backtest_only
+    applies_to: initial_capital_only
+    trigger:
+      base_target_role: moderate
+      reference_price: previous_completed_session_close
+      sma_period: 50
+      close_to_sma_ratio_gte: 1.05
+      target_source: post_experimental_execution_target
+    allocation_when_triggered:
+      resolved_target_weight: 0.5
+      cash_weight: 0.5
+      hold_trading_sessions: 60
+      during_hold: active_half_follows_normal_target
+      release_target: current_resolved_target
+      release_timing: next_common_session_open
+    allocation_otherwise:
+      action: full_resolved_target
+      target_weight: 1.0
+
+# 실행 그래프는 typed portfolio 계약에 완전히 정의되어 있다.
+strategy:
+  id: qqq_meta_v1_red_router_s1_n1_a1_v4_shadow_v3_0
+  category: regime_meta_rotation
+  indicators: []
+  entry:
+    logic: AND
+    conditions: []
+  exit:
+    logic: OR
+    conditions: []
+  params: {}
+
+risk:
+  stop_loss:
+    enabled: false
+  take_profit:
+    enabled: false
+  trailing_stop:
+    enabled: false

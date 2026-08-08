@@ -21,8 +21,15 @@ def _signal():
         "planned_execution_session": "2026-08-03",
         "market_regime_label": "강세장",
         "base_execution_target": "QLD",
+        "post_n1_execution_target": "QQQ",
         "resolved_execution_target": "QQQ",
         "n1_overlay": {"applied": True},
+        "a1_overlay": {
+            "event": "ENTER",
+            "active": True,
+            "previous_state_subtype": "BULL",
+            "current_state_subtype": "UP_MIXED",
+        },
         "entry_filter_v4": {
             "triggered": True,
             "mode": "SPLIT_50_50",
@@ -53,7 +60,9 @@ def test_alternative_notification_has_separate_marker_targets_and_branch():
     )
     assert "N1 전 기준 목표: **QLD**" in body
     assert "N1 오버레이: **적용**" in body
-    assert "대안 resolved target: **QQQ**" in body
+    assert "N1 후 목표: **QQQ**" in body
+    assert "A1 래치: **ENTER** · BULL → UP_MIXED" in body
+    assert "v3.0 최종 shadow target: **QQQ**" in body
     assert "신규진입 V4: **발동**" in body
     assert "alternative-strategy-data/signals/latest_validated.md" in body
     assert "공식 메타전략 판정은 변경하지 않습니다" in body

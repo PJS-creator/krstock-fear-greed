@@ -69,6 +69,7 @@ def render_alternative_strategy_notification(
     liquidity = _mapping(signal_payload.get("liquidity"))
     qqq = _mapping(signal_payload.get("qqq"))
     n1 = _mapping(signal_payload.get("n1_overlay"))
+    a1 = _mapping(signal_payload.get("a1_overlay"))
     entry = _mapping(signal_payload.get("entry_filter_v4"))
     rsi = _mapping(signal_payload.get("rsi_reference"))
     marker = _notification_marker(
@@ -78,7 +79,7 @@ def render_alternative_strategy_notification(
     )
 
     if status == "VALIDATED":
-        notice = "새 대안 N1/V4 shadow 판정이 검증 완료되었습니다."
+        notice = "새 대안 N1/A1/V4 shadow v3.0 판정이 검증 완료되었습니다."
     elif status == "NO_NEW_SESSION":
         notice = "신규 완료 거래일이 없어 직전 대안 판정을 유지합니다."
     elif status in FAILURE_STATUSES:
@@ -96,7 +97,7 @@ def render_alternative_strategy_notification(
         marker,
         f"@{recipient}",
         "",
-        f"## 대안 shadow 전략 판정 · {_text(notification_date)} KST",
+        f"## 대안 shadow v3.0 전략 판정 · {_text(notification_date)} KST",
         "",
         f"> {notice}",
         "",
@@ -112,7 +113,14 @@ def render_alternative_strategy_notification(
                 f"- 시장구간: **{_text(signal_payload.get('market_regime_label'))}**",
                 f"- N1 전 기준 목표: **{_text(signal_payload.get('base_execution_target'))}**",
                 f"- N1 오버레이: **{'적용' if n1.get('applied') is True else '미적용'}**",
-                f"- 대안 resolved target: **{_text(signal_payload.get('resolved_execution_target'))}**",
+                f"- N1 후 목표: **{_text(signal_payload.get('post_n1_execution_target'))}**",
+                (
+                    f"- A1 래치: **{_text(a1.get('event'))}** · "
+                    f"{_text(a1.get('previous_state_subtype'))} → "
+                    f"{_text(a1.get('current_state_subtype'))}"
+                ),
+                f"- A1 활성: **{'예' if a1.get('active') is True else '아니오'}**",
+                f"- v3.0 최종 shadow target: **{_text(signal_payload.get('resolved_execution_target'))}**",
                 f"- 신규진입 V4: **{'발동' if entry.get('triggered') is True else '미발동'}** · {_text(entry.get('mode'))}",
                 (
                     f"- 오늘 시작 가정: {_number(entry.get('immediate_weight_pct'), digits=0, suffix='%')} "
@@ -138,7 +146,7 @@ def render_alternative_strategy_notification(
             "",
             f"[상세 대안 판정]({signal_url}) · [실행 상태]({run_status_url}) · [Actions 실행]({run_url})",
             "",
-            "> 공식 메타전략 판정은 변경하지 않습니다. 별도 shadow 검증이며 자동 매매나 투자 조언이 아닙니다.",
+            "> 공식 메타전략 판정은 변경하지 않습니다. v3.0은 별도 shadow 검증이며 자동 매매나 투자 조언이 아닙니다.",
             "",
         ]
     )

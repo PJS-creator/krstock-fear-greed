@@ -16,6 +16,8 @@ def test_alternative_workflow_is_scheduled_and_persists_to_separate_branch():
     assert "meta-strategy-data" not in source
     assert "scripts/update_alternative_strategy.py" in source
     assert "scripts/render_alternative_strategy_notification.py" in source
+    assert "Alternative shadow v3.0 strategy daily signal" in source
+    assert "N1/A1/V4" in source
     assert "issues/130/comments" in source
     assert "gh issue comment 130" in source
     assert "TIINGO_API_TOKEN" in source

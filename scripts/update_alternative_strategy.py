@@ -35,7 +35,7 @@ STRATEGY_SPEC_PATH = (
     PROJECT_ROOT
     / "config"
     / "strategies"
-    / "qqq_meta_v1_red_router_s1_n1_v4_shadow_v2_1.kis.yaml"
+    / "qqq_meta_v1_red_router_s1_n1_a1_v4_shadow_v3_0.kis.yaml"
 )
 
 
@@ -218,18 +218,21 @@ def run_update(
     }
     written = store.write_validated(signal, normalized_inputs=normalized_inputs)
     n1 = written.get("n1_overlay") if isinstance(written.get("n1_overlay"), dict) else {}
+    a1 = written.get("a1_overlay") if isinstance(written.get("a1_overlay"), dict) else {}
     entry = written.get("entry_filter_v4") if isinstance(written.get("entry_filter_v4"), dict) else {}
     store.write_run(
         status="VALIDATED",
         run_slot=run_slot,
         decision_session=active_decision_session,
-        message="대안 N1/V4 shadow 판정과 산출물을 갱신했습니다.",
+        message="대안 N1/A1/V4 shadow v3.0 판정과 산출물을 갱신했습니다.",
         details={
             "signal_hash": written.get("signal_hash"),
             "planned_execution_session": written.get("planned_execution_session"),
             "base_execution_target": written.get("base_execution_target"),
             "resolved_execution_target": written.get("resolved_execution_target"),
             "n1_applied": n1.get("applied"),
+            "a1_event": a1.get("event"),
+            "a1_active": a1.get("active"),
             "entry_v4_triggered": entry.get("triggered"),
         },
         generated_at=now,
@@ -238,7 +241,9 @@ def run_update(
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Update the separate N1/V4 alternative shadow signal.")
+    parser = argparse.ArgumentParser(
+        description="Update the separate N1/A1/V4 alternative shadow v3.0 signal."
+    )
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--audit-dir", type=Path, required=True)
     parser.add_argument("--run-slot", default="manual")
