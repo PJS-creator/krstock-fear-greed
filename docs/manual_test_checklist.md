@@ -178,15 +178,20 @@
 - [ ] 본 실행 실패 후 07:57 재시도는 최종 성공 또는 실패 상태를 게시한다.
 - [ ] Issue #127 구독 상태에서 GitHub 알림함과 설정된 이메일로 알림이 도착한다.
 
-## 대안 N1/V4 shadow 일일 파이프라인
+## 대안 N1/A1/V4 shadow v3.0 일일 파이프라인
 
 - [ ] 기존 공식 워크플로가 07:37/07:57 KST와 `meta-strategy-data`, Issue #127을 계속 사용한다.
 - [ ] 대안 워크플로가 07:47/08:07 KST에 별도로 실행된다.
 - [ ] 수동 실행 후 `alternative-strategy-data` 브랜치에 `signals/latest_validated.json`이 생성된다.
-- [ ] 대안 산출물의 `strategy_id`가 `qqq_meta_v1_red_router_s1_n1_v4_shadow_v2_1`이다.
-- [ ] `base_execution_target`, `n1_overlay.applied`, `resolved_execution_target`이 함께 기록된다.
+- [ ] 대안 산출물의 `strategy_id`가 `qqq_meta_v1_red_router_s1_n1_a1_v4_shadow_v3_0`이다.
+- [ ] `base_execution_target`, `post_n1_execution_target`, `a1_overlay`, `resolved_execution_target`이 함께 기록된다.
 - [ ] BULL + 비교3 + base QLD + Router 비활성일 때만 resolved target이 QQQ로 바뀐다.
-- [ ] 신규진입 V4는 N1 전 base target QLD와 QQQ SMA50 상방이격률 5%를 기준으로 판정한다.
+- [ ] BULL에서 UP_MIXED로 바뀌고 직전 목표와 post-N1 조건이 맞을 때 A1이 `ENTER`하고 QQQ를 유지한다.
+- [ ] A1 활성 중 같은 UP_MIXED와 비교3 QLD가 유지되면 `HOLD`한다.
+- [ ] UP_MIXED 이탈, 비교3 TQQQ, Router 활성 중 하나가 발생하면 A1이 `RELEASE`한다.
+- [ ] 같은 UP_MIXED episode에서는 A1 재진입이 차단되고 subtype 이탈 후 `REARM`한다.
+- [ ] A1 상태가 2010-02-11 anchor부터 전체 이력 재생으로 동일하게 복원된다.
+- [ ] 신규진입 V4는 post-A1 최종 목표 QLD와 QQQ SMA50 상방이격률 5%를 기준으로 판정한다.
 - [ ] V4 발동 시 오늘 시작 가정 배분이 resolved target 50%, 현금 50%로 표시된다.
 - [ ] V4 미발동 시 resolved target 100%로 표시된다.
 - [ ] 60개 완료 공통 거래일 뒤 현금 유예분의 합류 예정일이 기록된다.
@@ -196,4 +201,7 @@
 - [ ] 본 실행 성공 시 Issue #130에 대안 판정 댓글이 한 번 게시된다.
 - [ ] 본 실행 성공 후 08:07 재시도는 중복 댓글을 게시하지 않는다.
 - [ ] Issue #130 구독 상태에서 GitHub 알림함과 설정된 이메일로 대안 알림이 도착한다.
+- [ ] 총괄현황의 공식 메타전략 바로 아래에 별도 `쉐도우 전략 v3.0` 카드가 표시된다.
+- [ ] 쉐도우 카드에 N1 상태, A1 이벤트·subtype 전이, 최종 티커, V4 집행안이 표시된다.
+- [ ] v2.1 또는 검증 실패 산출물이 v3.0 검증 결과로 잘못 표시되지 않는다.
 - [ ] 대안 실행 후 공식 `meta-strategy-data`와 Issue #127의 판정이 변경되지 않는다.

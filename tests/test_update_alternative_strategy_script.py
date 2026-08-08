@@ -41,9 +41,11 @@ def _validated_signal(decision_session: date) -> dict[str, object]:
         "decision_session": decision_session.isoformat(),
         "planned_execution_session": (decision_session + timedelta(days=1)).isoformat(),
         "base_execution_target": "QLD",
+        "post_n1_execution_target": "QQQ",
         "resolved_execution_target": "QQQ",
         "overall_execution_target": "QQQ",
         "n1_overlay": {"applied": True},
+        "a1_overlay": {"event": "ENTER", "active": True},
         "entry_filter_v4": {"triggered": True},
         "liquidity": {},
     }
@@ -162,5 +164,6 @@ def test_changed_source_rebuilds_and_records_resolved_target(tmp_path, monkeypat
     store = update_alternative_strategy._store(tmp_path / "alternative-data")
     assert store.read_latest_signal()["resolved_execution_target"] == "QQQ"
     assert store.read_latest_run()["details"]["n1_applied"] is True
+    assert store.read_latest_run()["details"]["a1_event"] == "ENTER"
     assert store.read_latest_inputs()["strategy_id"] == update_alternative_strategy.STRATEGY_ID
     assert len(store.read_latest_inputs()["strategy_spec_sha256"]) == 64

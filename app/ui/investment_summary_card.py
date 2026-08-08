@@ -1370,6 +1370,75 @@ def _meta_strategy_panel(result: MetaStrategyResult | Mapping[str, Any] | None) 
     )
 
 
+def _shadow_strategy_panel(result: Mapping[str, Any] | None) -> str:
+    payload = result if isinstance(result, Mapping) else {}
+    validated = payload.get("status") == "VALIDATED" and payload.get("strategy_kind") == "ALTERNATIVE_SHADOW"
+    n1 = payload.get("n1_overlay") if isinstance(payload.get("n1_overlay"), Mapping) else {}
+    a1 = payload.get("a1_overlay") if isinstance(payload.get("a1_overlay"), Mapping) else {}
+    entry = payload.get("entry_filter_v4") if isinstance(payload.get("entry_filter_v4"), Mapping) else {}
+    event = str(a1.get("event") or "NONE")
+    event_label = {
+        "ENTER": "진입",
+        "HOLD": "유지",
+        "RELEASE": "해제",
+        "REARM": "재무장",
+        "BLOCKED_REENTRY": "재진입 차단",
+        "NONE": "대기",
+    }.get(event, event)
+    status_label = "Actions 검증" if validated else "산출물 대기"
+    base_target = str(payload.get("base_execution_target") or "-")
+    post_n1_target = str(payload.get("post_n1_execution_target") or "-")
+    final_target = str(payload.get("resolved_execution_target") or "-")
+    n1_label = "적용" if n1.get("applied") is True else "미적용"
+    transition_from = str(a1.get("previous_state_subtype") or "-")
+    transition_to = str(a1.get("current_state_subtype") or "-")
+    details: list[str] = []
+    if validated:
+        details.extend(
+            [
+                f"판정 {payload.get('decision_session') or '-'}",
+                f"실행 {payload.get('planned_execution_session') or '-'}",
+                f"N1 {base_target} → {post_n1_target}",
+                f"상태 {transition_from} → {transition_to}",
+            ]
+        )
+        if a1.get("active") is True:
+            details.append(f"A1 시작 {a1.get('entry_session') or '-'}")
+    else:
+        details.append("Actions에서 v3.0 최초 판정을 실행하면 검증 결과가 표시됩니다.")
+    v4_text = ""
+    if validated:
+        mode = str(entry.get("mode") or "-")
+        distance = entry.get("qqq_sma50_upper_distance_pct")
+        distance_text = ""
+        if isinstance(distance, (int, float)) and math.isfinite(float(distance)):
+            distance_text = f" · SMA50 이격 {float(distance):+.1f}%"
+        v4_text = (
+            f"V4 {mode} · 즉시 {entry.get('immediate_weight_pct', '-')}% {entry.get('immediate_target') or '-'}"
+            f" · 현금 {entry.get('cash_weight_pct', '-')}%{distance_text}"
+        )
+    v4_html = f"<div class='summary-meta-detail'>{escape(v4_text)}</div>" if v4_text else ""
+    return (
+        "<div class='summary-meta-strategy summary-shadow-strategy' aria-label='쉐도우 전략 v3.0'>"
+        "<div class='summary-meta-head'>"
+        "<strong>쉐도우 전략 v3.0</strong>"
+        f"<span>{escape(status_label)}</span>"
+        "</div>"
+        "<div class='summary-meta-grid'>"
+        "<div class='summary-meta-cell'><small>기준 목표</small>"
+        f"<strong>{escape(base_target)}</strong></div>"
+        "<div class='summary-meta-cell'><small>N1 → A1</small>"
+        f"<strong>{escape(n1_label)} · {escape(event_label)}</strong></div>"
+        "<div class='summary-meta-cell summary-meta-ticker'><small>최종 티커</small>"
+        f"<strong>{escape(final_target)}</strong></div>"
+        "</div>"
+        f"<div class='summary-meta-detail'>{escape(' · '.join(details))}</div>"
+        f"{v4_html}"
+        "<div class='summary-meta-note'>별도 N1/A1/V4 shadow 연구 판정이며 공식 메타전략과 자동 주문을 변경하지 않습니다.</div>"
+        "</div>"
+    )
+
+
 def _market_index_strip(rows: list[MarketIndexQuote | Mapping[str, Any]] | None) -> str:
     index_rows = list(rows or [])
     if not index_rows:
@@ -2065,6 +2134,10 @@ def _render_styles() -> None:
             border-radius: 7px;
             background: var(--app-surface);
             color: var(--app-text);
+        }
+        .summary-shadow-strategy {
+            border-left: 3px solid var(--app-accent);
+            background: var(--app-surface-alt);
         }
         .summary-meta-head {
             display: flex;
@@ -2840,6 +2913,7 @@ def render_investment_summary_card(
     market_indices: list[MarketIndexQuote | Mapping[str, Any]] | None = None,
     market_warnings: list[MarketWarningSignal | Mapping[str, Any]] | None = None,
     meta_strategy: MetaStrategyResult | Mapping[str, Any] | None = None,
+    shadow_strategy: Mapping[str, Any] | None = None,
 ) -> None:
     _render_styles()
     if metrics.holdings_count == 0 and metrics.cash_total_krw <= 0:
@@ -2902,6 +2976,7 @@ def render_investment_summary_card(
     market_index_strip = _market_index_strip(market_indices)
     market_warning_strip = _market_warning_strip(market_warnings)
     meta_strategy_panel = _meta_strategy_panel(meta_strategy)
+    shadow_strategy_panel = _shadow_strategy_panel(shadow_strategy) if shadow_strategy is not None else ""
     mobile_holding_summary = _mobile_holding_summary_table(metrics)
     table_rows = "".join(_holding_table_rows(metrics, transactions=transactions, as_of_date=as_of_date))
     cash_detail = f"KRW {_krw(metrics.cash.cash_krw)} · USD ${format_number(metrics.cash.cash_usd)}"
@@ -2950,6 +3025,7 @@ def render_investment_summary_card(
                 {market_index_strip}
                 {market_warning_strip}
                 {meta_strategy_panel}
+                {shadow_strategy_panel}
             </div>
         </div>
         <div class="summary-split-grid">

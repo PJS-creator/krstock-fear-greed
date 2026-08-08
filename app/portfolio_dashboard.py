@@ -86,6 +86,11 @@ from portfolio.holdings import build_portfolio_metrics
 from portfolio.historical_holdings import HistoricalScheduleStoreError, build_supabase_historical_schedule_store
 from portfolio.market_indices import MarketWarningSpec, fetch_market_indices, fetch_market_warning_signals
 from portfolio.meta_strategy import MetaStrategyResult, fetch_meta_strategy, retain_previous_meta_strategy_result
+from portfolio.meta_strategy_alternative_snapshot import (
+    DEFAULT_ALTERNATIVE_SIGNAL_URL,
+    AlternativeSnapshotError,
+    fetch_alternative_snapshot,
+)
 from portfolio.meta_strategy_snapshot import (
     DEFAULT_OFFICIAL_SIGNAL_URL,
     OfficialSnapshotError,
@@ -166,6 +171,7 @@ PRICE_REFRESH_STARTED_AT_KEY = "price_refresh_started_at"
 PRICE_REFRESH_STALE_SECONDS = 180.0
 PRICE_REFRESH_BUDGET_SECONDS = 24.0
 META_STRATEGY_RESULT_KEY = "meta_strategy_result"
+ALTERNATIVE_META_STRATEGY_RESULT_KEY = "alternative_meta_strategy_result"
 KIS_REQUEST_TIMEOUT_SECONDS = 3.0
 YFINANCE_REQUEST_TIMEOUT_SECONDS = 5.0
 INTRADAY_REQUEST_TIMEOUT_SECONDS = 3.0
@@ -432,6 +438,7 @@ def _reset_current_portfolio_state(portfolio_name: str = "main") -> None:
         "price_update_statuses": [],
         "last_price_refresh_at": None,
         META_STRATEGY_RESULT_KEY: None,
+        ALTERNATIVE_META_STRATEGY_RESULT_KEY: None,
         "mark_clean": True,
     }
 
@@ -794,6 +801,7 @@ def _apply_pending_portfolio_state() -> None:
         "price_update_statuses",
         "last_price_refresh_at",
         META_STRATEGY_RESULT_KEY,
+        ALTERNATIVE_META_STRATEGY_RESULT_KEY,
     ):
         if key in pending_state:
             st.session_state[key] = pending_state[key]
@@ -845,6 +853,7 @@ def _initialize_session_state(*, public_auth_enabled: bool = False) -> None:
     st.session_state.setdefault("price_update_statuses", [])
     st.session_state.setdefault("last_price_refresh_at", None)
     st.session_state.setdefault(META_STRATEGY_RESULT_KEY, None)
+    st.session_state.setdefault(ALTERNATIVE_META_STRATEGY_RESULT_KEY, None)
     st.session_state.setdefault(PRICE_REFRESH_MODE_KEY, "미조회/오래된 가격만")
     st.session_state.setdefault(PRICE_REFRESH_IN_PROGRESS_KEY, False)
     st.session_state.setdefault(PRICE_REFRESH_STARTED_AT_KEY, 0.0)
@@ -1102,8 +1111,17 @@ def _cached_official_meta_strategy_snapshot(url: str) -> dict[str, object]:
     return fetch_official_snapshot(url=url)
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def _cached_alternative_meta_strategy_snapshot(url: str) -> dict[str, object]:
+    return fetch_alternative_snapshot(url=url)
+
+
 def _official_meta_strategy_url() -> str:
     return _secret_text("META_STRATEGY_SIGNAL_URL") or DEFAULT_OFFICIAL_SIGNAL_URL
+
+
+def _alternative_meta_strategy_url() -> str:
+    return _secret_text("ALTERNATIVE_STRATEGY_SIGNAL_URL") or DEFAULT_ALTERNATIVE_SIGNAL_URL
 
 
 def _load_official_meta_strategy_state() -> None:
@@ -1122,8 +1140,54 @@ def _load_official_meta_strategy_state() -> None:
     )
 
 
+def _load_alternative_meta_strategy_state() -> None:
+    current = st.session_state.get(ALTERNATIVE_META_STRATEGY_RESULT_KEY)
+    if isinstance(current, Mapping) and current.get("strategy_kind") == "ALTERNATIVE_SHADOW":
+        return
+    try:
+        shadow = _cached_alternative_meta_strategy_snapshot(_alternative_meta_strategy_url())
+    except AlternativeSnapshotError as exc:
+        LOGGER.info(
+            "alternative_meta_strategy_initial_load_skipped type=%s message=%s",
+            type(exc).__name__,
+            exc,
+        )
+        st.session_state[ALTERNATIVE_META_STRATEGY_RESULT_KEY] = {
+            "status": "UNAVAILABLE",
+            "strategy_spec_version": "3.0",
+            "refresh_error": str(exc),
+        }
+        return
+    st.session_state[ALTERNATIVE_META_STRATEGY_RESULT_KEY] = shadow
+
+
+def _refresh_alternative_meta_strategy_state() -> None:
+    previous = st.session_state.get(ALTERNATIVE_META_STRATEGY_RESULT_KEY)
+    try:
+        shadow = _cached_alternative_meta_strategy_snapshot(_alternative_meta_strategy_url())
+    except AlternativeSnapshotError as exc:
+        LOGGER.warning(
+            "alternative_meta_strategy_snapshot_failed type=%s message=%s",
+            type(exc).__name__,
+            exc,
+        )
+        if isinstance(previous, Mapping) and previous.get("strategy_kind") == "ALTERNATIVE_SHADOW":
+            retained = dict(previous)
+            retained["refresh_error"] = str(exc)
+            st.session_state[ALTERNATIVE_META_STRATEGY_RESULT_KEY] = retained
+        else:
+            st.session_state[ALTERNATIVE_META_STRATEGY_RESULT_KEY] = {
+                "status": "UNAVAILABLE",
+                "strategy_spec_version": "3.0",
+                "refresh_error": str(exc),
+            }
+        return
+    st.session_state[ALTERNATIVE_META_STRATEGY_RESULT_KEY] = shadow
+
+
 def _refresh_meta_strategy_state() -> None:
     preview = fetch_meta_strategy()
+    _refresh_alternative_meta_strategy_state()
     previous = st.session_state.get(META_STRATEGY_RESULT_KEY)
     try:
         official = _cached_official_meta_strategy_snapshot(_official_meta_strategy_url())
@@ -2110,6 +2174,13 @@ def _render_data_source_info() -> None:
             st.caption(f"메타전략 미리보기: {meta_strategy.get('source') or 'FRED + Yahoo chart'}")
     elif isinstance(meta_strategy, MetaStrategyResult):
         st.caption(f"메타전략 미리보기: {meta_strategy.source}")
+    shadow_strategy = st.session_state.get(ALTERNATIVE_META_STRATEGY_RESULT_KEY)
+    if isinstance(shadow_strategy, Mapping):
+        if shadow_strategy.get("strategy_kind") == "ALTERNATIVE_SHADOW":
+            st.caption("쉐도우 전략: Actions v3.0 · N1/A1/V4")
+            st.caption(f"쉐도우 기준일: {shadow_strategy.get('decision_session') or '-'}")
+        elif shadow_strategy.get("refresh_error"):
+            st.caption("쉐도우 전략 v3.0: 검증 산출물 대기")
 
 
 def _render_saved_portfolio_selector(owner_id, store) -> None:
@@ -2249,6 +2320,7 @@ def _render_summary_card_section(metrics) -> None:
         market_indices=_cached_market_indices(str(last_refresh or "")),
         market_warnings=_read_market_warning_signals(str(last_refresh or "")),
         meta_strategy=st.session_state.get(META_STRATEGY_RESULT_KEY),
+        shadow_strategy=st.session_state.get(ALTERNATIVE_META_STRATEGY_RESULT_KEY),
     )
 
 
@@ -2431,6 +2503,7 @@ def run_dashboard(*, public_auth_enabled: bool | None = None) -> None:
         _handle_public_logout_query()
     if public_auth_enabled and _is_authenticated():
         _load_official_meta_strategy_state()
+        _load_alternative_meta_strategy_state()
 
     portfolio_store, history_store, historical_schedule_store, target_allocation_store = _build_stores(storage_config)
     owner_id = _resolve_owner_id(storage_config)

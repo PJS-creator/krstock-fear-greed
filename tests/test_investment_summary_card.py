@@ -20,6 +20,7 @@ from app.ui.investment_summary_card import (
     _sector_group_html,
     _sector_heatmap,
     _sector_member_layout,
+    _shadow_strategy_panel,
     _sparkline_html,
     render_investment_summary_card,
 )
@@ -765,6 +766,56 @@ def test_meta_strategy_panel_distinguishes_official_preview_entry_filter_and_rsi
     assert "RSI14 62.3" in html
     assert "참고 경고" in html
     assert "앱 미리보기 QLD · P 80.8" in html
+
+
+def test_shadow_strategy_panel_is_separate_and_shows_v3_a1_lineage():
+    html = _shadow_strategy_panel(
+        {
+            "status": "VALIDATED",
+            "strategy_kind": "ALTERNATIVE_SHADOW",
+            "decision_session": "2026-08-06",
+            "planned_execution_session": "2026-08-07",
+            "base_execution_target": "QLD",
+            "post_n1_execution_target": "QLD",
+            "resolved_execution_target": "QQQ",
+            "n1_overlay": {"applied": False},
+            "a1_overlay": {
+                "event": "ENTER",
+                "active": True,
+                "entry_session": "2026-08-06",
+                "previous_state_subtype": "BULL",
+                "current_state_subtype": "UP_MIXED",
+            },
+            "entry_filter_v4": {
+                "mode": "IMMEDIATE_100",
+                "immediate_weight_pct": 100.0,
+                "immediate_target": "QQQ",
+                "cash_weight_pct": 0.0,
+                "qqq_sma50_upper_distance_pct": 6.1,
+            },
+        }
+    )
+
+    assert "쉐도우 전략 v3.0" in html
+    assert "Actions 검증" in html
+    assert "미적용 · 진입" in html
+    assert "BULL → UP_MIXED" in html
+    assert "최종 티커" in html
+    assert "QQQ" in html
+    assert "공식 메타전략" in html
+
+
+def test_shadow_strategy_panel_waits_for_first_v3_artifact_without_crashing():
+    html = _shadow_strategy_panel(
+        {
+            "status": "UNAVAILABLE",
+            "strategy_spec_version": "3.0",
+            "refresh_error": "아직 v3.0 산출물이 준비되지 않았습니다.",
+        }
+    )
+
+    assert "산출물 대기" in html
+    assert "v3.0 최초 판정을 실행하면" in html
 
 
 def test_summary_heatmap_tiles_fill_rectangular_area_with_change_labels_and_exclude_cash():

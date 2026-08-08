@@ -1,4 +1,4 @@
-name: Alternative shadow strategy daily signal
+name: Alternative shadow v3.0 strategy daily signal
 
 on:
   schedule:
@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   update-signal:
-    name: Build alternative shadow signal
+    name: Build alternative N1/A1/V4 shadow signal
     runs-on: ubuntu-latest
 
     steps:
@@ -90,7 +90,7 @@ jobs:
           if git -C alternative-strategy-data diff --cached --quiet; then
             echo "No durable output changes."
           else
-            git -C alternative-strategy-data commit -m "Update alternative shadow signal"
+            git -C alternative-strategy-data commit -m "Update alternative shadow v3.0 signal"
             git -C alternative-strategy-data push origin HEAD:alternative-strategy-data
           fi
 
