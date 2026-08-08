@@ -1,13 +1,17 @@
 # 대안 shadow 전략 일일 판정
 
-- 전략 ID: `qqq_meta_v1_red_router_s1_n1_v4_shadow_v2_1`
+- 전략 ID: `qqq_meta_v1_red_router_s1_n1_a1_v4_shadow_v3_0`
 - 판정 거래일: 2026-08-07
 - 예정 실행일: 2026-08-10
 - 시장구간: 강세장
 - 활성화 전략: 비교3 · RSI 전환
 - N1 전 기준 목표: **QLD**
 - N1 적용: **APPLIED**
-- 대안 resolved target: **QQQ**
+- N1 후 목표: **QQQ**
+- A1 이벤트: **NONE**
+- A1 상태: **NONE**
+- A1 상태 전이: BULL → BULL
+- v3.0 최종 shadow target: **QQQ**
 
 ## 신규진입 V4 · 오늘 시작 가정
 
