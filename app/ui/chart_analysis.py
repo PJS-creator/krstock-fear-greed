@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from datetime import date
+from html import escape
 
 import pandas as pd
 import streamlit as st
 
-from app.ui.components import render_empty_state, render_metric_card_grid
-from app.ui.theme import DIMENSIONS
+from app.ui.components import render_empty_state
 from portfolio.chart_analysis import (
     AnalysisInstrument,
     ChartAnalysisResult,
@@ -22,6 +24,10 @@ from portfolio.chart_analysis_data import (
 
 _RESULTS_KEY = "chart_analysis_results"
 _SIGNATURE_KEY = "chart_analysis_holdings_signature"
+ATTENTION_SCORE_THRESHOLD = 70.0
+ATTENTION_DELTA_THRESHOLD = 14.0
+_ELEVATED_SCORE_THRESHOLD = 50.0
+_MAX_ATTENTION_CARDS = 3
 _WARNING_LABELS = {
     "APPROXIMATED_TRADED_VALUE": "거래대금 추정값 사용",
     "ZERO_VOLUME_SESSION_PRESENT": "거래량 0 세션 포함",
@@ -30,6 +36,35 @@ _WARNING_LABELS = {
     "NO_COMPLETED_SESSION": "완료 일봉 없음",
     "KIS_DAILY_FALLBACK": "KIS 일봉 실패로 대체 출처 사용",
 }
+_TOP_COMPONENT_LABELS = {
+    "A1": "최근 고점 경과일",
+    "A2": "고점 전 선행 상승폭",
+    "A3": "고점 대비 하락 진행률",
+    "A4": "하락 진행 속도",
+    "A5": "3일 표준화 수익률",
+    "A6": "EMA5 하회",
+    "A7": "하락일 거래대금 비중",
+}
+
+
+@dataclass(frozen=True)
+class ScoreSignal:
+    score: float | None
+    delta: float | None
+    recent: tuple[tuple[date, float], ...]
+    emphasis: str
+    label: str
+    priority: int
+
+
+@dataclass(frozen=True)
+class ChartAnalysisView:
+    result: ChartAnalysisResult
+    top: ScoreSignal
+    bottom: ScoreSignal
+    priority: int
+    attention_level: str
+    attention_label: str
 
 
 @st.cache_data(ttl=30 * 60, show_spinner=False, max_entries=16)
@@ -70,6 +105,68 @@ def chart_analysis_table_rows(results: Iterable[ChartAnalysisResult]) -> list[di
     return rows
 
 
+def build_chart_analysis_views(results: Iterable[ChartAnalysisResult]) -> tuple[ChartAnalysisView, ...]:
+    views: list[ChartAnalysisView] = []
+    for result in results:
+        top = _score_signal(result, score_name="top_score", delta=result.top_delta)
+        bottom = _score_signal(result, score_name="bottom_score", delta=result.bottom_delta)
+        priority = max(top.priority, bottom.priority)
+        labels: list[str] = []
+        if top.priority >= 2:
+            labels.append(f"고점 {top.label}")
+        if bottom.priority >= 2:
+            labels.append(f"저점 {bottom.label}")
+        attention_level = {
+            4: "urgent",
+            3: "surge",
+            2: "high",
+            1: "elevated",
+        }.get(priority, "normal")
+        views.append(
+            ChartAnalysisView(
+                result=result,
+                top=top,
+                bottom=bottom,
+                priority=priority,
+                attention_level=attention_level,
+                attention_label=" · ".join(labels) if labels else "일반 범위",
+            )
+        )
+    return tuple(
+        sorted(
+            views,
+            key=lambda view: (
+                -view.priority,
+                -max(view.top.delta or 0.0, view.bottom.delta or 0.0),
+                -max(view.top.score or 0.0, view.bottom.score or 0.0),
+                view.result.instrument.display_name,
+            ),
+        )
+    )
+
+
+def _score_signal(result: ChartAnalysisResult, *, score_name: str, delta: float | None) -> ScoreSignal:
+    latest = result.latest
+    score = float(getattr(latest, score_name)) if latest is not None else None
+    recent = tuple(
+        (snapshot.as_of_session, float(getattr(snapshot, score_name)))
+        for snapshot in result.recent
+    )
+    if score is None:
+        return ScoreSignal(None, delta, recent, "missing", "산출 불가", -1)
+    high = score >= ATTENTION_SCORE_THRESHOLD
+    surge = delta is not None and delta >= ATTENTION_DELTA_THRESHOLD
+    if high and surge:
+        return ScoreSignal(score, delta, recent, "urgent", "높음·급상승", 4)
+    if surge:
+        return ScoreSignal(score, delta, recent, "surge", "급상승", 3)
+    if high:
+        return ScoreSignal(score, delta, recent, "high", "높음", 2)
+    if score >= _ELEVATED_SCORE_THRESHOLD or (delta is not None and delta > 0):
+        return ScoreSignal(score, delta, recent, "elevated", "관찰", 1)
+    return ScoreSignal(score, delta, recent, "normal", "일반", 0)
+
+
 def _score_trend(result: ChartAnalysisResult, *, score_name: str) -> str:
     if not result.recent:
         return "-"
@@ -91,26 +188,203 @@ def _payload(instruments: Iterable[AnalysisInstrument]) -> tuple[tuple[str, str,
     return tuple((item.market, item.symbol, item.display_name) for item in instruments)
 
 
-def _render_results_table(results: tuple[ChartAnalysisResult, ...]) -> None:
-    rows = chart_analysis_table_rows(results)
-    frame = pd.DataFrame(rows)
-    st.dataframe(
-        frame,
-        hide_index=True,
-        width="stretch",
-        height=min(DIMENSIONS.max_table_height, 92 + len(frame) * DIMENSIONS.row_height),
-        column_config={
-            "종목": st.column_config.TextColumn("종목", width="medium"),
-            "기준일": st.column_config.TextColumn("기준일", width="small"),
-            "고점점수": st.column_config.NumberColumn("고점점수", format="%.2f", width="small"),
-            "고점 증감": st.column_config.NumberColumn("고점 전일증감", format="%+.2f", width="small"),
-            "저점점수": st.column_config.NumberColumn("저점점수", format="%.2f", width="small"),
-            "저점 증감": st.column_config.NumberColumn("저점 전일증감", format="%+.2f", width="small"),
-            "판정결과": st.column_config.TextColumn("판정결과", width="medium"),
-            "최근 5일 고점점수": st.column_config.TextColumn("고점점수 5일", width="large"),
-            "최근 5일 저점점수": st.column_config.TextColumn("저점점수 5일", width="large"),
-            "데이터 상태": st.column_config.TextColumn("상태", width="medium"),
-        },
+def _render_results_table(views: tuple[ChartAnalysisView, ...]) -> None:
+    st.markdown("#### 전체 종목 점수")
+    st.caption("높은 점수와 큰 전일 상승폭을 먼저 표시합니다.")
+    header = (
+        "<div class='chart-analysis-table-head' aria-hidden='true'>"
+        "<span>종목</span><span>고점 근거</span><span>저점 근거</span><span>판정</span>"
+        "</div>"
+    )
+    rows = "".join(_result_row_html(view) for view in views)
+    st.markdown(
+        f"<div class='chart-analysis-table' role='table' aria-label='보유종목 차트분석 결과'>{header}{rows}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _result_row_html(view: ChartAnalysisView) -> str:
+    result = view.result
+    latest = result.latest
+    session = latest.as_of_session.isoformat() if latest is not None else "기준일 없음"
+    status = _data_status(result)
+    status_tone = _data_status_tone(result)
+    attention_badge = ""
+    if view.priority >= 2:
+        attention_badge = (
+            f"<span class='chart-attention-badge chart-attention-{view.attention_level}'>"
+            f"{escape(view.attention_label)}</span>"
+        )
+    verdict = latest.verdict if latest is not None else "산출 불가"
+    return (
+        f"<article class='chart-analysis-row chart-analysis-row-{view.attention_level}' role='row'>"
+        "<div class='chart-analysis-asset' role='cell'>"
+        f"<div class='chart-analysis-name'>{escape(result.instrument.display_name)}</div>"
+        f"<div class='chart-analysis-meta'>{escape(result.instrument.market)} · {escape(session)}</div>"
+        f"{attention_badge}"
+        "</div>"
+        f"{_score_block_html(view.top, axis='top', label='고점점수')}"
+        f"{_score_block_html(view.bottom, axis='bottom', label='저점점수')}"
+        "<div class='chart-analysis-verdict' role='cell'>"
+        "<span class='chart-analysis-cell-label'>판정결과</span>"
+        f"<strong>{escape(verdict)}</strong>"
+        f"<span class='chart-data-status chart-data-status-{status_tone}'>{escape(status)}</span>"
+        "</div>"
+        "</article>"
+    )
+
+
+def _score_block_html(signal: ScoreSignal, *, axis: str, label: str) -> str:
+    if signal.score is None:
+        return (
+            f"<div class='chart-score-block chart-score-{axis}' role='cell'>"
+            f"<span class='chart-analysis-cell-label'>{escape(label)}</span>"
+            "<strong class='chart-score-missing'>-</strong>"
+            "<span class='chart-score-delta chart-score-delta-neutral'>비교 불가</span>"
+            "</div>"
+        )
+    score = max(0.0, min(100.0, signal.score))
+    return (
+        f"<div class='chart-score-block chart-score-{axis} chart-score-emphasis-{signal.emphasis}' role='cell'>"
+        "<div class='chart-score-heading'>"
+        f"<span class='chart-analysis-cell-label'>{escape(label)}</span>"
+        f"<span class='chart-score-level'>{escape(signal.label)}</span>"
+        "</div>"
+        "<div class='chart-score-value-row'>"
+        f"<strong class='chart-score-value'>{score:.1f}</strong>"
+        f"{_delta_html(signal.delta)}"
+        "</div>"
+        "<div class='chart-score-meter' aria-hidden='true'>"
+        f"<span style='width:{score:.2f}%'></span>"
+        "</div>"
+        f"{_trend_html(signal, axis=axis)}"
+        "</div>"
+    )
+
+
+def _delta_html(delta: float | None) -> str:
+    if delta is None:
+        return "<span class='chart-score-delta chart-score-delta-neutral'>전일 비교 없음</span>"
+    if delta > 0:
+        tone = "surge" if delta >= ATTENTION_DELTA_THRESHOLD else "rise"
+        return f"<span class='chart-score-delta chart-score-delta-{tone}'>▲ +{delta:.1f}</span>"
+    if delta < 0:
+        return f"<span class='chart-score-delta chart-score-delta-fall'>▼ {delta:.1f}</span>"
+    return "<span class='chart-score-delta chart-score-delta-neutral'>변화 없음</span>"
+
+
+def _trend_html(signal: ScoreSignal, *, axis: str) -> str:
+    if not signal.recent:
+        return "<div class='chart-score-trend-empty'>5일 추이 없음</div>"
+    values = " → ".join(f"{value:.1f}" for _, value in signal.recent)
+    bars = "".join(
+        (
+            f"<span style='height:{max(6.0, min(100.0, value)):.2f}%' "
+            f"title='{session.isoformat()} · {value:.1f}'></span>"
+        )
+        for session, value in signal.recent
+    )
+    return (
+        f"<div class='chart-score-trend chart-score-trend-{axis}' "
+        f"aria-label='최근 5일 {escape(values)}' title='{escape(values)}'>"
+        f"{bars}</div>"
+        "<span class='chart-score-trend-label'>최근 5일</span>"
+    )
+
+
+def _render_attention_cards(views: tuple[ChartAnalysisView, ...]) -> None:
+    attention = [view for view in views if view.priority >= 2][:_MAX_ATTENTION_CARDS]
+    st.markdown(
+        (
+            "<div class='chart-analysis-section-title'>"
+            "<div><strong>오늘의 주목 변화</strong>"
+            f"<span>점수 {ATTENTION_SCORE_THRESHOLD:.0f} 이상 또는 전일 +{ATTENTION_DELTA_THRESHOLD:.0f}점 이상</span></div>"
+            f"<span class='chart-analysis-focus-count'>{len([view for view in views if view.priority >= 2])}개</span>"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
+    if not attention:
+        st.markdown(
+            "<div class='chart-analysis-no-focus'>현재 강조 기준에 해당하는 종목이 없습니다.</div>",
+            unsafe_allow_html=True,
+        )
+        return
+    cards = "".join(_attention_card_html(view) for view in attention)
+    st.markdown(f"<div class='chart-attention-grid'>{cards}</div>", unsafe_allow_html=True)
+
+
+def _render_analysis_summary(
+    *,
+    attention_count: int,
+    top_surge_count: int,
+    bottom_surge_count: int,
+    data_issue_count: int,
+    ready_count: int,
+    total_count: int,
+) -> None:
+    items = (
+        (
+            "주목 변화",
+            f"{attention_count}개",
+            "warning" if attention_count else "success",
+            "점수 70 이상 또는 전일 대비 +14점 이상",
+        ),
+        (
+            "고점 급상승",
+            f"{top_surge_count}개",
+            "warning" if top_surge_count else "neutral",
+            "전일 대비 +14점 이상",
+        ),
+        (
+            "저점 급상승",
+            f"{bottom_surge_count}개",
+            "warning" if bottom_surge_count else "neutral",
+            "전일 대비 +14점 이상",
+        ),
+        (
+            "데이터 점검",
+            f"{data_issue_count}개",
+            "warning" if data_issue_count else "success",
+            f"산출 완료 {ready_count}/{total_count}",
+        ),
+    )
+    html = "".join(
+        (
+            f"<div class='chart-analysis-kpi chart-analysis-kpi-{tone}' title='{escape(detail)}'>"
+            f"<span>{escape(title)}</span><strong>{escape(value)}</strong><small>{escape(detail)}</small>"
+            "</div>"
+        )
+        for title, value, tone, detail in items
+    )
+    st.markdown(f"<div class='chart-analysis-kpis'>{html}</div>", unsafe_allow_html=True)
+
+
+def _attention_card_html(view: ChartAnalysisView) -> str:
+    result = view.result
+    latest = result.latest
+    verdict = latest.verdict if latest is not None else "산출 불가"
+    return (
+        f"<article class='chart-attention-card chart-attention-card-{view.attention_level}'>"
+        "<div class='chart-attention-card-head'>"
+        f"<strong>{escape(result.instrument.display_name)}</strong>"
+        f"<span class='chart-attention-badge chart-attention-{view.attention_level}'>{escape(view.attention_label)}</span>"
+        "</div>"
+        "<div class='chart-attention-score-grid'>"
+        f"{_attention_axis_html(view.top, label='고점', axis='top')}"
+        f"{_attention_axis_html(view.bottom, label='저점', axis='bottom')}"
+        "</div>"
+        f"<div class='chart-attention-verdict'>{escape(verdict)}</div>"
+        "</article>"
+    )
+
+
+def _attention_axis_html(signal: ScoreSignal, *, label: str, axis: str) -> str:
+    score = f"{signal.score:.1f}" if signal.score is not None else "-"
+    return (
+        f"<div class='chart-attention-axis chart-attention-axis-{axis}'>"
+        f"<span>{escape(label)}점수</span><strong>{score}</strong>{_delta_html(signal.delta)}"
+        "</div>"
     )
 
 
@@ -147,7 +421,7 @@ def _render_result_details(results: tuple[ChartAnalysisResult, ...]) -> None:
         st.markdown("**직전 완료봉 판정 근거**")
         top_rows = [
             {
-                "조건": component,
+                "조건": _TOP_COMPONENT_LABELS.get(component, component),
                 "충족": "충족" if result.latest.top_components.get(component) else "미충족",
             }
             for component in TOP_COMPONENT_IDS
@@ -174,13 +448,21 @@ def _warning_text(value: str) -> str:
     return _WARNING_LABELS.get(value, value)
 
 
+def _data_status_tone(result: ChartAnalysisResult) -> str:
+    if result.latest is not None and result.quality_status == "PASS":
+        return "success"
+    if result.latest is not None or result.readiness in {"WARMUP", "READY_INELIGIBLE"}:
+        return "warning"
+    return "danger"
+
+
 def render_chart_analysis(
     holdings: Iterable[Mapping[str, object]],
     *,
     auto_load: bool,
     kis_provider: KisDailyHistoryProvider | None = None,
 ) -> None:
-    st.subheader("차트분석")
+    st.markdown("<h2 class='chart-analysis-title'>차트분석</h2>", unsafe_allow_html=True)
     st.caption(
         "현재 보유종목의 직전 완료 정규장 일봉을 동일 기준으로 분석합니다. "
         "고점·저점 점수는 서로 독립적인 근거 점수이며 매수·매도 확률이나 자동 주문 신호가 아닙니다."
@@ -226,16 +508,30 @@ def render_chart_analysis(
     warning_count = sum(result.latest is not None and result.quality_status == "WARNING" for result in results)
     failed_count = len(results) - ready_count
     latest_sessions = [result.latest.as_of_session for result in results if result.latest is not None]
-    render_metric_card_grid(
-        [
-            {"title": "분석 종목", "value": f"{len(results)}개", "status": "neutral"},
-            {"title": "산출 완료", "value": f"{ready_count}개", "status": "success" if ready_count else "warning"},
-            {"title": "주의/실패", "value": f"{warning_count + failed_count}개", "status": "warning" if warning_count + failed_count else "success"},
-            {"title": "최근 기준일", "value": max(latest_sessions).isoformat() if latest_sessions else "-", "status": "info"},
-        ]
+    views = build_chart_analysis_views(results)
+    attention_count = sum(view.priority >= 2 for view in views)
+    top_surge_count = sum(
+        view.top.delta is not None and view.top.delta >= ATTENTION_DELTA_THRESHOLD
+        for view in views
     )
-    _render_results_table(results)
-    _render_result_details(results)
+    bottom_surge_count = sum(
+        view.bottom.delta is not None and view.bottom.delta >= ATTENTION_DELTA_THRESHOLD
+        for view in views
+    )
+    _render_analysis_summary(
+        attention_count=attention_count,
+        top_surge_count=top_surge_count,
+        bottom_surge_count=bottom_surge_count,
+        data_issue_count=warning_count + failed_count,
+        ready_count=ready_count,
+        total_count=len(results),
+    )
+    if latest_sessions:
+        st.caption(f"최근 기준일 {max(latest_sessions).isoformat()} · 주목 변화 우선 정렬")
+    _render_attention_cards(views)
+    _render_results_table(views)
+    ranked_results = tuple(view.result for view in views)
+    _render_result_details(ranked_results)
     st.caption(
         "판정결과는 직전 완료봉의 raw 조건 요약입니다. 점수 증감과 5일 추이는 설명용이며, "
         "고점점수와 저점점수를 서로 빼거나 비교해 투자 방향을 정하지 않습니다."
