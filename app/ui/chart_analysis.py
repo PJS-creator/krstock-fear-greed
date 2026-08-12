@@ -28,6 +28,11 @@ ATTENTION_SCORE_THRESHOLD = 70.0
 ATTENTION_DELTA_THRESHOLD = 14.0
 _ELEVATED_SCORE_THRESHOLD = 50.0
 _MAX_ATTENTION_CARDS = 3
+_SORT_LABELS = {
+    "attention": "주목 변화순",
+    "top_score": "고점점수 높은순",
+    "bottom_score": "저점점수 높은순",
+}
 _WARNING_LABELS = {
     "APPROXIMATED_TRADED_VALUE": "거래대금 추정값 사용",
     "ZERO_VOLUME_SESSION_PRESENT": "거래량 0 세션 포함",
@@ -132,17 +137,39 @@ def build_chart_analysis_views(results: Iterable[ChartAnalysisResult]) -> tuple[
                 attention_label=" · ".join(labels) if labels else "일반 범위",
             )
         )
-    return tuple(
-        sorted(
-            views,
-            key=lambda view: (
-                -view.priority,
-                -max(view.top.delta or 0.0, view.bottom.delta or 0.0),
-                -max(view.top.score or 0.0, view.bottom.score or 0.0),
-                view.result.instrument.display_name,
-            ),
+    return sort_chart_analysis_views(views, sort_mode="attention")
+
+
+def sort_chart_analysis_views(
+    views: Iterable[ChartAnalysisView],
+    *,
+    sort_mode: str,
+) -> tuple[ChartAnalysisView, ...]:
+    items = tuple(views)
+    if sort_mode == "top_score":
+        key = lambda view: (
+            view.top.score is None,
+            -(view.top.score or 0.0),
+            -(view.top.delta or 0.0),
+            -view.priority,
+            view.result.instrument.display_name,
         )
-    )
+    elif sort_mode == "bottom_score":
+        key = lambda view: (
+            view.bottom.score is None,
+            -(view.bottom.score or 0.0),
+            -(view.bottom.delta or 0.0),
+            -view.priority,
+            view.result.instrument.display_name,
+        )
+    else:
+        key = lambda view: (
+            -view.priority,
+            -max(view.top.delta or 0.0, view.bottom.delta or 0.0),
+            -max(view.top.score or 0.0, view.bottom.score or 0.0),
+            view.result.instrument.display_name,
+        )
+    return tuple(sorted(items, key=key))
 
 
 def _score_signal(result: ChartAnalysisResult, *, score_name: str, delta: float | None) -> ScoreSignal:
@@ -188,19 +215,32 @@ def _payload(instruments: Iterable[AnalysisInstrument]) -> tuple[tuple[str, str,
     return tuple((item.market, item.symbol, item.display_name) for item in instruments)
 
 
-def _render_results_table(views: tuple[ChartAnalysisView, ...]) -> None:
-    st.markdown("#### 전체 종목 점수")
-    st.caption("높은 점수와 큰 전일 상승폭을 먼저 표시합니다.")
+def _render_results_table(views: tuple[ChartAnalysisView, ...]) -> tuple[ChartAnalysisView, ...]:
+    title_col, sort_col = st.columns([3, 2], vertical_alignment="bottom")
+    with title_col:
+        st.markdown("#### 전체 종목 점수")
+    with sort_col:
+        sort_mode = st.selectbox(
+            "정렬 기준",
+            tuple(_SORT_LABELS),
+            format_func=_SORT_LABELS.__getitem__,
+            key="chart_analysis_sort_mode",
+        )
+    sorted_views = sort_chart_analysis_views(views, sort_mode=sort_mode)
+    st.caption(
+        f"{_SORT_LABELS[sort_mode]}으로 표시합니다. 최근 5일 점수는 막대 위 숫자로 확인할 수 있습니다."
+    )
     header = (
         "<div class='chart-analysis-table-head' aria-hidden='true'>"
         "<span>종목</span><span>고점 근거</span><span>저점 근거</span><span>판정</span>"
         "</div>"
     )
-    rows = "".join(_result_row_html(view) for view in views)
+    rows = "".join(_result_row_html(view) for view in sorted_views)
     st.markdown(
         f"<div class='chart-analysis-table' role='table' aria-label='보유종목 차트분석 결과'>{header}{rows}</div>",
         unsafe_allow_html=True,
     )
+    return sorted_views
 
 
 def _result_row_html(view: ChartAnalysisView) -> str:
@@ -277,18 +317,21 @@ def _trend_html(signal: ScoreSignal, *, axis: str) -> str:
     if not signal.recent:
         return "<div class='chart-score-trend-empty'>5일 추이 없음</div>"
     values = " → ".join(f"{value:.1f}" for _, value in signal.recent)
-    bars = "".join(
+    points = "".join(
         (
-            f"<span style='height:{max(6.0, min(100.0, value)):.2f}%' "
-            f"title='{session.isoformat()} · {value:.1f}'></span>"
+            f"<span class='chart-score-trend-point' title='{session.isoformat()} · {value:.1f}'>"
+            f"<span class='chart-score-trend-value'>{value:.1f}</span>"
+            "<span class='chart-score-trend-track' aria-hidden='true'>"
+            f"<i class='chart-score-trend-fill' style='height:{max(8.0, min(100.0, value)):.2f}%'></i>"
+            "</span></span>"
         )
         for session, value in signal.recent
     )
     return (
+        "<span class='chart-score-trend-label'>최근 5일 점수</span>"
         f"<div class='chart-score-trend chart-score-trend-{axis}' "
         f"aria-label='최근 5일 {escape(values)}' title='{escape(values)}'>"
-        f"{bars}</div>"
-        "<span class='chart-score-trend-label'>최근 5일</span>"
+        f"{points}</div>"
     )
 
 
@@ -527,10 +570,10 @@ def render_chart_analysis(
         total_count=len(results),
     )
     if latest_sessions:
-        st.caption(f"최근 기준일 {max(latest_sessions).isoformat()} · 주목 변화 우선 정렬")
+        st.caption(f"최근 기준일 {max(latest_sessions).isoformat()}")
     _render_attention_cards(views)
-    _render_results_table(views)
-    ranked_results = tuple(view.result for view in views)
+    sorted_views = _render_results_table(views)
+    ranked_results = tuple(view.result for view in sorted_views)
     _render_result_details(ranked_results)
     st.caption(
         "판정결과는 직전 완료봉의 raw 조건 요약입니다. 점수 증감과 5일 추이는 설명용이며, "
