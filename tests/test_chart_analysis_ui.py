@@ -5,8 +5,11 @@ from datetime import date
 from app.ui.chart_analysis import (
     ATTENTION_DELTA_THRESHOLD,
     ATTENTION_SCORE_THRESHOLD,
+    ScoreSignal,
+    _trend_html,
     build_chart_analysis_views,
     chart_analysis_table_rows,
+    sort_chart_analysis_views,
 )
 from portfolio.chart_analysis import AnalysisInstrument, ChartAnalysisResult, ChartScoreSnapshot
 
@@ -116,3 +119,51 @@ def test_missing_result_is_sorted_after_ready_results():
 
     assert [view.result.instrument.display_name for view in views] == ["READY", "MISSING"]
     assert views[-1].top.emphasis == "missing"
+
+
+def test_views_can_be_sorted_by_top_or_bottom_score():
+    top_first = _result(
+        "TOP",
+        previous_top=70.0,
+        top=80.0,
+        previous_bottom=10.0,
+        bottom=20.0,
+    )
+    bottom_first = _result(
+        "BOTTOM",
+        previous_top=10.0,
+        top=20.0,
+        previous_bottom=70.0,
+        bottom=90.0,
+    )
+    views = build_chart_analysis_views((bottom_first, top_first))
+
+    by_top = sort_chart_analysis_views(views, sort_mode="top_score")
+    by_bottom = sort_chart_analysis_views(views, sort_mode="bottom_score")
+
+    assert [view.result.instrument.display_name for view in by_top] == ["TOP", "BOTTOM"]
+    assert [view.result.instrument.display_name for view in by_bottom] == ["BOTTOM", "TOP"]
+
+
+def test_recent_trend_renders_visible_numeric_labels():
+    signal = ScoreSignal(
+        score=50.0,
+        delta=10.0,
+        recent=(
+            (date(2026, 8, 1), 10.0),
+            (date(2026, 8, 2), 20.0),
+            (date(2026, 8, 3), 30.0),
+            (date(2026, 8, 4), 40.0),
+            (date(2026, 8, 5), 50.0),
+        ),
+        emphasis="elevated",
+        label="관찰",
+        priority=1,
+    )
+
+    html = _trend_html(signal, axis="top")
+
+    assert html.count("chart-score-trend-value") == 5
+    assert ">10.0<" in html
+    assert ">50.0<" in html
+    assert "최근 5일 점수" in html

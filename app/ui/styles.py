@@ -1272,30 +1272,59 @@ __CSS_VARS__
         }
         .chart-score-bottom .chart-score-meter span { background: var(--app-accent); }
         .chart-score-trend {
-            display: flex;
-            align-items: flex-end;
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
             gap: 3px;
-            height: 28px;
-            margin-top: var(--token-space-2);
+            height: 46px;
+            margin-top: 3px;
+            min-width: 0;
+        }
+        .chart-score-trend-point {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            min-width: 0;
+        }
+        .chart-score-trend-value {
+            width: 100%;
+            overflow: hidden;
+            color: var(--app-muted);
+            font-size: 0.64rem;
+            font-weight: 760;
+            line-height: 1;
+            text-align: center;
+            text-overflow: clip;
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+        .chart-score-trend-track {
+            display: flex;
+            flex: 1 1 auto;
+            align-items: flex-end;
+            justify-content: center;
+            width: 100%;
+            min-height: 29px;
             border-bottom: 1px solid var(--app-border);
         }
-        .chart-score-trend span {
-            flex: 1 1 0;
-            min-width: 3px;
-            max-width: 18px;
+        .chart-score-trend-fill {
+            display: block;
+            width: min(12px, 72%);
+            min-height: 3px;
             border-radius: 3px 3px 0 0;
             background: var(--app-primary);
             opacity: 0.72;
         }
-        .chart-score-trend-bottom span { background: var(--app-accent); }
-        .chart-score-trend span:last-child {
+        .chart-score-trend-bottom .chart-score-trend-fill { background: var(--app-accent); }
+        .chart-score-trend-point:last-child .chart-score-trend-fill {
             opacity: 1;
         }
         .chart-score-trend-label,
         .chart-score-trend-empty {
-            margin-top: 2px;
+            display: block;
+            margin-top: var(--token-space-2);
             color: var(--app-muted);
-            font-size: var(--token-font-xs);
+            font-size: 0.62rem;
             line-height: 1.2;
         }
         .chart-analysis-verdict {
