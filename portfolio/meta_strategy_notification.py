@@ -19,7 +19,7 @@ def should_publish_notification(
     update_exit_code: int,
     latest_run: Mapping[str, object],
 ) -> bool:
-    if run_slot == "manual":
+    if run_slot == "manual" or run_slot.startswith("external-"):
         return True
     if run_slot.startswith("primary-"):
         return update_exit_code == 0

@@ -7,6 +7,12 @@ on:
     - cron: "7 8 * * *"
       timezone: "Asia/Seoul"
   workflow_dispatch:
+    inputs:
+      run_slot:
+        description: "Execution source recorded in the durable audit output"
+        required: false
+        default: "manual"
+        type: string
 
 permissions:
   contents: write
@@ -57,9 +63,18 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_SCHEDULE: ${{ github.event.schedule }}
+          DISPATCH_RUN_SLOT: ${{ inputs.run_slot }}
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            echo "value=manual" >> "$GITHUB_OUTPUT"
+            case "${DISPATCH_RUN_SLOT:-manual}" in
+              manual|external-0750-kst|external-watchdog-0820-kst)
+                echo "value=${DISPATCH_RUN_SLOT:-manual}" >> "$GITHUB_OUTPUT"
+                ;;
+              *)
+                echo "Unsupported workflow_dispatch run slot: $DISPATCH_RUN_SLOT" >&2
+                exit 1
+                ;;
+            esac
           elif [[ "$EVENT_SCHEDULE" == "47 7 * * *" ]]; then
             echo "value=primary-0747-kst" >> "$GITHUB_OUTPUT"
           else
