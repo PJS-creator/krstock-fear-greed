@@ -1,0 +1,43 @@
+name: External strategy schedule watchdog
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "07:50 missing-run fallback or 08:20 missing-notification watchdog"
+        required: true
+        type: choice
+        options:
+          - ensure
+          - watchdog
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: external-strategy-watchdog-${{ inputs.mode }}
+  cancel-in-progress: false
+
+jobs:
+  inspect-and-recover:
+    name: Inspect notifications and recover missing runs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout application source
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Check strategy notifications
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_TARGET_REF: ${{ github.event.repository.default_branch }}
+          GITHUB_RECIPIENT: PJS-creator
+        run: python scripts/run_external_strategy_watchdog.py --mode "${{ inputs.mode }}"

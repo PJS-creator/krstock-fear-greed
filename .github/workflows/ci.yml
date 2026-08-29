@@ -57,27 +57,6 @@ jobs:
       - name: Compile dashboard and portfolio modules
         run: python -m compileall app portfolio scripts
 
-  external-scheduler-tests:
-    name: External scheduler tests
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Test fallback and watchdog logic
-        working-directory: external-scheduler
-        run: npm test
-
-      - name: Validate Cloudflare Worker bundle
-        working-directory: external-scheduler
-        run: npx --yes wrangler@4.127.1 deploy --dry-run
-
   dashboard-dependencies:
     name: Dashboard deps and smoke test
     runs-on: ubuntu-latest
