@@ -10,3 +10,7 @@ android-webview/local.properties
 android-webview/**/build/
 *.apk
 meta-strategy-audit/
+external-scheduler/node_modules/
+external-scheduler/.npm-cache/
+external-scheduler/.wrangler/
+external-scheduler/.dev.vars*

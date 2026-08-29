@@ -1,0 +1,49 @@
+name: Deploy external strategy scheduler
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Test and deploy Cloudflare watchdog
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: external-scheduler
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test scheduler
+        run: npm test
+
+      - name: Validate deployment secrets
+        shell: bash
+        env:
+          EXTERNAL_SCHEDULER_GITHUB_TOKEN: ${{ secrets.EXTERNAL_SCHEDULER_GITHUB_TOKEN }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "Missing CLOUDFLARE_API_TOKEN" >&2; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "Missing CLOUDFLARE_ACCOUNT_ID" >&2; exit 1; }
+          test -n "$EXTERNAL_SCHEDULER_GITHUB_TOKEN" || { echo "Missing EXTERNAL_SCHEDULER_GITHUB_TOKEN" >&2; exit 1; }
+
+      - name: Deploy Worker cron triggers
+        shell: bash
+        env:
+          EXTERNAL_SCHEDULER_GITHUB_TOKEN: ${{ secrets.EXTERNAL_SCHEDULER_GITHUB_TOKEN }}
+        run: |
+          umask 077
+          printf 'GITHUB_TOKEN=%s\n' "$EXTERNAL_SCHEDULER_GITHUB_TOKEN" > .env.production
+          trap 'rm -f .env.production' EXIT
+          npx --yes wrangler@4.127.1 deploy --secrets-file .env.production
