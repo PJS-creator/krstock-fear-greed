@@ -16,7 +16,7 @@
 
 공식 계산이 끝나면 [공식 메타전략 일일 알림 Issue](https://github.com/PJS-creator/krstock-fear-greed/issues/127)에 `@PJS-creator` 판정 요약을 게시합니다. 본 실행이 실패하면 07:57 재시도 결과까지 기다린 뒤 최종 상태를 알리고, 본 실행이 성공한 날의 재시도는 중복 알림을 만들지 않습니다.
 
-GitHub 예약 이벤트 지연에 대비해 [외부 스케줄러와 미수신 감시](external_strategy_scheduler.md)를 함께 운영할 수 있습니다. 외부 Worker는 07:50 KST에 당일 알림이 없는 전략만 보충 실행하고, 08:20 KST까지 알림이 없으면 재호출과 GitHub 경고 댓글을 수행합니다. 기존 07:37/07:57 예약은 삭제하지 않습니다.
+GitHub 예약 이벤트 지연에 대비해 [cron-job.org 보충 실행과 미수신 감시](external_strategy_scheduler.md)를 함께 운영할 수 있습니다. 외부 cron 작업은 07:50 KST에 당일 알림이 없는 전략만 보충 실행하고, 08:20 KST까지 알림이 없으면 재호출과 GitHub 경고 댓글을 수행합니다. 기존 07:37/07:57 예약은 삭제하지 않습니다.
 
 Streamlit 공개 앱에는 Tiingo 토큰을 넣지 않습니다. `TIINGO_API_TOKEN`은 GitHub 저장소의 **Settings > Secrets and variables > Actions**에만 저장합니다.
 
