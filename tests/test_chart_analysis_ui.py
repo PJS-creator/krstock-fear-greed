@@ -6,6 +6,7 @@ from app.ui.chart_analysis import (
     ATTENTION_DELTA_THRESHOLD,
     ATTENTION_SCORE_THRESHOLD,
     ScoreSignal,
+    _result_row_html,
     _trend_html,
     build_chart_analysis_views,
     chart_analysis_table_rows,
@@ -14,7 +15,13 @@ from app.ui.chart_analysis import (
 from portfolio.chart_analysis import AnalysisInstrument, ChartAnalysisResult, ChartScoreSnapshot
 
 
-def _snapshot(session: date, top: float, bottom: float) -> ChartScoreSnapshot:
+def _snapshot(
+    session: date,
+    top: float,
+    bottom: float,
+    *,
+    close: float | None = None,
+) -> ChartScoreSnapshot:
     return ChartScoreSnapshot(
         as_of_session=session,
         top_score=top,
@@ -26,12 +33,13 @@ def _snapshot(session: date, top: float, bottom: float) -> ChartScoreSnapshot:
         bottom_watch=False,
         direction_conflict=False,
         verdict="특이 조건 없음",
+        close=close,
     )
 
 
 def test_chart_analysis_table_contains_required_scores_deltas_and_five_day_trends():
     snapshots = tuple(
-        _snapshot(date(2026, 8, day), top=float(day), bottom=float(day * 2))
+        _snapshot(date(2026, 8, day), top=float(day), bottom=float(day * 2), close=40.0 + day)
         for day in range(1, 6)
     )
     result = ChartAnalysisResult(
@@ -46,6 +54,8 @@ def test_chart_analysis_table_contains_required_scores_deltas_and_five_day_trend
     row = chart_analysis_table_rows([result])[0]
 
     assert row["기준일"] == "2026-08-05"
+    assert row["2일 전 종가"] == "$44.00"
+    assert row["전일 종가"] == "$45.00"
     assert row["고점점수"] == 5.0
     assert row["고점 증감"] == 1.0
     assert row["저점점수"] == 10.0
@@ -167,3 +177,24 @@ def test_recent_trend_renders_visible_numeric_labels():
     assert ">10.0<" in html
     assert ">50.0<" in html
     assert "최근 5일 점수" in html
+
+
+def test_result_row_shows_previous_and_latest_close_next_to_name():
+    previous = _snapshot(date(2026, 8, 4), top=20.0, bottom=15.0, close=41.20)
+    latest = _snapshot(date(2026, 8, 5), top=25.0, bottom=20.0, close=40.62)
+    result = ChartAnalysisResult(
+        instrument=AnalysisInstrument(market="US", symbol="QURE", display_name="QURE"),
+        readiness="READY_ELIGIBLE",
+        quality_status="PASS",
+        latest=latest,
+        previous=previous,
+        recent=(previous, latest),
+    )
+
+    html = _result_row_html(build_chart_analysis_views((result,))[0])
+
+    assert "chart-analysis-close" in html
+    assert "2일 전" in html
+    assert "$41.20" in html
+    assert "전일" in html
+    assert "$40.62" in html

@@ -1133,7 +1133,7 @@ __CSS_VARS__
         .chart-analysis-table-head,
         .chart-analysis-row {
             display: grid;
-            grid-template-columns: minmax(145px, 0.85fr) minmax(180px, 1fr) minmax(180px, 1fr) minmax(210px, 1.15fr);
+            grid-template-columns: minmax(220px, 1fr) minmax(190px, 1fr) minmax(190px, 1fr) minmax(210px, 1.05fr);
             gap: 0;
         }
         .chart-analysis-table-head {
@@ -1186,12 +1186,60 @@ __CSS_VARS__
             flex-direction: column;
             justify-content: center;
         }
+        .chart-analysis-asset-head {
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: var(--token-space-3);
+            min-width: 0;
+        }
         .chart-analysis-name {
+            min-width: 0;
             color: var(--app-heading);
             font-size: var(--token-font-md);
             font-weight: 880;
             line-height: 1.3;
             overflow-wrap: anywhere;
+        }
+        .chart-analysis-close {
+            display: flex;
+            flex: 0 1 auto;
+            align-items: baseline;
+            gap: var(--token-space-1);
+            min-width: 0;
+            color: var(--app-muted);
+            font-size: var(--token-font-xs);
+            line-height: 1.3;
+            white-space: nowrap;
+            font-variant-numeric: tabular-nums;
+        }
+        .chart-analysis-close-label {
+            color: var(--app-muted);
+            font-weight: 700;
+        }
+        .chart-analysis-close-values {
+            display: inline-flex;
+            align-items: baseline;
+            gap: var(--token-space-1);
+            min-width: 0;
+        }
+        .chart-analysis-close-item {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 3px;
+        }
+        .chart-analysis-close-item small {
+            color: var(--app-muted);
+            font-size: 0.66rem;
+        }
+        .chart-analysis-close-item strong {
+            color: var(--app-text);
+            font-size: var(--token-font-xs);
+            font-weight: 780;
+        }
+        .chart-analysis-close-arrow {
+            color: var(--app-muted);
+            font-weight: 800;
         }
         .chart-analysis-meta {
             margin-top: var(--token-space-1);
@@ -1688,6 +1736,14 @@ __CSS_VARS__
             }
             .chart-analysis-name {
                 font-size: var(--token-font-base);
+            }
+            .chart-analysis-asset-head {
+                align-items: flex-start;
+                flex-direction: column;
+                gap: var(--token-space-1);
+            }
+            .chart-analysis-close {
+                max-width: 100%;
             }
             .chart-score-value,
             .chart-score-missing {

@@ -57,6 +57,7 @@ class ChartScoreSnapshot:
     bottom_watch: bool
     direction_conflict: bool
     verdict: str
+    close: float | None = None
 
 
 @dataclass(frozen=True)
@@ -378,6 +379,7 @@ def _snapshot_from_row(row: pd.Series) -> ChartScoreSnapshot:
         bottom_watch=bool(row["bottom_watch"]),
         direction_conflict=bool(row["direction_conflict"]),
         verdict=str(row["verdict"]),
+        close=float(row["close"]),
     )
 
 

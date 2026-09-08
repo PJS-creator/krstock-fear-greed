@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from app.ui.components import render_empty_state
+from app.ui.formatters import format_price
 from portfolio.chart_analysis import (
     AnalysisInstrument,
     ChartAnalysisResult,
@@ -97,6 +98,8 @@ def chart_analysis_table_rows(results: Iterable[ChartAnalysisResult]) -> list[di
             {
                 "종목": result.instrument.display_name,
                 "기준일": latest.as_of_session.isoformat() if latest is not None else "-",
+                "2일 전 종가": _close_text(result, result.previous),
+                "전일 종가": _close_text(result, latest),
                 "고점점수": latest.top_score if latest is not None else None,
                 "고점 증감": result.top_delta,
                 "저점점수": latest.bottom_score if latest is not None else None,
@@ -201,6 +204,51 @@ def _score_trend(result: ChartAnalysisResult, *, score_name: str) -> str:
     return " → ".join(f"{value:.2f}" for value in values)
 
 
+def _close_text(result: ChartAnalysisResult, snapshot: object) -> str:
+    close = getattr(snapshot, "close", None) if snapshot is not None else None
+    if close is None:
+        return "-"
+    currency = "KRW" if result.instrument.market.upper() == "KR" else "USD"
+    return format_price(close, currency)
+
+
+def _close_summary_html(result: ChartAnalysisResult) -> str:
+    latest = result.latest
+    if latest is None or latest.close is None:
+        return ""
+    previous = result.previous
+    previous_text = _close_text(result, previous)
+    latest_text = _close_text(result, latest)
+    previous_date = previous.as_of_session.isoformat() if previous is not None else ""
+    latest_date = latest.as_of_session.isoformat()
+    if previous is None or previous.close is None:
+        return (
+            "<div class='chart-analysis-close' "
+            f"title='{escape(latest_date)} · 전일 종가 {escape(latest_text)}'>"
+            "<span class='chart-analysis-close-label'>전일 종가</span>"
+            f"<strong>{escape(latest_text)}</strong>"
+            "</div>"
+        )
+    return (
+        "<div class='chart-analysis-close' "
+        f"aria-label='2일 전 종가 {escape(previous_text)}, 전일 종가 {escape(latest_text)}' "
+        f"title='{escape(previous_date)} → {escape(latest_date)}'>"
+        "<span class='chart-analysis-close-label'>종가</span>"
+        "<span class='chart-analysis-close-values'>"
+        "<span class='chart-analysis-close-item'>"
+        "<small>2일 전</small>"
+        f"<strong>{escape(previous_text)}</strong>"
+        "</span>"
+        "<span class='chart-analysis-close-arrow' aria-hidden='true'>→</span>"
+        "<span class='chart-analysis-close-item'>"
+        "<small>전일</small>"
+        f"<strong>{escape(latest_text)}</strong>"
+        "</span>"
+        "</span>"
+        "</div>"
+    )
+
+
 def _data_status(result: ChartAnalysisResult) -> str:
     if result.latest is not None:
         return "준비 완료" if result.quality_status == "PASS" else "준비 완료 · 주의"
@@ -259,7 +307,10 @@ def _result_row_html(view: ChartAnalysisView) -> str:
     return (
         f"<article class='chart-analysis-row chart-analysis-row-{view.attention_level}' role='row'>"
         "<div class='chart-analysis-asset' role='cell'>"
+        "<div class='chart-analysis-asset-head'>"
         f"<div class='chart-analysis-name'>{escape(result.instrument.display_name)}</div>"
+        f"{_close_summary_html(result)}"
+        "</div>"
         f"<div class='chart-analysis-meta'>{escape(result.instrument.market)} · {escape(session)}</div>"
         f"{attention_badge}"
         "</div>"
