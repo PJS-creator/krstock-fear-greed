@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from app.ui.chart_analysis import (
     ATTENTION_DELTA_THRESHOLD,
     ATTENTION_SCORE_THRESHOLD,
     ScoreSignal,
+    _result_row_html,
     _trend_html,
     build_chart_analysis_views,
     chart_analysis_table_rows,
     sort_chart_analysis_views,
 )
-from portfolio.chart_analysis import AnalysisInstrument, ChartAnalysisResult, ChartScoreSnapshot
+from portfolio.chart_analysis import AnalysisInstrument, ChartAnalysisResult, ChartCloseSnapshot, ChartScoreSnapshot
 
 
 def _snapshot(session: date, top: float, bottom: float) -> ChartScoreSnapshot:
@@ -41,11 +44,15 @@ def test_chart_analysis_table_contains_required_scores_deltas_and_five_day_trend
         latest=snapshots[-1],
         previous=snapshots[-2],
         recent=snapshots,
+        latest_close=ChartCloseSnapshot(snapshots[-1].as_of_session, 45.0),
+        previous_close=ChartCloseSnapshot(snapshots[-2].as_of_session, 44.0),
     )
 
     row = chart_analysis_table_rows([result])[0]
 
     assert row["기준일"] == "2026-08-05"
+    assert row["2일 전 종가"] == "$44.00"
+    assert row["전일 종가"] == "$45.00"
     assert row["고점점수"] == 5.0
     assert row["고점 증감"] == 1.0
     assert row["저점점수"] == 10.0
@@ -167,3 +174,52 @@ def test_recent_trend_renders_visible_numeric_labels():
     assert ">10.0<" in html
     assert ">50.0<" in html
     assert "최근 5일 점수" in html
+
+
+@pytest.mark.parametrize(
+    ("market", "symbol", "name", "prior_price", "price", "prior_text", "text"),
+    [
+        ("US", "QURE", "QURE", 41.2, 40.62, "$41.20", "$40.62"),
+        ("KR", "000660", "SK하이닉스", 1117140, 1245900, "₩1,117,140", "₩1,245,900"),
+    ],
+)
+def test_result_row_shows_previous_and_latest_close_next_to_name(
+    market, symbol, name, prior_price, price, prior_text, text,
+):
+    previous = _snapshot(date(2026, 9, 4), top=20.0, bottom=15.0)
+    latest = _snapshot(date(2026, 9, 7), top=25.0, bottom=20.0)
+    result = ChartAnalysisResult(
+        instrument=AnalysisInstrument(market=market, symbol=symbol, display_name=name),
+        readiness="READY_ELIGIBLE",
+        quality_status="PASS",
+        latest=latest,
+        previous=previous,
+        recent=(previous, latest),
+        latest_close=ChartCloseSnapshot(latest.as_of_session, price),
+        previous_close=ChartCloseSnapshot(previous.as_of_session, prior_price),
+    )
+
+    html = _result_row_html(build_chart_analysis_views((result,))[0])
+
+    assert "chart-analysis-close" in html
+    assert "2일 전" in html
+    assert prior_text in html
+    assert "전일" in html
+    assert text in html
+    assert "2026-09-04 → 2026-09-07" in html
+
+
+def test_missing_previous_close_is_not_fabricated_from_latest():
+    result = ChartAnalysisResult(
+        instrument=AnalysisInstrument("US", "NEW", "NEW"),
+        readiness="WARMUP",
+        latest_close=ChartCloseSnapshot(date(2026, 9, 7), 12.5),
+    )
+
+    row = chart_analysis_table_rows([result])[0]
+    html = _result_row_html(build_chart_analysis_views([result])[0])
+
+    assert row["2일 전 종가"] == "-"
+    assert row["전일 종가"] == "$12.50"
+    assert "미조회 → 2026-09-07" in html
+    assert "산출 불가" in html

@@ -46,6 +46,12 @@ class DailyHistoryInput:
 
 
 @dataclass(frozen=True)
+class ChartCloseSnapshot:
+    as_of_session: date
+    close: float
+
+
+@dataclass(frozen=True)
 class ChartScoreSnapshot:
     as_of_session: date
     top_score: float
@@ -75,6 +81,8 @@ class ChartAnalysisResult:
     latest: ChartScoreSnapshot | None = None
     previous: ChartScoreSnapshot | None = None
     recent: tuple[ChartScoreSnapshot, ...] = ()
+    latest_close: ChartCloseSnapshot | None = None
+    previous_close: ChartCloseSnapshot | None = None
 
     @property
     def top_delta(self) -> float | None:
@@ -414,6 +422,11 @@ def analyze_daily_history(history: DailyHistoryInput) -> ChartAnalysisResult:
     eligible_rows = int(scored["decision_eligible"].sum())
     warnings = tuple(dict.fromkeys((*history.warnings, *validation_warnings)))
     source_sha256 = _source_hash(scored)
+    # Price comparison uses consecutive bars even when a score excludes a zero-volume session.
+    closes = tuple(
+        ChartCloseSnapshot(as_of_session=row["session"], close=float(row["close"]))
+        for _, row in scored.tail(2).iterrows()
+    )
     common: dict[str, Any] = {
         "instrument": history.instrument,
         "provider": history.provider,
@@ -423,6 +436,8 @@ def analyze_daily_history(history: DailyHistoryInput) -> ChartAnalysisResult:
         "eligible_rows": eligible_rows,
         "source_sha256": source_sha256,
         "warnings": warnings,
+        "latest_close": closes[-1],
+        "previous_close": closes[-2] if len(closes) >= 2 else None,
     }
     if rows < MINIMUM_INPUT_ROWS:
         return ChartAnalysisResult(

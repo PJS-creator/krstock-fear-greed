@@ -66,10 +66,11 @@ def test_daily_bar_validation_fails_closed_for_duplicate_sessions():
 
 def test_chart_analysis_returns_latest_previous_and_five_day_history():
     instrument = AnalysisInstrument(market="US", symbol="TEST", display_name="테스트")
+    frame = _daily_bars()
     result = analyze_daily_history(
         DailyHistoryInput(
             instrument=instrument,
-            frame=_daily_bars(),
+            frame=frame,
             provider="test-provider",
             adjustment_mode="SPLIT_ADJUSTED_OHLCV",
             source_symbol="TEST",
@@ -83,6 +84,23 @@ def test_chart_analysis_returns_latest_previous_and_five_day_history():
     assert result.top_delta == round(result.latest.top_score - result.previous.top_score, 2)
     assert result.bottom_delta == round(result.latest.bottom_score - result.previous.bottom_score, 2)
     assert len(result.source_sha256) == 64
+    assert result.latest_close.close == pytest.approx(frame.iloc[-1]["close"])
+    assert result.previous_close.close == pytest.approx(frame.iloc[-2]["close"])
+    assert result.latest_close.as_of_session == frame.iloc[-1]["timestamp"].date()
+    assert result.previous_close.as_of_session == frame.iloc[-2]["timestamp"].date()
+
+
+def test_closing_prices_keep_the_immediately_previous_zero_volume_session():
+    frame = _daily_bars()
+    frame.loc[frame.index[-2], "volume"] = 0
+    result = analyze_daily_history(
+        DailyHistoryInput(AnalysisInstrument("KR", "TEST", "테스트"), frame)
+    )
+
+    assert result.previous.as_of_session == frame.iloc[-3]["timestamp"].date()
+    assert result.previous_close.as_of_session == frame.iloc[-2]["timestamp"].date()
+    assert result.previous_close.close == pytest.approx(frame.iloc[-2]["close"])
+    assert result.latest_close.close == pytest.approx(frame.iloc[-1]["close"])
 
 
 def test_chart_score_does_not_change_past_rows_when_future_rows_are_added():
@@ -101,4 +119,5 @@ def test_analysis_requires_at_least_300_input_rows():
     assert result.readiness == "WARMUP"
     assert result.latest is None
     assert "300" in str(result.error)
-
+    assert result.latest_close is not None
+    assert result.previous_close is not None

@@ -9,9 +9,11 @@ import pandas as pd
 import streamlit as st
 
 from app.ui.components import render_empty_state
+from app.ui.formatters import format_price
 from portfolio.chart_analysis import (
     AnalysisInstrument,
     ChartAnalysisResult,
+    ChartCloseSnapshot,
     TOP_COMPONENT_IDS,
     analyze_daily_history,
 )
@@ -24,6 +26,7 @@ from portfolio.chart_analysis_data import (
 
 _RESULTS_KEY = "chart_analysis_results"
 _SIGNATURE_KEY = "chart_analysis_holdings_signature"
+_RESULT_SCHEMA = "consecutive-closes-v1"
 ATTENTION_SCORE_THRESHOLD = 70.0
 ATTENTION_DELTA_THRESHOLD = 14.0
 _ELEVATED_SCORE_THRESHOLD = 50.0
@@ -77,7 +80,10 @@ def _load_chart_analysis(
     payload: tuple[tuple[str, str, str], ...],
     use_kis: bool,
     _kis_provider: KisDailyHistoryProvider | None = None,
+    *,
+    result_schema: str = _RESULT_SCHEMA,
 ) -> tuple[ChartAnalysisResult, ...]:
+    del result_schema  # Included in the Streamlit cache key when the result structure changes.
     instruments = tuple(
         AnalysisInstrument(market=market, symbol=symbol, display_name=display_name)
         for market, symbol, display_name in payload
@@ -97,6 +103,8 @@ def chart_analysis_table_rows(results: Iterable[ChartAnalysisResult]) -> list[di
             {
                 "종목": result.instrument.display_name,
                 "기준일": latest.as_of_session.isoformat() if latest is not None else "-",
+                "2일 전 종가": _close_text(result, result.previous_close),
+                "전일 종가": _close_text(result, result.latest_close),
                 "고점점수": latest.top_score if latest is not None else None,
                 "고점 증감": result.top_delta,
                 "저점점수": latest.bottom_score if latest is not None else None,
@@ -201,6 +209,39 @@ def _score_trend(result: ChartAnalysisResult, *, score_name: str) -> str:
     return " → ".join(f"{value:.2f}" for value in values)
 
 
+def _close_text(result: ChartAnalysisResult, snapshot: ChartCloseSnapshot | None) -> str:
+    if snapshot is None:
+        return "-"
+    currency = "KRW" if result.instrument.market.upper() == "KR" else "USD"
+    return format_price(snapshot.close, currency)
+
+
+def _close_summary_html(result: ChartAnalysisResult) -> str:
+    latest = result.latest_close
+    if latest is None:
+        return ""
+    previous = result.previous_close
+    previous_text = _close_text(result, previous)
+    latest_text = _close_text(result, latest)
+    previous_date = previous.as_of_session.isoformat() if previous is not None else "미조회"
+    latest_date = latest.as_of_session.isoformat()
+    return (
+        "<div class='chart-analysis-close' "
+        f"aria-label='2일 전 종가 {escape(previous_text)}, 전일 종가 {escape(latest_text)}' "
+        f"title='{escape(previous_date)} → {escape(latest_date)}'>"
+        "<span class='chart-analysis-close-item'>"
+        "<small>2일 전 종가</small>"
+        f"<strong>{escape(previous_text)}</strong>"
+        "</span>"
+        "<span class='chart-analysis-close-arrow' aria-hidden='true'>→</span>"
+        "<span class='chart-analysis-close-item'>"
+        "<small>전일 종가</small>"
+        f"<strong>{escape(latest_text)}</strong>"
+        "</span>"
+        "</div>"
+    )
+
+
 def _data_status(result: ChartAnalysisResult) -> str:
     if result.latest is not None:
         return "준비 완료" if result.quality_status == "PASS" else "준비 완료 · 주의"
@@ -237,7 +278,9 @@ def _render_results_table(views: tuple[ChartAnalysisView, ...]) -> tuple[ChartAn
     )
     rows = "".join(_result_row_html(view) for view in sorted_views)
     st.markdown(
-        f"<div class='chart-analysis-table' role='table' aria-label='보유종목 차트분석 결과'>{header}{rows}</div>",
+        "<div class='chart-analysis-table-wrap'>"
+        f"<div class='chart-analysis-table' role='table' aria-label='보유종목 차트분석 결과'>{header}{rows}</div>"
+        "</div>",
         unsafe_allow_html=True,
     )
     return sorted_views
@@ -246,7 +289,8 @@ def _render_results_table(views: tuple[ChartAnalysisView, ...]) -> tuple[ChartAn
 def _result_row_html(view: ChartAnalysisView) -> str:
     result = view.result
     latest = result.latest
-    session = latest.as_of_session.isoformat() if latest is not None else "기준일 없음"
+    reference = latest or result.latest_close
+    session = reference.as_of_session.isoformat() if reference is not None else "기준일 없음"
     status = _data_status(result)
     status_tone = _data_status_tone(result)
     attention_badge = ""
@@ -259,7 +303,10 @@ def _result_row_html(view: ChartAnalysisView) -> str:
     return (
         f"<article class='chart-analysis-row chart-analysis-row-{view.attention_level}' role='row'>"
         "<div class='chart-analysis-asset' role='cell'>"
+        "<div class='chart-analysis-asset-head'>"
         f"<div class='chart-analysis-name'>{escape(result.instrument.display_name)}</div>"
+        f"{_close_summary_html(result)}"
+        "</div>"
         f"<div class='chart-analysis-meta'>{escape(result.instrument.market)} · {escape(session)}</div>"
         f"{attention_badge}"
         "</div>"
@@ -519,7 +566,7 @@ def render_chart_analysis(
         return
 
     payload = _payload(instruments)
-    signature = (payload, kis_provider is not None)
+    signature = (payload, kis_provider is not None, _RESULT_SCHEMA)
     if st.session_state.get(_SIGNATURE_KEY) != signature:
         st.session_state[_SIGNATURE_KEY] = signature
         st.session_state.pop(_RESULTS_KEY, None)
@@ -540,6 +587,7 @@ def render_chart_analysis(
                 payload,
                 kis_provider is not None,
                 kis_provider,
+                result_schema=_RESULT_SCHEMA,
             )
 
     results = st.session_state.get(_RESULTS_KEY)
