@@ -13,6 +13,7 @@ import streamlit as st
 from app.ui.components import render_empty_state
 from app.ui.freshness import mark_checked, refresh_due
 from app.ui.formatters import format_price
+from app.ui.stability import request_app_rerun
 from portfolio.chart_analysis import (
     AnalysisInstrument,
     ChartAnalysisResult,
@@ -119,7 +120,7 @@ def _load_chart_analysis(
                 result = ChartAnalysisResult(
                     instrument=AnalysisInstrument(*item), readiness="FAILED", error="일봉 조회 또는 분석 실패",
                 )
-            if result.latest is None:
+            if result.readiness in {"ERROR", "FAILED"}:
                 _load_single_chart_analysis.clear(item, use_kis, _kis_provider, result_schema=result_schema)
         results.append(result)
     return tuple(results)
@@ -142,14 +143,53 @@ def retain_previous_analysis(previous, incoming):
     return tuple(merged)
 
 
+def _is_query_deferred(result: ChartAnalysisResult) -> bool:
+    return result.readiness == "PENDING" or "QUERY_DEFERRED" in result.warnings
+
+
+def _needs_query_retry(result: ChartAnalysisResult) -> bool:
+    return (
+        _is_query_deferred(result)
+        or "RETAINED_PREVIOUS" in result.warnings
+        or result.readiness in {"ERROR", "FAILED"}
+    )
+
+
 def retry_payload(payload, previous):
     by_key = {result.instrument.key: result for result in previous}
     def priority(item):
         result = by_key.get(f"{item[0]}:{item[1]}")
-        if result is None or result.readiness == "PENDING" or "QUERY_DEFERRED" in result.warnings:
+        if result is None or _is_query_deferred(result):
             return 0
-        return 2 if result.latest is None or "RETAINED_PREVIOUS" in result.warnings else 1
-    return tuple(sorted(payload, key=priority))
+        return 1
+    requested = (
+        item for item in payload
+        if (result := by_key.get(f"{item[0]}:{item[1]}")) is None or _needs_query_retry(result)
+    )
+    return tuple(sorted(requested, key=priority))
+
+
+def merge_analysis_batch(payload, previous, incoming):
+    # Untouched successes must not turn into PENDING when a later batch uses its budget.
+    by_key = {result.instrument.key: result for result in previous}
+    by_key.update({result.instrument.key: result for result in retain_previous_analysis(previous, incoming)})
+    return tuple(by_key[f"{item[0]}:{item[1]}"] for item in payload)
+
+
+def chart_query_counts(results):
+    counts = dict(ready=0, pending=0, failed=0, insufficient=0, retained=0)
+    for result in results:
+        if "RETAINED_PREVIOUS" in result.warnings:
+            counts["retained"] += 1
+        if _is_query_deferred(result):
+            counts["pending"] += 1
+        elif _needs_query_retry(result):
+            counts["failed"] += 1
+        elif result.latest is not None:
+            counts["ready"] += 1
+        else:
+            counts["insufficient"] += 1
+    return counts
 
 
 def chart_analysis_table_rows(results: Iterable[ChartAnalysisResult]) -> list[dict[str, object]]:
@@ -300,8 +340,8 @@ def _close_summary_html(result: ChartAnalysisResult) -> str:
 
 
 def _data_status(result: ChartAnalysisResult) -> str:
-    if result.readiness == "PENDING":
-        return "조회 대기 · 이어서 조회"
+    if _is_query_deferred(result):
+        return "조회 대기 · 이전값 표시" if result.latest is not None else "조회 대기 · 이어서 조회"
     if "RETAINED_PREVIOUS" in result.warnings:
         return "이전 정상값 · 재조회 필요"
     if result.latest is not None:
@@ -600,6 +640,8 @@ def _warning_text(value: str) -> str:
 
 
 def _data_status_tone(result: ChartAnalysisResult) -> str:
+    if _is_query_deferred(result):
+        return "warning"
     if result.latest is not None and result.quality_status == "PASS":
         return "success"
     if result.latest is not None or result.readiness in {"WARMUP", "READY_INELIGIBLE"}:
@@ -634,8 +676,12 @@ def render_chart_analysis(
         st.session_state.pop(_CHECKED_KEY, None)
 
     previous = tuple(st.session_state.get(_RESULTS_KEY) or ())
-    retry_pending = any(result.latest is None or "RETAINED_PREVIOUS" in result.warnings for result in previous)
-    action_label = "미완료 종목 다시 조회" if retry_pending else ("일봉 데이터 새로고침" if auto_load else "차트분석 실행")
+    retries = retry_payload(payload, previous) if previous else ()
+    retry_pending = bool(retries)
+    pending_count = chart_query_counts(previous)["pending"]
+    action_label = (
+        f"남은 {len(retries)}개 이어서 조회" if pending_count else "실패 종목 다시 조회"
+    ) if retry_pending else ("일봉 데이터 새로고침" if auto_load else "차트분석 실행")
     action_clicked = st.button(
         action_label,
         type="primary",
@@ -647,15 +693,25 @@ def render_chart_analysis(
             _load_single_chart_analysis.clear(item, kis_provider is not None, kis_provider, result_schema=_RESULT_SCHEMA)
     should_load = action_clicked or (auto_load and refresh_due(st.session_state, _CHECKED_KEY, ttl_seconds=1800))
     if should_load:
+        continuing = action_clicked and retry_pending
+        requested = retries if continuing else payload
+        if continuing:
+            previous_by_key = {row.instrument.key: row for row in previous}
+            for item in requested:
+                result = previous_by_key.get(f"{item[0]}:{item[1]}")
+                if result is not None and not _is_query_deferred(result):
+                    _load_single_chart_analysis.clear(item, kis_provider is not None, kis_provider, result_schema=_RESULT_SCHEMA)
         mark_checked(st.session_state, _CHECKED_KEY)
-        with st.spinner(f"보유종목 {len(instruments)}개의 완료 일봉을 조회하고 있습니다..."):
+        with st.spinner(f"보유종목 {len(requested)}개의 완료 일봉을 조회하고 있습니다..."):
             try:
-                requested = retry_payload(payload, previous) if retry_pending else payload
                 incoming = _load_chart_analysis(requested, kis_provider is not None, kis_provider, result_schema=_RESULT_SCHEMA)
-                st.session_state[_RESULTS_KEY] = retain_previous_analysis(previous, incoming)
+                st.session_state[_RESULTS_KEY] = merge_analysis_batch(payload, previous, incoming)
                 st.session_state.pop("chart_analysis_refresh_error", None)
             except Exception:
                 st.session_state["chart_analysis_refresh_error"] = "차트분석 조회 실패 · 이전 결과를 유지합니다."
+            else:
+                # Update the button's remaining count before the next user click.
+                request_app_rerun()
     if st.session_state.get("chart_analysis_refresh_error"):
         st.warning(st.session_state["chart_analysis_refresh_error"])
 
@@ -667,9 +723,20 @@ def render_chart_analysis(
     ready_count = sum(result.latest is not None for result in results)
     warning_count = sum(result.latest is not None and result.quality_status == "WARNING" for result in results)
     failed_count = len(results) - ready_count
-    retained_count = sum("RETAINED_PREVIOUS" in result.warnings for result in results)
-    if retained_count or failed_count:
-        st.warning(f"이전 정상값 {retained_count}개 · 미완료 {failed_count}개. 기준일을 확인하고 미완료 종목을 다시 조회해 주세요.")
+    counts = chart_query_counts(results)
+    if counts["pending"] or counts["failed"] or counts["insufficient"]:
+        message = (
+            f"조회 완료 {counts['ready']}개 · 조회 대기 {counts['pending']}개 · "
+            f"조회 실패 {counts['failed']}개 · 산출 조건 미충족 {counts['insufficient']}개"
+        )
+        if counts["pending"]:
+            message += ". 조회 대기는 시간 제한으로 아직 처리하지 못한 종목이며 API 조회 실패가 아닙니다."
+        if counts["retained"]:
+            message += f" 이전 정상값 {counts['retained']}개는 기준일을 확인해 주세요."
+        if counts["failed"] or counts["insufficient"]:
+            st.warning(message)
+        else:
+            st.info(message)
     latest_sessions = [result.latest.as_of_session for result in results if result.latest is not None]
     views = build_chart_analysis_views(results)
     attention_count = sum(view.priority >= 2 for view in views)
