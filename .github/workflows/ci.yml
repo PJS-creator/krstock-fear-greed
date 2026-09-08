@@ -102,7 +102,9 @@ jobs:
         timeout-minutes: 10
         env:
           NODE_PATH: ${{ github.workspace }}/.browser-deps/node_modules
-        run: node tests/browser/smoke.cjs
+        run: |
+          node --test tests/browser/render_sync.test.cjs
+          node tests/browser/smoke.cjs
 
       - name: Upload browser screenshots and logs
         if: always()

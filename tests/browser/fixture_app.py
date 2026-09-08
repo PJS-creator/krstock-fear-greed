@@ -39,6 +39,26 @@ def analysis(payload, *args, **kwargs):
     )) for market, symbol, name in payload)
 
 
+def acknowledge_render():
+    st.session_state["qa_render_id"] = st.session_state.get("qa_render_id", 0) + 1
+    section = st.session_state.get(dashboard.PUBLIC_SECTION_KEY, "summary")
+    st.markdown(
+        f'<span data-qa-render="{st.session_state.qa_render_id}" '
+        f'data-qa-theme="{st.session_state.app_theme_mode}" '
+        f'data-qa-section="{section}" hidden></span>',
+        unsafe_allow_html=True,
+    )
+
+
+original_stop = st.stop
+
+
+def stop_after_login_render():
+    # Preserve the real login gate's stop, acknowledging its completed form first.
+    acknowledge_render()
+    original_stop()
+
+
 scenario = st.query_params.get("scenario", "ready")
 if not st.session_state.get("qa_initialized"):
     dashboard._initialize_session_state(public_auth_enabled=True)
@@ -78,4 +98,9 @@ with ExitStack() as stack:
     for name, value in overrides.items():
         stack.enter_context(patch.object(dashboard, name, value))
     stack.enter_context(patch.object(chart_analysis, "_load_chart_analysis", analysis))
+    if scenario == "login":
+        stack.enter_context(patch.object(st, "stop", stop_after_login_render))
     dashboard.run_dashboard(public_auth_enabled=True)
+
+# A new acknowledgement is emitted only after a complete dashboard render.
+acknowledge_render()
