@@ -251,7 +251,7 @@ def render_kpi_cards(metrics: PortfolioMetrics, *, history_records: list[Portfol
     render_metric_card_grid(
         [
             {
-                "title": "총자산",
+                "title": "총자산" if metrics.valuation_complete else "총자산 · 부분 평가",
                 "value": eok_man_krw(metrics.total_value_krw),
                 "status": "info",
                 "help_text": f"KRW 환산 총자산입니다. 전체 금액: {full_krw(metrics.total_value_krw)}",

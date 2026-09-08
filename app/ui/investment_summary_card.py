@@ -422,7 +422,7 @@ def _holding_irr(
 
 
 def _portfolio_irr(metrics: PortfolioMetrics, transactions: list[dict[str, object]], *, as_of_date: date) -> float | None:
-    if not transactions or metrics.total_position_value_krw <= 0:
+    if not transactions or metrics.total_position_value_krw <= 0 or not metrics.valuation_complete:
         return None
     cashflows: list[tuple[date, float]] = []
     for transaction in transactions:
@@ -1294,6 +1294,9 @@ def _meta_strategy_panel(result: MetaStrategyResult | Mapping[str, Any] | None) 
     }
     if data_mode == "official" and status == "updated":
         status_labels["updated"] = "Actions 공식"
+    refresh_note = str(_meta_strategy_attr(result, "official_refresh_error") or _meta_strategy_attr(result, "freshness_note") or "")
+    if refresh_note and data_mode == "official":
+        status_labels[status] = "이전 검증값"
     tone = regime if regime in {"bull", "mixed", "bear"} else "neutral"
     details: list[str] = []
     qqq_date = _meta_strategy_attr(result, "qqq_as_of_date")
@@ -1313,6 +1316,8 @@ def _meta_strategy_panel(result: MetaStrategyResult | Mapping[str, Any] | None) 
         details.append("회복 ON" if bool(recovery) else "회복 OFF")
     detail_text = " · ".join(details) if details else "가격·환율 갱신 시 FRED 유동성과 QQQ 일봉을 함께 조회합니다."
     supplemental: list[str] = []
+    if refresh_note:
+        supplemental.append(refresh_note)
     planned_execution = _meta_strategy_attr(result, "planned_execution_session")
     if planned_execution:
         supplemental.append(f"예정 실행일 {planned_execution}")
@@ -1386,6 +1391,9 @@ def _shadow_strategy_panel(result: Mapping[str, Any] | None) -> str:
         "NONE": "대기",
     }.get(event, event)
     status_label = "Actions 검증" if validated else "산출물 대기"
+    refresh_note = str(payload.get("refresh_error") or payload.get("freshness_note") or "")
+    if validated and refresh_note:
+        status_label = "이전 검증값"
     base_target = str(payload.get("base_execution_target") or "-")
     post_n1_target = str(payload.get("post_n1_execution_target") or "-")
     final_target = str(payload.get("resolved_execution_target") or "-")
@@ -1407,6 +1415,8 @@ def _shadow_strategy_panel(result: Mapping[str, Any] | None) -> str:
     else:
         details.append("Actions에서 v3.0 최초 판정을 실행하면 검증 결과가 표시됩니다.")
     v4_text = ""
+    if refresh_note:
+        details.append(refresh_note)
     if validated:
         mode = str(entry.get("mode") or "-")
         distance = entry.get("qqq_sma50_upper_distance_pct")
@@ -1503,7 +1513,7 @@ def _holding_table_rows(
             f"<td class='{day_change_class}'>{_badge_html(day_change_value, day_change)}</td>"
             f"<td>{_pnl_stack_html(item.total_pnl_pct, item.total_pnl_krw)}</td>"
             f"<td>{_plain_metric_html(irr, irr_text)}</td>"
-            f"<td>{escape(percentage(item.weight, digits=2))}</td>"
+            f"<td>{escape(percentage(item.weight, digits=2)) if item.market_value_krw is not None else '미산정'}</td>"
             "</tr>"
         )
     if metrics.cash_total_krw > 0:
@@ -1541,7 +1551,7 @@ def _holding_table_rows(
         f"<td>{_badge_html(metrics.day_change_krw, total_day_text)}</td>"
         f"<td>{_pnl_stack_html(metrics.total_pnl_pct, metrics.total_pnl_krw)}</td>"
         f"<td>{_plain_metric_html(portfolio_irr, signed_percentage(portfolio_irr) if portfolio_irr is not None else '-')}</td>"
-        "<td>100.00%</td>"
+        f"<td>{'100.00%' if metrics.valuation_complete else '부분 평가'}</td>"
         "</tr>"
     )
     return rows
@@ -1564,7 +1574,7 @@ def _mobile_holding_summary_table(metrics: PortfolioMetrics) -> str:
             f"<td>{escape(quantity)}</td>"
             f"<td class='summary-mobile-tight'>{escape(avg_price)}</td>"
             f"<td class='summary-mobile-tight'>{escape(current_price)}</td>"
-            f"<td class='summary-mobile-summary-weight'>{escape(percentage(item.weight, digits=1))}</td>"
+            f"<td class='summary-mobile-summary-weight'>{escape(percentage(item.weight, digits=1)) if item.market_value_krw is not None else '-'}</td>"
             "</tr>"
         )
     if not rows:
@@ -2932,7 +2942,7 @@ def render_investment_summary_card(
     seed = metrics.total_cost_krw if metrics.total_cost_krw > 0 else None
     seed_label = _krw(seed) if seed is not None else "평균단가 필요"
     kpi_cards = [
-        _kpi_card("총자산", _krw(metrics.total_value_krw), f"주식 {percentage(stock_pct, digits=2)} · 현금 {percentage(cash_pct, digits=2)}", "cyan", "₩"),
+        _kpi_card("총자산" if metrics.valuation_complete else "총자산 · 부분 평가", _krw(metrics.total_value_krw), f"주식 {percentage(stock_pct, digits=2)} · 현금 {percentage(cash_pct, digits=2)}", "cyan", "₩"),
         _kpi_card("주식 평가금액", _krw(metrics.total_position_value_krw), f"{metrics.priced_count:,}/{metrics.holdings_count:,}종목 평가", "default", "주"),
         _kpi_card("현금", _krw(metrics.cash_total_krw), f"{percentage(cash_pct, digits=2)}", "default", "$"),
         _kpi_card("평가이익", _signed_text(metrics.total_pnl_krw, signed_krw), "주식 평가금액 - 투자원금", _kpi_tone(metrics.total_pnl_krw), "P/L"),
@@ -3013,7 +3023,7 @@ def render_investment_summary_card(
                     <div class="summary-asset-group-head"><span>현금</span><strong>{escape(percentage(cash_pct, digits=2))}</strong></div>
                     {cash_legend_rows}
                 </div>
-                <div class="summary-legend-total">투자 + 현금 100%</div>
+                <div class="summary-legend-total">{'투자 + 현금 100%' if metrics.valuation_complete else '평가 가능한 자산 기준'}</div>
             </div>
             <div class="summary-panel summary-heatmap-card">
                 <div class="summary-heatmap-head">
@@ -3090,4 +3100,5 @@ def render_investment_summary_card(
         </div>
     </div>
     """
-    st.markdown(html, unsafe_allow_html=True)
+    # Empty optional panels must not turn subsequent indented HTML into a Markdown code block.
+    st.markdown("\n".join(line.lstrip() for line in html.splitlines()), unsafe_allow_html=True)

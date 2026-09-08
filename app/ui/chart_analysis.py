@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from html import escape
+import logging
+import time
 
 import pandas as pd
 import streamlit as st
 
 from app.ui.components import render_empty_state
+from app.ui.freshness import mark_checked, refresh_due
 from app.ui.formatters import format_price
 from portfolio.chart_analysis import (
     AnalysisInstrument,
@@ -27,6 +30,9 @@ from portfolio.chart_analysis_data import (
 _RESULTS_KEY = "chart_analysis_results"
 _SIGNATURE_KEY = "chart_analysis_holdings_signature"
 _RESULT_SCHEMA = "consecutive-closes-v1"
+_CHECKED_KEY = "chart_analysis_checked_at"
+_BATCH_BUDGET_SECONDS = 24.0
+LOGGER = logging.getLogger(__name__)
 ATTENTION_SCORE_THRESHOLD = 70.0
 ATTENTION_DELTA_THRESHOLD = 14.0
 _ELEVATED_SCORE_THRESHOLD = 50.0
@@ -37,6 +43,8 @@ _SORT_LABELS = {
     "bottom_score": "저점점수 높은순",
 }
 _WARNING_LABELS = {
+    "RETAINED_PREVIOUS": "갱신 실패로 이전 정상값 유지",
+    "QUERY_DEFERRED": "조회 시간 한도로 다음 조회에 계속",
     "APPROXIMATED_TRADED_VALUE": "거래대금 추정값 사용",
     "ZERO_VOLUME_SESSION_PRESENT": "거래량 0 세션 포함",
     "SPLIT_EVENTS_UNAVAILABLE": "분할 이벤트 확인 불가",
@@ -75,7 +83,18 @@ class ChartAnalysisView:
     attention_label: str
 
 
-@st.cache_data(ttl=30 * 60, show_spinner=False, max_entries=16)
+@st.cache_data(ttl=30 * 60, show_spinner=False, max_entries=256)
+def _load_single_chart_analysis(instrument_payload, use_kis, _kis_provider=None, *, result_schema=_RESULT_SCHEMA):
+    del result_schema
+    market, symbol, display_name = instrument_payload
+    instrument = AnalysisInstrument(market=market, symbol=symbol, display_name=display_name)
+    history = fetch_daily_histories(
+        (instrument,), kis_provider=_kis_provider if use_kis else None,
+        timeout_seconds=5.0, allow_korea_fallback=False,
+    )[0]
+    return analyze_daily_history(history)
+
+
 def _load_chart_analysis(
     payload: tuple[tuple[str, str, str], ...],
     use_kis: bool,
@@ -83,16 +102,54 @@ def _load_chart_analysis(
     *,
     result_schema: str = _RESULT_SCHEMA,
 ) -> tuple[ChartAnalysisResult, ...]:
-    del result_schema  # Included in the Streamlit cache key when the result structure changes.
-    instruments = tuple(
-        AnalysisInstrument(market=market, symbol=symbol, display_name=display_name)
-        for market, symbol, display_name in payload
-    )
-    provider = _kis_provider if use_kis else None
-    return tuple(
-        analyze_daily_history(history)
-        for history in fetch_daily_histories(instruments, kis_provider=provider)
-    )
+    deadline = time.monotonic() + _BATCH_BUDGET_SECONDS
+    results = []
+    for item in payload:
+        if time.monotonic() >= deadline:
+            result = ChartAnalysisResult(
+                instrument=AnalysisInstrument(market=item[0], symbol=item[1], display_name=item[2]),
+                readiness="PENDING",
+                error="조회 시간 한도: 미완료 종목 다시 조회를 눌러 이어서 조회하세요.",
+            )
+        else:
+            try:
+                result = _load_single_chart_analysis(item, use_kis, _kis_provider, result_schema=result_schema)
+            except Exception as exc:
+                LOGGER.warning("chart_analysis_fetch_failed market=%s symbol=%s type=%s", item[0], item[1], type(exc).__name__)
+                result = ChartAnalysisResult(
+                    instrument=AnalysisInstrument(*item), readiness="FAILED", error="일봉 조회 또는 분석 실패",
+                )
+            if result.latest is None:
+                _load_single_chart_analysis.clear(item, use_kis, _kis_provider, result_schema=result_schema)
+        results.append(result)
+    return tuple(results)
+
+
+def retain_previous_analysis(previous, incoming):
+    by_key = {result.instrument.key: result for result in previous or ()}
+    merged = []
+    for result in incoming:
+        old = by_key.get(result.instrument.key)
+        if old is not None and old.latest is not None and (
+            result.latest is None or result.latest.as_of_session < old.latest.as_of_session
+        ):
+            warnings = [warning for warning in old.warnings if warning != "QUERY_DEFERRED"]
+            if result.readiness == "PENDING":
+                warnings.append("QUERY_DEFERRED")
+            result = replace(old, quality_status="WARNING", error=result.error or "이전 날짜의 데이터가 반환되었습니다.",
+                             warnings=tuple(dict.fromkeys((*warnings, "RETAINED_PREVIOUS"))))
+        merged.append(result)
+    return tuple(merged)
+
+
+def retry_payload(payload, previous):
+    by_key = {result.instrument.key: result for result in previous}
+    def priority(item):
+        result = by_key.get(f"{item[0]}:{item[1]}")
+        if result is None or result.readiness == "PENDING" or "QUERY_DEFERRED" in result.warnings:
+            return 0
+        return 2 if result.latest is None or "RETAINED_PREVIOUS" in result.warnings else 1
+    return tuple(sorted(payload, key=priority))
 
 
 def chart_analysis_table_rows(results: Iterable[ChartAnalysisResult]) -> list[dict[str, object]]:
@@ -243,6 +300,10 @@ def _close_summary_html(result: ChartAnalysisResult) -> str:
 
 
 def _data_status(result: ChartAnalysisResult) -> str:
+    if result.readiness == "PENDING":
+        return "조회 대기 · 이어서 조회"
+    if "RETAINED_PREVIOUS" in result.warnings:
+        return "이전 정상값 · 재조회 필요"
     if result.latest is not None:
         return "준비 완료" if result.quality_status == "PASS" else "준비 완료 · 주의"
     if result.readiness == "WARMUP":
@@ -570,25 +631,33 @@ def render_chart_analysis(
     if st.session_state.get(_SIGNATURE_KEY) != signature:
         st.session_state[_SIGNATURE_KEY] = signature
         st.session_state.pop(_RESULTS_KEY, None)
+        st.session_state.pop(_CHECKED_KEY, None)
 
-    action_label = "일봉 데이터 새로고침" if auto_load else "차트분석 실행"
+    previous = tuple(st.session_state.get(_RESULTS_KEY) or ())
+    retry_pending = any(result.latest is None or "RETAINED_PREVIOUS" in result.warnings for result in previous)
+    action_label = "미완료 종목 다시 조회" if retry_pending else ("일봉 데이터 새로고침" if auto_load else "차트분석 실행")
     action_clicked = st.button(
         action_label,
         type="primary",
         icon=":material/candlestick_chart:",
         key="chart_analysis_refresh",
     )
-    if action_clicked:
-        _load_chart_analysis.clear()
-    should_load = action_clicked or (auto_load and _RESULTS_KEY not in st.session_state)
+    if action_clicked and not retry_pending:
+        for item in payload:
+            _load_single_chart_analysis.clear(item, kis_provider is not None, kis_provider, result_schema=_RESULT_SCHEMA)
+    should_load = action_clicked or (auto_load and refresh_due(st.session_state, _CHECKED_KEY, ttl_seconds=1800))
     if should_load:
+        mark_checked(st.session_state, _CHECKED_KEY)
         with st.spinner(f"보유종목 {len(instruments)}개의 완료 일봉을 조회하고 있습니다..."):
-            st.session_state[_RESULTS_KEY] = _load_chart_analysis(
-                payload,
-                kis_provider is not None,
-                kis_provider,
-                result_schema=_RESULT_SCHEMA,
-            )
+            try:
+                requested = retry_payload(payload, previous) if retry_pending else payload
+                incoming = _load_chart_analysis(requested, kis_provider is not None, kis_provider, result_schema=_RESULT_SCHEMA)
+                st.session_state[_RESULTS_KEY] = retain_previous_analysis(previous, incoming)
+                st.session_state.pop("chart_analysis_refresh_error", None)
+            except Exception:
+                st.session_state["chart_analysis_refresh_error"] = "차트분석 조회 실패 · 이전 결과를 유지합니다."
+    if st.session_state.get("chart_analysis_refresh_error"):
+        st.warning(st.session_state["chart_analysis_refresh_error"])
 
     results = st.session_state.get(_RESULTS_KEY)
     if not results:
@@ -598,6 +667,9 @@ def render_chart_analysis(
     ready_count = sum(result.latest is not None for result in results)
     warning_count = sum(result.latest is not None and result.quality_status == "WARNING" for result in results)
     failed_count = len(results) - ready_count
+    retained_count = sum("RETAINED_PREVIOUS" in result.warnings for result in results)
+    if retained_count or failed_count:
+        st.warning(f"이전 정상값 {retained_count}개 · 미완료 {failed_count}개. 기준일을 확인하고 미완료 종목을 다시 조회해 주세요.")
     latest_sessions = [result.latest.as_of_session for result in results if result.latest is not None]
     views = build_chart_analysis_views(results)
     attention_count = sum(view.priority >= 2 for view in views)

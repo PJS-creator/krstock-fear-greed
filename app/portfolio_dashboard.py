@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping
 from datetime import date
+from dataclasses import replace
 from html import escape
 import logging
+import json
 import os
 from pathlib import Path
 import sys
@@ -40,7 +42,7 @@ def _stop_if_unsupported_python_runtime() -> None:
     st.stop()
 
 
-from app.ui.auth_persistence import delete_remember_cookie, get_cookie_manager, get_remember_cookie, set_remember_cookie
+from app.ui.auth_persistence import begin_cookie_run, delete_remember_cookie, get_cookie_manager, get_remember_cookie, set_remember_cookie
 from app.ui.chart_analysis import render_chart_analysis
 from app.ui.components import render_app_header, render_price_update_log, safe_render_section
 from app.ui.data_portability import render_data_portability_tools
@@ -58,6 +60,9 @@ from app.ui.manage import (
     render_storage_tools,
 )
 from app.ui.overview import render_overview
+from app.ui.persistence_state import BASE_VERSION_KEY, SAVE_CONFLICT_KEY, expected_version, record_loaded_version
+from app.ui.freshness import mark_checked, refresh_due
+from portfolio.snapshot_freshness import with_publication_health
 from app.ui.rebalancing import render_rebalancing
 from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
 from app.ui.status import quote_status_label
@@ -124,6 +129,7 @@ from portfolio.pricing import (
     refresh_usd_krw,
 )
 from portfolio.storage import (
+    PortfolioConflictError,
     PortfolioRecord,
     PortfolioStoreError,
     build_target_allocation_store,
@@ -418,6 +424,8 @@ def _restore_last_saved_state() -> None:
 
 def _reset_current_portfolio_state(portfolio_name: str = "main") -> None:
     clean_name = _clean_portfolio_name(portfolio_name)
+    st.session_state.pop(BASE_VERSION_KEY, None)
+    st.session_state.pop(SAVE_CONFLICT_KEY, None)
     st.session_state[PENDING_PORTFOLIO_STATE_KEY] = {
         "portfolio_name": clean_name,
         "portfolio_transactions": [],
@@ -802,6 +810,7 @@ def _apply_pending_portfolio_state() -> None:
         "last_price_refresh_at",
         META_STRATEGY_RESULT_KEY,
         ALTERNATIVE_META_STRATEGY_RESULT_KEY,
+        BASE_VERSION_KEY,
     ):
         if key in pending_state:
             st.session_state[key] = pending_state[key]
@@ -1108,12 +1117,12 @@ def _read_market_warning_signals(refresh_key: str | None) -> list:
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _cached_official_meta_strategy_snapshot(url: str) -> dict[str, object]:
-    return fetch_official_snapshot(url=url)
+    return with_publication_health(fetch_official_snapshot(url=url), url=url)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def _cached_alternative_meta_strategy_snapshot(url: str) -> dict[str, object]:
-    return fetch_alternative_snapshot(url=url)
+    return with_publication_health(fetch_alternative_snapshot(url=url), url=url)
 
 
 def _official_meta_strategy_url() -> str:
@@ -1126,14 +1135,24 @@ def _alternative_meta_strategy_url() -> str:
 
 def _load_official_meta_strategy_state() -> None:
     current = st.session_state.get(META_STRATEGY_RESULT_KEY)
-    if isinstance(current, Mapping) and current.get("data_mode") == "official":
+    if isinstance(current, Mapping) and not refresh_due(st.session_state, "official_snapshot_checked", ttl_seconds=600):
         return
+    mark_checked(st.session_state, "official_snapshot_checked")
     try:
         official = _cached_official_meta_strategy_snapshot(_official_meta_strategy_url())
     except OfficialSnapshotError as exc:
         LOGGER.info("official_meta_strategy_initial_load_skipped type=%s message=%s", type(exc).__name__, exc)
+        if isinstance(current, Mapping):
+            retained = dict(current)
+            retained["official_refresh_error"] = "공식 산출물 조회 실패 · 이전 검증값 표시"
+            st.session_state[META_STRATEGY_RESULT_KEY] = retained
+        elif current is None:
+            st.session_state[META_STRATEGY_RESULT_KEY] = {
+                "status": "failed", "data_mode": "preview",
+                "official_refresh_error": "공식 산출물을 불러오지 못했습니다. 다음 재확인 때 다시 시도합니다.",
+            }
         return
-    preview = current if isinstance(current, MetaStrategyResult) else None
+    preview = current if isinstance(current, MetaStrategyResult) else (current.get("preview") if isinstance(current, Mapping) else None)
     st.session_state[META_STRATEGY_RESULT_KEY] = official_snapshot_to_app_view(
         official,
         preview=preview,
@@ -1142,8 +1161,9 @@ def _load_official_meta_strategy_state() -> None:
 
 def _load_alternative_meta_strategy_state() -> None:
     current = st.session_state.get(ALTERNATIVE_META_STRATEGY_RESULT_KEY)
-    if isinstance(current, Mapping) and current.get("strategy_kind") == "ALTERNATIVE_SHADOW":
+    if isinstance(current, Mapping) and not refresh_due(st.session_state, "shadow_snapshot_checked", ttl_seconds=600):
         return
+    mark_checked(st.session_state, "shadow_snapshot_checked")
     try:
         shadow = _cached_alternative_meta_strategy_snapshot(_alternative_meta_strategy_url())
     except AlternativeSnapshotError as exc:
@@ -1152,16 +1172,16 @@ def _load_alternative_meta_strategy_state() -> None:
             type(exc).__name__,
             exc,
         )
-        st.session_state[ALTERNATIVE_META_STRATEGY_RESULT_KEY] = {
-            "status": "UNAVAILABLE",
-            "strategy_spec_version": "3.0",
-            "refresh_error": str(exc),
-        }
+        retained = dict(current) if isinstance(current, Mapping) else {"status": "UNAVAILABLE", "strategy_spec_version": "3.0"}
+        retained["refresh_error"] = "쉐도우 산출물 조회 실패 · 이전 검증값 표시"
+        st.session_state[ALTERNATIVE_META_STRATEGY_RESULT_KEY] = retained
         return
     st.session_state[ALTERNATIVE_META_STRATEGY_RESULT_KEY] = shadow
 
 
 def _refresh_alternative_meta_strategy_state() -> None:
+    _cached_alternative_meta_strategy_snapshot.clear(_alternative_meta_strategy_url())
+    mark_checked(st.session_state, "shadow_snapshot_checked")
     previous = st.session_state.get(ALTERNATIVE_META_STRATEGY_RESULT_KEY)
     try:
         shadow = _cached_alternative_meta_strategy_snapshot(_alternative_meta_strategy_url())
@@ -1185,9 +1205,16 @@ def _refresh_alternative_meta_strategy_state() -> None:
     st.session_state[ALTERNATIVE_META_STRATEGY_RESULT_KEY] = shadow
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def _cached_meta_strategy_preview():
+    return fetch_meta_strategy()
+
+
 def _refresh_meta_strategy_state() -> None:
-    preview = fetch_meta_strategy()
+    preview = _cached_meta_strategy_preview()
     _refresh_alternative_meta_strategy_state()
+    _cached_official_meta_strategy_snapshot.clear(_official_meta_strategy_url())
+    mark_checked(st.session_state, "official_snapshot_checked")
     previous = st.session_state.get(META_STRATEGY_RESULT_KEY)
     try:
         official = _cached_official_meta_strategy_snapshot(_official_meta_strategy_url())
@@ -1273,7 +1300,11 @@ def _persist_current_portfolio(owner_id, store, target_allocation_store=None) ->
         st.session_state.get(SAVED_TARGET_ALLOCATIONS_SIGNATURE_KEY) != _current_target_allocations_signature()
     )
     payload = _current_portfolio_payload()
-    save_portfolio_with_verification(store, owner_id, portfolio_name, payload)
+    saved = save_portfolio_with_verification(
+        store, owner_id, portfolio_name, payload,
+        expected_updated_at=expected_version(owner_id, portfolio_name),
+    )
+    record_loaded_version(saved)
     if target_allocations_changed:
         save_target_allocations_if_available(
             target_allocation_store,
@@ -1345,6 +1376,9 @@ def _auto_save_public_portfolio(owner_id, store, target_allocation_store, histor
     if not _portfolio_is_dirty():
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "새 포트폴리오 입력 대기" if load_status == "missing" else "저장됨"
         return
+    conflict = st.session_state.get(SAVE_CONFLICT_KEY) or {}
+    if conflict.get("key") == _portfolio_load_key(owner_id, PUBLIC_PORTFOLIO_NAME):
+        return
     try:
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장 중"
         payload = _persist_current_portfolio(owner_id, store, target_allocation_store)
@@ -1359,8 +1393,37 @@ def _auto_save_public_portfolio(owner_id, store, target_allocation_store, histor
             )
         )
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = "저장됨"
+    except PortfolioConflictError as exc:
+        st.session_state[SAVE_CONFLICT_KEY] = {
+            "key": _portfolio_load_key(owner_id, PUBLIC_PORTFOLIO_NAME), "message": str(exc),
+        }
+        st.session_state[PUBLIC_SAVE_STATUS_KEY] = str(exc)
     except (PortfolioStoreError, ValueError) as exc:
         st.session_state[PUBLIC_SAVE_STATUS_KEY] = f"저장 실패: {exc}"
+
+
+def _render_save_conflict(owner_id, store, target_allocation_store) -> None:
+    conflict = st.session_state.get(SAVE_CONFLICT_KEY) or {}
+    name = _current_portfolio_name()
+    if conflict.get("key") != _portfolio_load_key(owner_id, name):
+        return
+    st.error(conflict["message"])
+    st.download_button(
+        "현재 입력 백업", json.dumps(_current_portfolio_payload(), ensure_ascii=False, indent=2),
+        file_name="portfolio_unsaved_backup.json", mime="application/json", key="conflict_backup",
+    )
+    replace_inputs = st.checkbox("현재 입력을 서버의 최신 저장본으로 교체", key="conflict_confirm_reload")
+    if st.button("최신 저장본 불러오기", disabled=not replace_inputs, key="conflict_reload"):
+        try:
+            record = store.get_portfolio(owner_id, name)
+            if record is None:
+                st.warning("서버 저장본이 없습니다. 현재 입력을 백업한 뒤 다시 로그인해 주세요.")
+                return
+            _load_portfolio_record_now(record, target_allocation_store)
+        except (PortfolioStoreError, ValueError):
+            st.error("최신 저장본을 불러오지 못했습니다. 현재 입력을 유지합니다.")
+            return
+        request_app_rerun()
 
 
 def _current_save_status_text(*, public_auth_enabled: bool, dirty: bool) -> str:
@@ -2046,6 +2109,7 @@ def _auto_load_account_portfolio(
         return
 
     if recovery_record is not None:
+        recovery_record = replace(recovery_record, updated_at=record.updated_at if record else None)
         if _finish_portfolio_load(
             owner_id,
             portfolio_name,
@@ -2059,6 +2123,7 @@ def _auto_load_account_portfolio(
         return
 
     if record is None:
+        record_loaded_version(PortfolioRecord(owner_id=owner_id, portfolio_name=portfolio_name, payload_json={}))
         st.session_state[AUTO_LOAD_ATTEMPTED_KEY] = attempt_key
         _set_portfolio_load_state(owner_id, portfolio_name, "missing", attempted_at=current_time)
         return
@@ -2480,6 +2545,7 @@ def _render_public_dashboard_sections(security_config, owner_id, portfolio_store
 def run_dashboard(*, public_auth_enabled: bool | None = None) -> None:
     _stop_if_unsupported_python_runtime()
     st.set_page_config(page_title="포트폴리오 대시보드", layout="wide")
+    begin_cookie_run()
     _initialize_theme_state()
     inject_styles(_current_theme_mode())
     if public_auth_enabled is None:
@@ -2528,6 +2594,12 @@ def run_dashboard(*, public_auth_enabled: bool | None = None) -> None:
     )
     _render_mobile_public_auth_status(public_auth_enabled=public_auth_enabled)
     _render_status_messages()
+    _render_save_conflict(owner_id, portfolio_store, target_allocation_store)
+    if not metrics.valuation_complete:
+        st.warning(
+            f"부분 평가: {metrics.unpriced_count}개 종목의 가격이 없습니다. "
+            "총자산·손익·비중은 평가 가능한 종목과 현금 기준이며, 전체 포트폴리오 값이 아닙니다."
+        )
 
     if public_auth_enabled:
         safe_render_section("온보딩", lambda: render_onboarding(portfolio_snapshot=_current_portfolio_payload()))

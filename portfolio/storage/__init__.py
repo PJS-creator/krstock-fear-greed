@@ -1,4 +1,4 @@
-from .base import PortfolioRecord, PortfolioStore, PortfolioStoreError
+from .base import PortfolioConflictError, PortfolioRecord, PortfolioStore, PortfolioStoreError
 from .memory_store import MemoryPortfolioStore
 from .serialization import (
     SCHEMA_VERSION,
@@ -38,6 +38,7 @@ __all__ = [
     "MemoryTargetAllocationStore",
     "PortfolioPayloadError",
     "PortfolioRecord",
+    "PortfolioConflictError",
     "PortfolioStore",
     "PortfolioStoreError",
     "SupabasePortfolioStore",

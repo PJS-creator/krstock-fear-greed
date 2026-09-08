@@ -97,6 +97,14 @@ class PortfolioMetrics:
     total_pnl_pct: float | None
     last_price_refresh_at: str | None
 
+    @property
+    def unpriced_count(self) -> int:
+        return sum(1 for row in self.rows if row.market_value_krw is None and float(row.holding["quantity"]) > 0)
+
+    @property
+    def valuation_complete(self) -> bool:
+        return self.unpriced_count == 0
+
 
 def clean_text(value: object | None) -> str:
     if value is None:
@@ -381,8 +389,9 @@ def build_portfolio_metrics(
             previous_value = float(previous_close) * quantity * fx_rate
             day_change_pct = day_change_krw / previous_value if previous_value else None
             day_change_krw_values.append(day_change_krw)
-        if current_price is not None and avg_price is not None:
+        if avg_price is not None:
             cost_basis_krw = float(avg_price) * quantity * fx_rate
+        if current_price is not None and cost_basis_krw is not None:
             total_pnl_krw = market_value_krw - cost_basis_krw if market_value_krw is not None else None
             total_pnl_pct = total_pnl_krw / cost_basis_krw if cost_basis_krw else 0.0
         fetched_at = row.get("fetched_at")
@@ -410,7 +419,8 @@ def build_portfolio_metrics(
     total_cost_krw = sum(row.cost_basis_krw or 0.0 for row in metric_rows if row.cost_basis_krw is not None)
     known_pnl_rows = [row for row in metric_rows if row.total_pnl_krw is not None]
     total_pnl_krw = sum(row.total_pnl_krw or 0.0 for row in known_pnl_rows) if known_pnl_rows else None
-    total_pnl_pct = (total_pnl_krw or 0.0) / total_cost_krw if known_pnl_rows and total_cost_krw else (0.0 if known_pnl_rows else None)
+    priced_cost_krw = sum(row.cost_basis_krw or 0.0 for row in known_pnl_rows)
+    total_pnl_pct = (total_pnl_krw or 0.0) / priced_cost_krw if known_pnl_rows and priced_cost_krw else (0.0 if known_pnl_rows else None)
     day_change_krw = sum(day_change_krw_values) if day_change_krw_values else None
     previous_total = total_value_krw - (day_change_krw or 0.0)
     day_change_pct = day_change_krw / previous_total if day_change_krw is not None and previous_total else None

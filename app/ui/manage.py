@@ -20,6 +20,8 @@ from portfolio.storage import (
 )
 from portfolio.transactions import TRANSACTION_COLUMNS, normalize_transaction_rows, rows_to_csv as transaction_rows_to_csv
 from .formatters import format_kst
+from .persistence_state import SAVE_CONFLICT_KEY, expected_version, record_loaded_version
+from portfolio.persistence import save_portfolio_with_verification
 from .history import clear_history_cache
 from .stability import begin_ui_action, finish_ui_action, request_app_rerun
 
@@ -95,7 +97,9 @@ def queue_portfolio_record_load(
         fx_error_message=fx_metadata.get("error_message"),
         fx_fetched_at=fx_metadata.get("fetched_at"),
         mark_clean=mark_clean,
+        portfolio_base_version={"owner_id": record.owner_id, "portfolio_name": record.portfolio_name, "updated_at": record.updated_at},
     )
+    st.session_state.pop(SAVE_CONFLICT_KEY, None)
     _set_storage_status(f"{record.portfolio_name} 포트폴리오를 불러왔습니다.")
 
 
@@ -169,7 +173,11 @@ def render_storage_tools(
                 return
             try:
                 payload = _session_portfolio_payload()
-                store.save_portfolio(owner_id, clean_name, payload)
+                saved = save_portfolio_with_verification(
+                    store, owner_id, clean_name, payload,
+                    expected_updated_at=expected_version(owner_id, clean_name),
+                )
+                record_loaded_version(saved)
                 save_target_allocations_if_available(
                     target_allocation_store,
                     owner_id,

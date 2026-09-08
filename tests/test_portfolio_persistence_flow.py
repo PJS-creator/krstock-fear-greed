@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app import portfolio_dashboard as dashboard
-from app.ui import manage
+from app.ui import manage, persistence_state
 from portfolio.history import MemoryPortfolioHistoryStore, build_history_record
 from portfolio.holdings import build_portfolio_metrics
 from portfolio.storage import MemoryPortfolioStore, PortfolioStoreError, serialize_portfolio_payload
@@ -91,6 +91,7 @@ def _install_streamlit(monkeypatch, state: SessionState) -> None:
     fake = SimpleNamespace(session_state=state)
     monkeypatch.setattr(dashboard, "st", fake)
     monkeypatch.setattr(manage, "st", fake)
+    monkeypatch.setattr(persistence_state, "st", fake)
     dashboard._mark_portfolio_clean()
 
 
@@ -116,6 +117,23 @@ def test_transient_load_failure_retries_and_blocks_remote_overwrite(monkeypatch)
     assert state.holdings_rows[0]["ticker"] == "005930"
     assert state.cash_krw == 1_000_000
     assert state[dashboard.PORTFOLIO_LOAD_STATE_KEY]["status"] == "loaded"
+
+
+def test_mobile_save_conflict_preserves_local_inputs_and_latest_server_record(monkeypatch):
+    store = MemoryPortfolioStore()
+    original = store.save_portfolio("owner-a", "main", _payload())
+    mobile = _state()
+    _install_streamlit(monkeypatch, mobile)
+    dashboard._load_portfolio_record_now(original)
+    dashboard._set_portfolio_load_state("owner-a", "main", "loaded")
+    newer = store.save_portfolio("owner-a", "main", _payload(ticker="MSFT"))
+    mobile.holdings_rows = [_holding("AAPL")]
+    dashboard._auto_save_public_portfolio("owner-a", store, None, None, dashboard._current_metrics())
+    assert mobile.holdings_rows[0]["ticker"] == "AAPL"
+    assert mobile[persistence_state.SAVE_CONFLICT_KEY]["key"] == "owner-a:main"
+    assert store.get_portfolio("owner-a", "main") == newer
+    dashboard._auto_save_public_portfolio("owner-a", store, None, None, dashboard._current_metrics())
+    assert store.get_portfolio("owner-a", "main") == newer
 
 
 def test_legacy_attempt_marker_without_load_state_does_not_skip_hydration(monkeypatch):

@@ -114,6 +114,7 @@ def fetch_yfinance_daily_histories(
     korea_fallback_reader: Callable[..., pd.DataFrame] | None = None,
     now: datetime | None = None,
     timeout_seconds: float = 12.0,
+    allow_korea_fallback: bool = True,
 ) -> tuple[DailyHistoryInput, ...]:
     requested = tuple(instruments)
     if not requested:
@@ -177,7 +178,7 @@ def fetch_yfinance_daily_histories(
                     warnings=warnings,
                 )
             )
-        if not candidates and instrument.market == "KR":
+        if not candidates and instrument.market == "KR" and allow_korea_fallback:
             fallback, fallback_error = _fetch_finance_datareader_history(
                 instrument,
                 reader=korea_fallback_reader,
@@ -210,6 +211,7 @@ def fetch_daily_histories(
     korea_fallback_reader: Callable[..., pd.DataFrame] | None = None,
     now: datetime | None = None,
     timeout_seconds: float = 12.0,
+    allow_korea_fallback: bool = True,
 ) -> tuple[DailyHistoryInput, ...]:
     requested = tuple(instruments)
     if not requested:
@@ -221,6 +223,7 @@ def fetch_daily_histories(
             korea_fallback_reader=korea_fallback_reader,
             now=now,
             timeout_seconds=timeout_seconds,
+            allow_korea_fallback=allow_korea_fallback,
         )
 
     results_by_key: dict[str, DailyHistoryInput] = {}
@@ -255,6 +258,7 @@ def fetch_daily_histories(
             korea_fallback_reader=korea_fallback_reader,
             now=now,
             timeout_seconds=timeout_seconds,
+            allow_korea_fallback=allow_korea_fallback,
         )
         for fallback in fallback_results:
             kis_error = kis_errors.get(fallback.instrument.key, "조회 실패")
