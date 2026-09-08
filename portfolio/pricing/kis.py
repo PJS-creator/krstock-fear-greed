@@ -445,7 +445,9 @@ class KoreaInvestmentQuoteProvider:
         *,
         max_rows: int = 500,
         end_date: date | None = None,
+        max_runtime_seconds: float = 12.0,
     ) -> tuple[list[Mapping[str, Any]], str]:
+        deadline = time_module.monotonic() + max(0.0, max_runtime_seconds)
         normalized_market = str(market or "").strip().upper()
         row_limit = max(1, min(int(max_rows), 1_000))
         if normalized_market == "KR":
@@ -454,6 +456,7 @@ class KoreaInvestmentQuoteProvider:
                 normalized_symbol,
                 max_rows=row_limit,
                 end_date=end_date,
+                deadline=deadline,
             )
             return rows, normalized_symbol
         if normalized_market == "US":
@@ -462,6 +465,7 @@ class KoreaInvestmentQuoteProvider:
                 normalized_symbol,
                 max_rows=row_limit,
                 end_date=end_date,
+                deadline=deadline,
             )
         raise PriceProviderError(f"KIS 일봉 조회를 지원하지 않는 시장입니다: {normalized_market or '-'}")
 
@@ -475,6 +479,7 @@ class KoreaInvestmentQuoteProvider:
         *,
         max_rows: int,
         end_date: date | None,
+        deadline: float,
     ) -> list[Mapping[str, Any]]:
         current = self._now_fn()
         if current.tzinfo is None:
@@ -484,6 +489,8 @@ class KoreaInvestmentQuoteProvider:
         max_requests = max(2, math.ceil(max_rows / 70) + 2)
 
         for request_index in range(max_requests):
+            if time_module.monotonic() >= deadline:
+                raise PriceProviderError("KIS 일봉 조회 시간 한도 초과")
             window_start = window_end - timedelta(days=KIS_DOMESTIC_HISTORY_WINDOW_DAYS - 1)
             payload = self._request_json(
                 "GET",
@@ -527,6 +534,7 @@ class KoreaInvestmentQuoteProvider:
         *,
         max_rows: int,
         end_date: date | None,
+        deadline: float,
     ) -> tuple[list[Mapping[str, Any]], str]:
         current = self._now_fn()
         if current.tzinfo is None:
@@ -540,10 +548,14 @@ class KoreaInvestmentQuoteProvider:
         max_requests = max(2, math.ceil(max_rows / 80) + 2)
 
         for exchange in exchanges:
+            if time_module.monotonic() >= deadline:
+                raise PriceProviderError("KIS 일봉 조회 시간 한도 초과")
             rows_by_date: dict[date, Mapping[str, Any]] = {}
             page_end = initial_end
             try:
                 for request_index in range(max_requests):
+                    if time_module.monotonic() >= deadline:
+                        raise PriceProviderError("KIS 일봉 조회 시간 한도 초과")
                     payload = self._request_json(
                         "GET",
                         KIS_OVERSEAS_DAILY_PRICE_PATH,

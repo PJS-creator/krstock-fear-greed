@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from .base import PortfolioRecord, PortfolioStoreError
+from .base import PORTFOLIO_CONFLICT_MESSAGE, PortfolioConflictError, PortfolioRecord, PortfolioStoreError
 
 DEFAULT_TABLE_NAME = "portfolio_snapshots"
 
@@ -142,6 +142,34 @@ def _record_from_mapping(data: Mapping[str, Any]) -> PortfolioRecord:
 
 
 class SupabasePortfolioStore:
+    def save_portfolio_if_unchanged(
+        self, owner_id: str, portfolio_name: str, payload_json: Mapping[str, Any],
+        *, expected_updated_at: str | None,
+    ) -> PortfolioRecord:
+        clean_name = portfolio_name.strip()
+        if not clean_name:
+            raise PortfolioStoreError("portfolio_name is required")
+        row = {
+            "owner_id": owner_id, "portfolio_name": clean_name,
+            "payload_json": dict(payload_json), "updated_at": _utc_now_iso(),
+        }
+        try:
+            if expected_updated_at is None:
+                result = self._table().insert(row).execute()
+            else:
+                result = (
+                    self._table().update(row)
+                    .eq("owner_id", owner_id).eq("portfolio_name", clean_name)
+                    .eq("updated_at", expected_updated_at).execute()
+                )
+        except Exception as exc:
+            if str(getattr(exc, "code", "")) == "23505":
+                raise PortfolioConflictError(PORTFOLIO_CONFLICT_MESSAGE) from exc
+            raise PortfolioStoreError("Failed to conditionally save portfolio") from exc
+        if not result.data:
+            raise PortfolioConflictError(PORTFOLIO_CONFLICT_MESSAGE)
+        return _record_from_mapping(result.data[0])
+
     def __init__(self, config: SupabaseStorageConfig, *, client: Any | None = None) -> None:
         if not has_supabase_credentials(config):
             raise PortfolioStoreError("Supabase storage is not configured")

@@ -77,6 +77,7 @@ def official_snapshot_to_app_view(
     legacy["entry_advice"] = parsed.get("entry_advice")
     legacy["rsi_reference"] = parsed.get("rsi_reference")
     legacy["official_snapshot"] = parsed
+    legacy["freshness_note"] = parsed.get("freshness_note", "")
     if preview is not None:
         if isinstance(preview, Mapping):
             preview_view = dict(preview)

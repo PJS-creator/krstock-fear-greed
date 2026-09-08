@@ -68,7 +68,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Install scraper runtime dependencies
         run: |
@@ -83,6 +83,37 @@ jobs:
 
       - name: Verify dashboard imports
         run: python -c "import streamlit, pandas, plotly, supabase, FinanceDataReader, yfinance; print('dashboard deps ok')"
+
+      - name: Test deployed Python runtime
+        run: |
+          python -m pip install -r requirements-dev.txt -r requirements-meta-strategy.txt
+          pytest -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install browser test runtime
+        run: |
+          npm install --no-save --package-lock=false --prefix .browser-deps playwright@1.62.1
+          .browser-deps/node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Public dashboard browser regression
+        timeout-minutes: 10
+        env:
+          NODE_PATH: ${{ github.workspace }}/.browser-deps/node_modules
+        run: |
+          node --test tests/browser/render_sync.test.cjs
+          node tests/browser/smoke.cjs
+
+      - name: Upload browser screenshots and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-regression
+          path: test-results/browser/
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Smoke test simple dashboard
         run: |

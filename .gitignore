@@ -10,3 +10,5 @@ android-webview/local.properties
 android-webview/**/build/
 *.apk
 meta-strategy-audit/
+.browser-deps/
+test-results/

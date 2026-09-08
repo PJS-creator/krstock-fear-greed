@@ -114,16 +114,25 @@ def portfolio_payloads_match(left: Mapping[str, Any], right: Mapping[str, Any]) 
         return False
 
 
+_UNGUARDED = object()
+
+
 def save_portfolio_with_verification(
     store: PortfolioStore,
     owner_id: str,
     portfolio_name: str,
     payload: Mapping[str, Any],
+    *, expected_updated_at: str | None | object = _UNGUARDED,
 ) -> PortfolioRecord:
     """Persist a portfolio and verify that the same user-scoped row can be read back."""
 
     clean_payload = deserialize_portfolio_payload_v2(payload)
-    store.save_portfolio(owner_id, portfolio_name, clean_payload)
+    if expected_updated_at is _UNGUARDED:
+        store.save_portfolio(owner_id, portfolio_name, clean_payload)
+    else:
+        store.save_portfolio_if_unchanged(
+            owner_id, portfolio_name, clean_payload, expected_updated_at=expected_updated_at,
+        )
     confirmed = store.get_portfolio(owner_id, portfolio_name)
     if confirmed is None:
         raise PortfolioStoreError("저장 결과를 다시 확인할 수 없습니다")
