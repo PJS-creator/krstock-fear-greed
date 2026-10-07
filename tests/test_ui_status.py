@@ -7,6 +7,7 @@ from app.ui.status import (
     build_price_log_rows,
     dirty_signature,
     infer_market_from_ticker,
+    merge_price_statuses,
     parse_bulk_input,
     prepare_quick_input_records,
     present_diagnostic,
@@ -87,7 +88,7 @@ def test_price_refresh_target_selection_modes():
     ]
 
     assert [row["ticker"] for row in select_price_refresh_rows(rows, "미조회/오래된 가격만")] == ["C", "D", "E"]
-    assert [row["ticker"] for row in select_price_refresh_rows(rows, "실패 종목만")] == ["C"]
+    assert [row["ticker"] for row in select_price_refresh_rows(rows, "실패 종목만")] == ["C", "E"]
     assert [row["ticker"] for row in select_price_refresh_rows(rows, "전체 강제 재조회")] == ["A", "B", "C", "D", "E"]
 
 
@@ -98,6 +99,21 @@ def test_dirty_signature_is_stable_and_sensitive_to_portfolio_changes():
 
     assert dirty_signature(base) == dirty_signature(same)
     assert dirty_signature(base) != dirty_signature(changed)
+
+
+def test_retry_includes_stale_and_missing_without_losing_other_statuses():
+    rows = [
+        {"ticker": "A", "market": "US", "quote_status": "updated"},
+        {"ticker": "B", "market": "US", "quote_status": "stale"},
+        {"ticker": "C", "market": "US", "quote_status": "failed"},
+        {"ticker": "C", "market": "KR", "quote_status": "missing_api_key"},
+    ]
+    assert [row["ticker"] for row in select_price_refresh_rows(rows, "실패 종목만")] == ["B", "C", "C"]
+    previous = [SimpleNamespace(symbol="B", market="US", status="stale")]
+    incoming = [SimpleNamespace(symbol="C", market="US", status="updated")]
+    summary = aggregate_price_statuses(merge_price_statuses(previous, incoming, rows))
+    assert (summary.total, summary.updated, summary.stale, summary.missing) == (4, 2, 1, 1)
+    assert len(merge_price_statuses(previous, incoming, rows[:1])) == 1
 
 
 def test_diagnostic_presentation_keeps_quote_status_short_and_splits_details():

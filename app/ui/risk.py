@@ -13,6 +13,8 @@ from portfolio.risk_metrics import (
     calculate_beta,
     calculate_mdd,
     filter_value_series_by_days,
+    external_flow_dates,
+    matched_interval_returns,
     pct_change_series,
     value_series_from_history_records,
     value_series_from_reconstruction_result,
@@ -187,8 +189,8 @@ def _plot_return_scatter(portfolio_returns: dict[date, float], benchmark_returns
         )
     )
     fig.update_layout(
-        xaxis_title="벤치마크 일간 수익률",
-        yaxis_title="포트폴리오 일간 수익률",
+        xaxis_title="벤치마크 동일 구간 수익률",
+        yaxis_title="포트폴리오 동일 구간 수익률",
         margin=dict(l=18, r=18, t=28, b=24),
     )
     fig.update_xaxes(ticksuffix="%", zeroline=True)
@@ -207,13 +209,13 @@ def _render_mdd_cards(result: MDDResult) -> None:
 
 def _render_beta_cards(result: BetaResult, *, benchmark_label: str, basis_label: str) -> None:
     col1, col2, col3, col4 = st.columns(4, gap="small")
-    col1.metric("Beta", format_number(result.beta, digits=2), help="벤치마크 일간 수익률 대비 포트폴리오 민감도입니다.", border=True)
+    col1.metric("참고 Beta", format_number(result.beta, digits=2), help="입출금 구간을 제외한 동일 시작·종료일 수익률의 민감도입니다. 일간 종가 Beta와 다릅니다.", border=True)
     col2.metric("R-squared", format_number(result.r_squared, digits=2), help="벤치마크 수익률이 포트폴리오 수익률 변동을 설명한 정도입니다.", border=True)
     col3.metric("관측치 수", f"{result.observations}개", border=True)
     col4.metric("벤치마크", benchmark_label, help=basis_label, border=True)
 
 
-def render_risk_analysis(*, history_records: list[object] | None, load_error: str | None = None) -> None:
+def render_risk_analysis(*, history_records: list[object] | None, load_error: str | None = None, cash_ledger=None) -> None:
     st.subheader("리스크분석")
     st.caption("MDD는 과거 관측 기간의 최대 낙폭, Beta는 선택한 벤치마크 대비 민감도입니다. 과거 지표이며 미래 손실을 보장하거나 예측하지 않습니다.")
     if load_error:
@@ -249,6 +251,7 @@ def render_risk_analysis(*, history_records: list[object] | None, load_error: st
         return
 
     _render_mdd_cards(mdd)
+    st.caption("MDD는 입출금을 포함한 총자산 낙폭이며, 입출금 효과를 제거한 투자수익률 낙폭은 아닙니다.")
     st.caption(f"계산 기준: {mdd_source} {mdd.observations}개, {values[0].date.isoformat()} ~ {values[-1].date.isoformat()}")
     if mdd.observations < 5:
         st.warning("관측치가 적어 MDD 해석에 주의가 필요합니다. 실제 기록이나 과거 보유현황 재구성 기간을 더 확보하면 안정적인 지표가 됩니다.")
@@ -263,15 +266,13 @@ def render_risk_analysis(*, history_records: list[object] | None, load_error: st
             render_plotly_chart(drawdown_fig, key="risk_drawdown")
 
     st.subheader("Beta")
-    beta_values, beta_source = _filtered_source_series(
-        actual_values=actual_values,
-        reconstructed_values=reconstructed_values,
-        days=RISK_PERIOD_DAYS[str(period_label)],
-        minimum_points=MIN_BETA_OBSERVATIONS + 1,
-    )
+    # Reconstruction snapshots may change quantities without a corresponding ledger.
+    # Do not silently substitute them for a cash-flow-auditable investment history.
+    beta_values = filter_value_series_by_days(actual_values, RISK_PERIOD_DAYS[str(period_label)])
+    beta_source = "저장된 실제 기록"
     portfolio_returns = pct_change_series(beta_values)
     if len(portfolio_returns) < MIN_BETA_OBSERVATIONS:
-        st.warning(f"Beta 계산에는 최소 {MIN_BETA_OBSERVATIONS}개 이상의 일간 수익률 관측치가 필요합니다. 현재 {len(portfolio_returns)}개입니다.")
+        st.warning(f"Beta 계산에는 최소 {MIN_BETA_OBSERVATIONS}개 이상의 실제 기록 수익률 구간이 필요합니다. 현재 {len(portfolio_returns)}개입니다.")
         return
 
     controls = st.columns([1, 1, 1], gap="small", vertical_alignment="bottom")
@@ -307,12 +308,20 @@ def render_risk_analysis(*, history_records: list[object] | None, load_error: st
                     fx_values = _load_yfinance_value_series("KRW=X", period)
                     benchmark_values = _apply_krw_fx(benchmark_values, fx_values)
                 except Exception as exc:
-                    actual_basis = "현지통화 기준"
-                    st.warning(f"USD/KRW 환율 시계열을 가져오지 못해 현지통화 기준 Beta로 계산합니다: {exc}")
+                    st.warning(f"USD/KRW 환율 시계열이 없어 선택한 KRW 기준 Beta를 계산할 수 없습니다: {exc}")
+                    return
 
             benchmark_values = filter_value_series_by_days(benchmark_values, RISK_PERIOD_DAYS[str(period_label)])
-            benchmark_returns = pct_change_series(benchmark_values)
             try:
+                # Include flows captured in past backups even if the current ledger was edited.
+                ledger = list(cash_ledger or [])
+                for record in history_records or []:
+                    backup = (getattr(record, "payload_json", {}) or {}).get("portfolio_backup", {})
+                    ledger.extend(backup.get("cash_ledger_entries", []) or [])
+                portfolio_returns, benchmark_returns, skipped = matched_interval_returns(
+                    beta_values, benchmark_values, excluded_dates=external_flow_dates(ledger),
+                )
+                st.caption(f"동일 시작·종료일 비교 {len(portfolio_returns)}구간 · 입출금/현금 조정으로 제외 {skipped}구간")
                 beta = calculate_beta(portfolio_returns, benchmark_returns, min_observations=MIN_BETA_OBSERVATIONS)
             except ValueError as exc:
                 st.warning(f"Beta를 계산할 수 없습니다: {exc}")
@@ -320,7 +329,8 @@ def render_risk_analysis(*, history_records: list[object] | None, load_error: st
 
             _render_beta_cards(beta, benchmark_label=f"{benchmark_label} ({symbol})", basis_label=actual_basis)
             if beta.start_date and beta.end_date:
-                st.caption(f"Beta 사용 기간: {beta_source}, {beta.start_date.isoformat()} ~ {beta.end_date.isoformat()}, 날짜 inner join 후 관측치 {beta.observations}개")
+                st.caption(f"Beta 사용 기간: {beta_source}, {beta.start_date.isoformat()} ~ {beta.end_date.isoformat()}, 동일 구간 {beta.observations}개")
+            st.caption("저장 시각과 시장 종가 시각은 다를 수 있고 구간 길이도 일정하지 않습니다. 정식 일간 종가 Beta가 아닌 참고값입니다. 기록하지 않은 입출금·보유수량 변경은 보정할 수 없습니다.")
             scatter = _plot_return_scatter(portfolio_returns, benchmark_returns)
             if scatter is not None:
                 render_plotly_chart(scatter, key="risk_beta_scatter")

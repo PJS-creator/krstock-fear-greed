@@ -33,6 +33,10 @@ _SIGNATURE_KEY = "chart_analysis_holdings_signature"
 _RESULT_SCHEMA = "consecutive-closes-v1"
 _CHECKED_KEY = "chart_analysis_checked_at"
 _BATCH_BUDGET_SECONDS = 24.0
+_AUTO_CONTINUE_KEY = "chart_analysis_auto_continue"
+_NEXT_BATCH_KEY = "chart_analysis_next_batch_at"
+_AUTO_BATCHES_KEY = "chart_analysis_auto_batches"
+_CONTINUE_INTERVAL_SECONDS = 3.0
 LOGGER = logging.getLogger(__name__)
 ATTENTION_SCORE_THRESHOLD = 70.0
 ATTENTION_DELTA_THRESHOLD = 14.0
@@ -110,7 +114,7 @@ def _load_chart_analysis(
             result = ChartAnalysisResult(
                 instrument=AnalysisInstrument(market=item[0], symbol=item[1], display_name=item[2]),
                 readiness="PENDING",
-                error="조회 시간 한도: 미완료 종목 다시 조회를 눌러 이어서 조회하세요.",
+                error="조회 시간 한도: 다음 묶음에서 이어서 조회합니다.",
             )
         else:
             try:
@@ -167,6 +171,21 @@ def retry_payload(payload, previous):
         if (result := by_key.get(f"{item[0]}:{item[1]}")) is None or _needs_query_retry(result)
     )
     return tuple(sorted(requested, key=priority))
+
+
+def deferred_payload(payload, previous):
+    by_key = {result.instrument.key: result for result in previous}
+    return tuple(item for item in payload if (
+        (result := by_key.get(f"{item[0]}:{item[1]}")) is None or _is_query_deferred(result)
+    ))
+
+
+def can_continue_batch(payload, previous, incoming, *, batches: int) -> bool:
+    # Only unattempted work advances automatically. Permanent errors require an
+    # explicit retry, and a no-progress batch cannot spin forever.
+    before = len(deferred_payload(payload, previous))
+    after = len(deferred_payload(payload, incoming))
+    return 0 < after < before and batches < len(payload)
 
 
 def merge_analysis_batch(payload, previous, incoming):
@@ -655,6 +674,16 @@ def render_chart_analysis(
     auto_load: bool,
     kis_provider: KisDailyHistoryProvider | None = None,
 ) -> None:
+    interval = _CONTINUE_INTERVAL_SECONDS if st.session_state.get(_AUTO_CONTINUE_KEY) else None
+    st.fragment(run_every=interval)(_render_chart_analysis)(
+        holdings, auto_load=auto_load, kis_provider=kis_provider, query_loader=_load_chart_analysis,
+    )
+
+
+def _render_chart_analysis(
+    holdings: Iterable[Mapping[str, object]], *, auto_load: bool,
+    kis_provider: KisDailyHistoryProvider | None = None, query_loader=_load_chart_analysis,
+) -> None:
     st.markdown("<h2 class='chart-analysis-title'>차트분석</h2>", unsafe_allow_html=True)
     st.caption(
         "현재 보유종목의 직전 완료 정규장 일봉을 동일 기준으로 분석합니다. "
@@ -662,6 +691,9 @@ def render_chart_analysis(
     )
     instruments = holdings_to_analysis_instruments(holdings)
     if not instruments:
+        if st.session_state.get(_AUTO_CONTINUE_KEY):
+            st.session_state[_AUTO_CONTINUE_KEY] = False
+            request_app_rerun()
         render_empty_state(
             "분석할 보유종목이 없습니다.",
             "사용자입력에서 국내 또는 미국 주식 보유수량을 입력한 뒤 다시 확인하세요.",
@@ -674,10 +706,13 @@ def render_chart_analysis(
         st.session_state[_SIGNATURE_KEY] = signature
         st.session_state.pop(_RESULTS_KEY, None)
         st.session_state.pop(_CHECKED_KEY, None)
+        st.session_state[_AUTO_CONTINUE_KEY] = False
+        st.session_state[_AUTO_BATCHES_KEY] = 0
 
     previous = tuple(st.session_state.get(_RESULTS_KEY) or ())
     retries = retry_payload(payload, previous) if previous else ()
     retry_pending = bool(retries)
+    auto_running = bool(st.session_state.get(_AUTO_CONTINUE_KEY))
     pending_count = chart_query_counts(previous)["pending"]
     action_label = (
         f"남은 {len(retries)}개 이어서 조회" if pending_count else "실패 종목 다시 조회"
@@ -687,14 +722,25 @@ def render_chart_analysis(
         type="primary",
         icon=":material/candlestick_chart:",
         key="chart_analysis_refresh",
+        disabled=auto_running,
     )
+    if auto_running:
+        if st.button("이어 조회 중지", icon=":material/pause:", key="chart_analysis_pause"):
+            st.session_state[_AUTO_CONTINUE_KEY] = False
+            request_app_rerun()
+        st.caption("남은 종목을 자동으로 이어서 조회 중입니다. 완료된 점수는 유지되며 실패 종목은 반복 호출하지 않습니다.")
     if action_clicked and not retry_pending:
         for item in payload:
             _load_single_chart_analysis.clear(item, kis_provider is not None, kis_provider, result_schema=_RESULT_SCHEMA)
-    should_load = action_clicked or (auto_load and refresh_due(st.session_state, _CHECKED_KEY, ttl_seconds=1800))
+    automatic_batch = auto_running and time.monotonic() >= st.session_state.get(_NEXT_BATCH_KEY, 0)
+    should_load = action_clicked or automatic_batch or (
+        not auto_running and auto_load and refresh_due(st.session_state, _CHECKED_KEY, ttl_seconds=1800)
+    )
     if should_load:
-        continuing = action_clicked and retry_pending
-        requested = retries if continuing else payload
+        continuing = automatic_batch or (action_clicked and retry_pending)
+        requested = deferred_payload(payload, previous) if automatic_batch else (retries if continuing else payload)
+        if not automatic_batch:
+            st.session_state[_AUTO_BATCHES_KEY] = 0
         if continuing:
             previous_by_key = {row.instrument.key: row for row in previous}
             for item in requested:
@@ -704,13 +750,23 @@ def render_chart_analysis(
         mark_checked(st.session_state, _CHECKED_KEY)
         with st.spinner(f"보유종목 {len(requested)}개의 완료 일봉을 조회하고 있습니다..."):
             try:
-                incoming = _load_chart_analysis(requested, kis_provider is not None, kis_provider, result_schema=_RESULT_SCHEMA)
-                st.session_state[_RESULTS_KEY] = merge_analysis_batch(payload, previous, incoming)
+                incoming = query_loader(requested, kis_provider is not None, kis_provider, result_schema=_RESULT_SCHEMA)
+                merged = merge_analysis_batch(payload, previous, incoming)
+                st.session_state[_RESULTS_KEY] = merged
+                batches = st.session_state.get(_AUTO_BATCHES_KEY, 0) + 1
+                st.session_state[_AUTO_BATCHES_KEY] = batches
+                # A fresh full refresh must compare against its requested set,
+                # not the previous cycle's already-complete results.
+                baseline = previous if continuing else ()
+                st.session_state[_AUTO_CONTINUE_KEY] = can_continue_batch(payload, baseline, merged, batches=batches)
+                st.session_state[_NEXT_BATCH_KEY] = time.monotonic() + _CONTINUE_INTERVAL_SECONDS
                 st.session_state.pop("chart_analysis_refresh_error", None)
             except Exception:
+                st.session_state[_AUTO_CONTINUE_KEY] = False
                 st.session_state["chart_analysis_refresh_error"] = "차트분석 조회 실패 · 이전 결과를 유지합니다."
-            else:
-                # Update the button's remaining count before the next user click.
+            if not automatic_batch or auto_running != bool(st.session_state.get(_AUTO_CONTINUE_KEY)):
+                # Re-register the timer only when starting/stopping. Intermediate
+                # fragment runs leave the rest of the dashboard untouched.
                 request_app_rerun()
     if st.session_state.get("chart_analysis_refresh_error"):
         st.warning(st.session_state["chart_analysis_refresh_error"])

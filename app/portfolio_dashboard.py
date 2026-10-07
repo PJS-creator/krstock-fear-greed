@@ -64,7 +64,7 @@ from app.ui.persistence_state import BASE_VERSION_KEY, SAVE_CONFLICT_KEY, expect
 from app.ui.freshness import mark_checked, refresh_due
 from portfolio.snapshot_freshness import with_publication_health
 from app.ui.rebalancing import render_rebalancing
-from app.ui.status import aggregate_price_statuses, dirty_signature, select_price_refresh_rows
+from app.ui.status import aggregate_price_statuses, dirty_signature, merge_price_statuses, select_price_refresh_rows
 from app.ui.status import quote_status_label
 from app.ui.stability import (
     begin_ui_action,
@@ -1455,13 +1455,15 @@ def _refresh_price_rows(
         us_provider,
         korea_provider=korea_provider,
         intraday_provider=intraday_provider,
-        cache=TTLQuoteCache() if mode == "전체 강제 재조회" else None,
+        cache=TTLQuoteCache() if mode in {"전체 강제 재조회", "실패 종목만"} else None,
         on_progress=on_progress,
         max_refresh_seconds=PRICE_REFRESH_BUDGET_SECONDS,
     )
     updated_by_key = {(str(row.get("market")), str(row.get("ticker"))): row for row in updated_rows}
     st.session_state.holdings_rows = [updated_by_key.get((str(row.get("market")), str(row.get("ticker"))), row) for row in all_rows]
-    st.session_state.price_update_statuses = statuses
+    st.session_state.price_update_statuses = merge_price_statuses(
+        st.session_state.get("price_update_statuses") or [], statuses, st.session_state.holdings_rows,
+    )
     fetched_times = [status.fetched_at for status in statuses if status.fetched_at]
     if fetched_times:
         st.session_state.last_price_refresh_at = max(fetched_times)
@@ -2324,7 +2326,7 @@ def _render_sidebar(config: AppSecurityConfig, owner_id, store, *, public_auth_e
             _render_data_source_info()
         with st.expander("가격 조회 옵션", expanded=False):
             st.caption("현재가 갱신은 보유 중인 모든 종목과 USD/KRW 환율을 캐시 없이 다시 조회합니다.")
-            st.caption("실패 종목 재시도 버튼은 실패한 종목만 다시 조회합니다.")
+            st.caption("미완료 가격 재조회는 이전 저장값 사용·조회 실패·미조회 종목을 다시 조회합니다.")
 
 
 def _render_header(config: AppSecurityConfig, owner_id, store, target_allocation_store, history_store, metrics, *, public_auth_enabled: bool = False) -> None:
@@ -2343,7 +2345,7 @@ def _render_header(config: AppSecurityConfig, owner_id, store, target_allocation
         refresh_disabled=in_progress,
         retry_disabled=in_progress,
         save_disabled=not dirty or owner_id is None or store is None,
-        show_retry=bool(summary.failed),
+        show_retry=bool(select_price_refresh_rows(st.session_state.holdings_rows, "실패 종목만")),
         show_save=not public_auth_enabled,
     )
     if actions["refresh"]:

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import math
+import re
 import json
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 from urllib.error import URLError
@@ -27,7 +29,8 @@ def normalize_yfinance_symbol(symbol: object) -> str:
     text = str(symbol or "").strip().upper()
     if not text:
         raise ValueError("미국 주식 ticker가 비어 있습니다.")
-    return text
+    # Yahoo uses a hyphen for US class shares; exchange suffixes stay unchanged.
+    return re.sub(r"^([A-Z]+)\.([AB])$", r"\1-\2", text)
 
 
 def _as_non_negative_float(value: object, field_name: str) -> float:
@@ -195,7 +198,8 @@ class YFinanceQuoteProvider:
             raise
         except Exception as exc:
             raise PriceProviderError(f"yfinance 최근 제공 가격 조회 실패: {normalized_symbol}") from exc
-        return parse_yfinance_history_frame(normalized_symbol, frame)
+        # Provider aliases must not rename the user's holding or its status key.
+        return replace(parse_yfinance_history_frame(normalized_symbol, frame), symbol=str(symbol).strip().upper())
 
 
 def build_yfinance_provider(*, timeout_seconds: float = 10.0) -> YFinanceQuoteProvider:

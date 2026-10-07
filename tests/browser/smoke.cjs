@@ -12,8 +12,7 @@ fs.mkdirSync(output, { recursive: true });
 const port = process.env.UI_TEST_PORT || '8591';
 const base = `http://127.0.0.1:${port}`;
 const server = spawn(process.env.UI_TEST_PYTHON || 'python', [
-  '-m', 'streamlit', 'run', 'tests/browser/fixture_app.py', '--server.headless=true',
-  `--server.port=${port}`, '--browser.gatherUsageStats=false',
+  'tests/browser/serve_fixture.py', port,
 ], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 const log = fs.createWriteStream(path.join(output, 'streamlit.log'));
 server.stdout.pipe(log, { end: false });
@@ -32,6 +31,14 @@ async function assertScreen(page, name, expected, { hasDetail = true } = {}) {
     return main ? main.scrollWidth - main.clientWidth : document.documentElement.scrollWidth - innerWidth;
   });
   assert.ok(overflow <= 2, `${name}: horizontal overflow ${overflow}px`);
+  const headerOverlap = await page.evaluate(() => {
+    const button = document.querySelector('.st-key-app_header_refresh button');
+    const meta = document.querySelector('.app-header-refresh-meta');
+    if (!button || !meta) return false;
+    const a = button.getBoundingClientRect(), b = meta.getBoundingClientRect();
+    return a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  });
+  assert.equal(headerOverlap, false, `${name}: refresh/timestamp overlap`);
   await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: true });
   if (hasDetail) {
     const selector = expected.section === 'chart_analysis' ? '.chart-analysis-table' : '.summary-table-wrap';
@@ -64,6 +71,15 @@ async function assertScreen(page, name, expected, { hasDetail = true } = {}) {
         await page.getByRole('radiogroup', { name: '테마', exact: true }).getByText(nextTheme === 'light' ? '라이트' : '다크', { exact: true }).click();
         await assertScreen(page, `${width}-${theme}-theme-switch`, { after: revision, theme: nextTheme, section: 'chart_analysis' });
         assert.ok(await page.getByRole('radio', { name: '차트분석', exact: true }).isChecked());
+        await page.getByRole('radiogroup', { name: '화면 선택', exact: true }).getByText('리밸런싱', { exact: true }).click();
+        await waitForFixtureRender(page, { theme: nextTheme, section: 'rebalancing' });
+        await page.waitForFunction(mode => {
+          const canvas = document.querySelector('[data-testid="stDataFrame"] canvas');
+          if (!canvas) return false;
+          const cell = getComputedStyle(canvas).getPropertyValue('--gdg-bg-cell').trim().toLowerCase();
+          return cell === (mode === 'light' ? '#ffffff' : '#111827');
+        }, nextTheme);
+        await assertScreen(page, `${width}-${nextTheme}-native-table`, { theme: nextTheme, section: 'rebalancing' }, { hasDetail: false });
         await page.close();
       }
     }
@@ -77,7 +93,25 @@ async function assertScreen(page, name, expected, { hasDetail = true } = {}) {
       await assertScreen(page, `390-${scenario}`, { theme: 'light', section: 'summary' }, { hasDetail: scenario === 'partial' });
       await page.close();
     }
-    console.log('Browser regression checks passed: 3 viewports, 2 themes, theme persistence and login/empty/partial states.');
+    const batchPage = await browser.newPage();
+    await batchPage.goto(`${base}/?scenario=batched&theme=dark`);
+    await waitForFixtureRender(batchPage, { theme: 'dark', section: 'summary' });
+    await batchPage.getByRole('radiogroup', { name: '화면 선택', exact: true }).getByText('차트분석', { exact: true }).click();
+    // The initial refresh button exists before the first batch starts. Wait for
+    // the completed render acknowledgement of the timer-driven second batch.
+    await batchPage.waitForFunction(() => {
+      const markers = document.querySelectorAll('[data-qa-section="chart_analysis"][data-qa-batches]');
+      const marker = markers[markers.length - 1];
+      return marker && JSON.parse(marker.getAttribute('data-qa-batches')).length >= 2;
+    }, null, { timeout: 30000 });
+    await waitForFixtureRender(batchPage, { theme: 'dark', section: 'chart_analysis' });
+    await batchPage.getByText('산출 완료 2/2', { exact: true }).waitFor();
+    assert.ok(await batchPage.getByRole('button', { name: 'candlestick_chart 일봉 데이터 새로고침', exact: true }).isEnabled());
+    assert.equal(await batchPage.getByRole('button', { name: 'pause 이어 조회 중지', exact: true }).count(), 0);
+    const batches = JSON.parse(await batchPage.locator('[data-qa-batches]').last().getAttribute('data-qa-batches'));
+    assert.deepEqual(batches, [['005930', 'MSFT'], ['MSFT']], 'automatic batches must preserve completed queries');
+    await batchPage.close();
+    console.log('Browser regression checks passed: responsive headers, native table themes, state persistence and automatic batches.');
   } finally {
     if (browser) await browser.close();
     server.kill();

@@ -93,7 +93,8 @@ def test_theme_css_keeps_metric_and_radio_text_readable():
     assert '[data-testid="stTooltipIcon"]' in source
     assert '[data-testid="stTooltipHoverTarget"]' in source
     assert 'color: var(--app-text) !important;' in source
-    assert 'div[data-testid="stDataFrame"] canvas' in source
+    assert 'sync_native_theme(theme_mode)' in source
+    assert 'div[data-testid="stDataFrame"] canvas' not in source
     assert ".app-data-table-wrap" in source
     assert ".holdings-data-table-wrap" in source
     assert 'div[data-testid="stDataEditor"] [role="columnheader"]' in source
