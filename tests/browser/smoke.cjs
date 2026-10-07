@@ -97,8 +97,17 @@ async function assertScreen(page, name, expected, { hasDetail = true } = {}) {
     await batchPage.goto(`${base}/?scenario=batched&theme=dark`);
     await waitForFixtureRender(batchPage, { theme: 'dark', section: 'summary' });
     await batchPage.getByRole('radiogroup', { name: '화면 선택', exact: true }).getByText('차트분석', { exact: true }).click();
-    await batchPage.getByRole('button', { name: 'candlestick_chart 일봉 데이터 새로고침', exact: true }).waitFor();
+    // The initial refresh button exists before the first batch starts. Wait for
+    // the completed render acknowledgement of the timer-driven second batch.
+    await batchPage.waitForFunction(() => {
+      const markers = document.querySelectorAll('[data-qa-section="chart_analysis"][data-qa-batches]');
+      const marker = markers[markers.length - 1];
+      return marker && JSON.parse(marker.getAttribute('data-qa-batches')).length >= 2;
+    }, null, { timeout: 30000 });
     await waitForFixtureRender(batchPage, { theme: 'dark', section: 'chart_analysis' });
+    await batchPage.getByText('산출 완료 2/2', { exact: true }).waitFor();
+    assert.ok(await batchPage.getByRole('button', { name: 'candlestick_chart 일봉 데이터 새로고침', exact: true }).isEnabled());
+    assert.equal(await batchPage.getByRole('button', { name: 'pause 이어 조회 중지', exact: true }).count(), 0);
     const batches = JSON.parse(await batchPage.locator('[data-qa-batches]').last().getAttribute('data-qa-batches'));
     assert.deepEqual(batches, [['005930', 'MSFT'], ['MSFT']], 'automatic batches must preserve completed queries');
     await batchPage.close();
