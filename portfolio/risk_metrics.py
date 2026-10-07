@@ -8,6 +8,7 @@ from typing import Any
 
 
 MIN_BETA_OBSERVATIONS = 20
+EXTERNAL_FLOW_TYPES = {"deposit", "withdrawal", "opening_balance", "manual_adjustment"}
 
 
 @dataclass(frozen=True)
@@ -96,11 +97,16 @@ def normalize_value_series(rows: Iterable[ValuePoint | Mapping[str, Any] | tuple
 
 
 def value_series_from_history_records(records: Iterable[Any]) -> list[ValuePoint]:
+    def captured_time(record: Any) -> datetime:
+        raw = getattr(record, "captured_at", None)
+        parsed = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+
     rows = []
-    for record in records:
+    for record in sorted(records, key=captured_time):
         rows.append(
             {
-                "date": getattr(record, "captured_at", None),
+                "date": captured_time(record).astimezone(timezone(timedelta(hours=9))).date(),
                 "value": getattr(record, "total_value_krw", None),
             }
         )
@@ -180,6 +186,39 @@ def pct_change_series(series: Iterable[ValuePoint]) -> dict[date, float]:
             continue
         returns[current.date] = current.value / previous.value - 1.0
     return returns
+
+
+def external_flow_dates(cash_ledger: Iterable[Mapping[str, Any]]) -> set[date]:
+    """Unknown intraday flow timing cannot support an exact TWR adjustment."""
+    return {
+        _to_date(row.get("event_date"))
+        for row in cash_ledger
+        if row.get("event_type") in EXTERNAL_FLOW_TYPES
+        and _to_finite_float(row.get("amount"), field_name="cash flow") != 0
+    }
+
+
+def matched_interval_returns(
+    portfolio: Iterable[ValuePoint], benchmark: Iterable[ValuePoint],
+    *, excluded_dates: Iterable[date] = (),
+) -> tuple[dict[date, float], dict[date, float], int]:
+    """Compare identical boundaries, without forward-filling missing valuations.
+
+    Both boundary days are excluded on a flow date because snapshots can precede
+    or follow that day's flow. Mixed-length intervals are reference beta, not daily beta.
+    """
+    benchmark_by_date = {point.date: point.value for point in normalize_value_series(benchmark)}
+    values = [point for point in normalize_value_series(portfolio) if point.date in benchmark_by_date]
+    excluded = set(excluded_dates)
+    portfolio_returns, benchmark_returns = {}, {}
+    skipped = 0
+    for previous, current in zip(values, values[1:]):
+        if any(previous.date <= day <= current.date for day in excluded):
+            skipped += 1
+            continue
+        portfolio_returns[current.date] = current.value / previous.value - 1.0
+        benchmark_returns[current.date] = benchmark_by_date[current.date] / benchmark_by_date[previous.date] - 1.0
+    return portfolio_returns, benchmark_returns, skipped
 
 
 def _normalize_return_mapping(values: Mapping[Any, Any]) -> dict[date, float]:

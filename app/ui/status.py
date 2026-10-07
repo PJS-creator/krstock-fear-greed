@@ -71,7 +71,7 @@ class PriceStatusSummary:
 
     @property
     def short_text(self) -> str:
-        return f"성공 {self.success} · 캐시 {self.cached} · 실패 {self.failed}"
+        return f"성공 {self.success} · 이전 {self.stale} · 실패 {self.failed} · 미조회 {self.missing}"
 
     @property
     def detail_text(self) -> str:
@@ -122,7 +122,7 @@ def quote_status_label(status: object) -> str:
 def select_price_refresh_rows(rows: Iterable[Mapping[str, Any]], mode: str) -> list[Mapping[str, Any]]:
     all_rows = list(rows)
     if mode == "실패 종목만":
-        return [row for row in all_rows if str(row.get("quote_status") or "").lower() == QUOTE_STATUS_FAILED]
+        return [row for row in all_rows if str(row.get("quote_status") or QUOTE_STATUS_MISSING).lower() in ISSUE_STATUSES]
     if mode == "전체 강제 재조회":
         return all_rows
     return [
@@ -131,6 +131,23 @@ def select_price_refresh_rows(rows: Iterable[Mapping[str, Any]], mode: str) -> l
         if str(row.get("quote_status") or "").lower() in DEFAULT_PRICE_REFRESH_STATUSES
         or row.get("current_price") is None
     ]
+
+
+def merge_price_statuses(previous, incoming, holdings_rows) -> list[object]:
+    """Keep a complete, market-qualified status ledger after a partial refresh."""
+    by_key = {
+        (str(_get_value(item, "market", "")).upper(), str(_get_value(item, "symbol", "")).upper()): item
+        for item in (*previous, *incoming)
+    }
+    merged = []
+    for row in holdings_rows:
+        market = str(row.get("market") or "").upper()
+        symbol = str(row.get("ticker") or row.get("symbol") or "").upper()
+        merged.append(by_key.get((market, symbol), {
+            **row, "symbol": symbol, "market": market,
+            "status": row.get("quote_status") or "missing",
+        }))
+    return merged
 
 
 def build_price_log_rows(statuses: Iterable[object], holdings_rows: Iterable[Mapping[str, Any]]) -> list[dict[str, object]]:

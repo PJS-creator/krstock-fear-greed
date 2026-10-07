@@ -104,7 +104,9 @@ def _normalize_portfolio_symbol(value: object, market: str) -> str:
 def yahoo_symbol_candidates(instrument: AnalysisInstrument) -> tuple[str, ...]:
     if instrument.market == "KR":
         return (f"{instrument.symbol}.KS", f"{instrument.symbol}.KQ")
-    return (instrument.symbol,)
+    from portfolio.pricing.yahoo_finance import normalize_yfinance_symbol
+
+    return (normalize_yfinance_symbol(instrument.symbol),)
 
 
 def fetch_yfinance_daily_histories(

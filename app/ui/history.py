@@ -79,7 +79,7 @@ def render_history_tab(
                 records = _list_history_cached(history_store, owner_id, portfolio_name, "all")
             except PortfolioHistoryStoreError as exc:
                 load_error = str(exc)
-        render_risk_analysis(history_records=records, load_error=load_error)
+        render_risk_analysis(history_records=records, load_error=load_error, cash_ledger=current_cash_ledger)
     else:
         render_historical_reconstruction_tab(
             owner_id=owner_id,

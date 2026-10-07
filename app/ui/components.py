@@ -120,14 +120,12 @@ def render_app_header(
     with left:
         st.title(title)
     with right:
-        refresh_col, meta_col = st.columns([1.0, 0.9], gap="small", vertical_alignment="center")
-        with refresh_col:
+        with st.container(key="app_header_actions"):
             refresh_clicked = st.button("가격·환율 갱신", type="primary", width="stretch", icon=":material/refresh:", key="app_header_refresh", disabled=refresh_disabled)
-        with meta_col:
             st.markdown(f"<div class='app-header-refresh-meta'>{escape(status_text)}</div>", unsafe_allow_html=True)
         retry_clicked = False
         if show_retry:
-            retry_clicked = st.button("실패 재시도", width="stretch", icon=":material/replay:", key="app_header_retry", disabled=retry_disabled)
+            retry_clicked = st.button("미완료 가격 재조회", width="stretch", icon=":material/replay:", key="app_header_retry", disabled=retry_disabled)
         save_clicked = False
         if show_save:
             save_clicked = st.button("포트폴리오 저장", disabled=save_disabled, width="stretch", icon=":material/save:", key="app_header_save")

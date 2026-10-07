@@ -1,5 +1,7 @@
 """Local/CI-only fixture using the public dashboard with synthetic data and no credentials."""
 from contextlib import ExitStack
+from html import escape
+import json
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -14,7 +16,7 @@ import streamlit as st
 from app import portfolio_dashboard as dashboard
 from app.ui import chart_analysis
 from portfolio.auth import AppSecurityConfig
-from portfolio.chart_analysis import AnalysisInstrument, DailyHistoryInput, analyze_daily_history
+from portfolio.chart_analysis import AnalysisInstrument, ChartAnalysisResult, DailyHistoryInput, analyze_daily_history
 from portfolio.storage import SupabaseStorageConfig
 
 
@@ -28,15 +30,19 @@ def synthetic_refresh(*args, **kwargs):
 
 
 def analysis(payload, *args, **kwargs):
+    st.session_state.setdefault("qa_query_batches", []).append([item[1] for item in payload])
     values = 100 + np.arange(400) * 0.2 + np.sin(np.arange(400) / 8) * 8
     frame = pd.DataFrame({
         "timestamp": pd.bdate_range(end="2026-09-04", periods=400),
         "open": values, "high": values + 2, "low": values - 2,
         "close": values, "volume": 10000, "traded_value": values * 10000,
     })
-    return tuple(analyze_daily_history(DailyHistoryInput(
+    results = tuple(analyze_daily_history(DailyHistoryInput(
         instrument=AnalysisInstrument(market, symbol, name), frame=frame, provider="QA fixture",
     )) for market, symbol, name in payload)
+    if st.query_params.get("scenario") == "batched" and len(results) > 1:
+        return (results[0], *(ChartAnalysisResult(row.instrument, readiness="PENDING") for row in results[1:]))
+    return results
 
 
 def acknowledge_render():
@@ -45,7 +51,8 @@ def acknowledge_render():
     st.markdown(
         f'<span data-qa-render="{st.session_state.qa_render_id}" '
         f'data-qa-theme="{st.session_state.app_theme_mode}" '
-        f'data-qa-section="{section}" hidden></span>',
+        f'data-qa-section="{section}" '
+        f'data-qa-batches="{escape(json.dumps(st.session_state.get("qa_query_batches", [])), quote=True)}" hidden></span>',
         unsafe_allow_html=True,
     )
 

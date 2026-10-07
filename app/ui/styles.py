@@ -5,6 +5,7 @@ import streamlit as st
 
 from .formatters import compact_krw, full_krw, percentage
 from .theme import DEFAULT_THEME_MODE, SEMANTIC_COLORS, get_app_theme
+from .native_theme import sync_native_theme
 
 PALETTE = SEMANTIC_COLORS
 pct = percentage
@@ -12,6 +13,7 @@ pct = percentage
 
 def inject_styles(theme_mode: str = DEFAULT_THEME_MODE) -> None:
     theme = get_app_theme(theme_mode)
+    sync_native_theme(theme_mode)
     css_vars = "\n".join(f"            --{name}: {value};" for name, value in theme.css_variables().items())
     st.markdown(
         """
@@ -21,6 +23,7 @@ def inject_styles(theme_mode: str = DEFAULT_THEME_MODE) -> None:
             --app-font-family: "Pretendard Variable", Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 __CSS_VARS__
         }
+        .st-key-native_theme_bridge { display: none; }
         html, body, .stApp, [data-testid="stAppViewContainer"], button, input, textarea, select {
             font-family: var(--app-font-family);
         }
@@ -289,9 +292,7 @@ __CSS_VARS__
         div[data-testid="stDataFrame"] [role="rowgroup"],
         div[data-testid="stDataEditor"] [role="rowgroup"],
         div[data-testid="stDataFrame"] [role="gridcell"],
-        div[data-testid="stDataEditor"] [role="gridcell"],
-        div[data-testid="stDataFrame"] canvas,
-        div[data-testid="stDataEditor"] canvas {
+        div[data-testid="stDataEditor"] [role="gridcell"] {
             background: var(--app-panel) !important;
         }
         div[data-testid="stDataFrame"] [role="columnheader"],
@@ -794,6 +795,15 @@ __CSS_VARS__
             white-space: nowrap !important;
             word-break: keep-all !important;
             line-height: 1 !important;
+        }
+        .st-key-app_header_actions {
+            max-width: 240px;
+            margin-left: auto;
+        }
+        .st-key-app_header_actions [data-testid="stVerticalBlock"] { gap: var(--token-space-1); }
+        .st-key-app_header_actions .app-header-refresh-meta {
+            text-align: left;
+            overflow-wrap: anywhere;
         }
         .st-key-app_header_refresh button {
             width: 190px !important;
@@ -1529,6 +1539,7 @@ __CSS_VARS__
                 line-height: 1.3;
                 text-align: left;
             }
+            .st-key-app_header_actions { max-width: none; margin-left: 0; }
             .st-key-app_header_refresh {
                 display: flex;
                 justify-content: center;
