@@ -122,6 +122,13 @@ class SupabaseAuthStore:
             raise SupabaseAuthError("저장된 로그인 세션이 만료되었습니다.")
         return account
 
+    def sign_out(self) -> None:
+        try:
+            # The default is global; logging out here must not disconnect other devices.
+            self._client.auth.sign_out({"scope": "local"})
+        except Exception as exc:
+            raise SupabaseAuthError("현재 로그인 세션을 종료할 수 없습니다.") from exc
+
     def sign_up(self, email: object | None, password: object | None, *, email_redirect_to: object | None = None) -> SupabaseSignupResult:
         clean_email = normalize_email(email)
         clean_password = validate_password(password)

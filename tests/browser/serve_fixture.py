@@ -13,6 +13,8 @@ routes._DEFAULT_ALLOWED_MESSAGE_ORIGINS.extend([
 ])
 options = {
     "server.port": port, "server.headless": True, "browser.gatherUsageStats": False,
+    "server.address": "127.0.0.1",
 }
 bootstrap.load_config_options(flag_options=options)
-bootstrap.run(str(Path(__file__).with_name("fixture_app.py")), False, [], options)
+fixture = "auth_fixture.py" if len(sys.argv) > 2 and sys.argv[2] == "auth" else "fixture_app.py"
+bootstrap.run(str(Path(__file__).with_name(fixture)), False, [], options)
