@@ -8,11 +8,13 @@ import streamlit as st
 from portfolio.session_persistence import DEFAULT_REMEMBER_DAYS, SESSION_COOKIE_NAME
 
 _COOKIE_MANAGER_KEY = "_auth_cookie_manager_for_run"
+_COOKIE_DELETE_KEY = "_auth_cookie_deleted_for_run"
 
 
 def begin_cookie_run() -> None:
     # Re-read this browser's component on each rerun, once per script execution.
     st.session_state.pop(_COOKIE_MANAGER_KEY, None)
+    st.session_state.pop(_COOKIE_DELETE_KEY, None)
 
 
 class CookieManagerLike(Protocol):
@@ -60,9 +62,15 @@ def get_remember_cookie(cookie_manager: CookieManagerLike | None) -> str | None:
 
 
 def delete_remember_cookie(cookie_manager: CookieManagerLike | None) -> None:
-    if cookie_manager is None:
+    if cookie_manager is None or st.session_state.get(_COOKIE_DELETE_KEY):
         return
     try:
-        cookie_manager.delete(SESSION_COOKIE_NAME)
+        # Expire the root cookie even when getAll has not returned yet. The
+        # library's delete() also indexes its possibly empty local snapshot.
+        cookie_manager.set(
+            SESSION_COOKIE_NAME, "", key="public_auth_cookie_clear", path="/",
+            expires_at=datetime(1970, 1, 1), max_age=0, secure=True, same_site="strict",
+        )
+        st.session_state[_COOKIE_DELETE_KEY] = True
     except Exception:
         return

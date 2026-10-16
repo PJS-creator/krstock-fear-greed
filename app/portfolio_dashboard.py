@@ -201,6 +201,8 @@ PUBLIC_AUTH_ENV_KEY = "PORTFOLIO_PUBLIC_AUTH"
 PUBLIC_AUTH_SECRET_KEY = "PUBLIC_USER_AUTH"
 AUTH_SESSION_SECRET_KEY = "AUTH_SESSION_SECRET"
 PUBLIC_LOGOUT_QUERY_KEY = "app_logout"
+PUBLIC_LOGGED_OUT_KEY = "public_auth_explicitly_logged_out"
+PUBLIC_REMEMBER_PENDING_KEY = "public_auth_remember_pending"
 UNPROTECTED_WARNING = "공개 앱에서 저장소와 직접 입력 보호를 위해 APP_PASSWORD 설정을 권장합니다."
 PUBLIC_PORTFOLIO_NAME = "main"
 APP_THEME_CHOICE_KEY = "app_theme_choice"
@@ -485,7 +487,19 @@ def _authenticate_public_account(account: SupabaseAuthAccount, *, reset_portfoli
     st.session_state[AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY] = time.time()
 
 
-def _logout(cookie_manager=None) -> None:
+def _logout(cookie_manager=None, *, public_auth_enabled: bool = False) -> None:
+    if public_auth_enabled:
+        # Cookie commands run asynchronously in the browser. Keep a durable
+        # logout intent so a stale getAll response cannot sign the user back in.
+        st.session_state[PUBLIC_LOGGED_OUT_KEY] = True
+        st.query_params[PUBLIC_LOGOUT_QUERY_KEY] = "1"
+        st.session_state[ACCOUNT_STATUS_KEY] = "로그아웃했습니다."
+        auth_store = st.session_state.get(PUBLIC_AUTH_STORE_KEY)
+        if auth_store is not None:
+            try:
+                auth_store.sign_out()
+            except SupabaseAuthError:
+                st.session_state[ACCOUNT_STATUS_KEY] = "이 화면에서는 로그아웃했습니다. 서버 세션 종료 확인에 실패해 저장된 로그인 정보도 삭제합니다."
     delete_remember_cookie(cookie_manager)
     st.session_state[AUTHENTICATED_KEY] = False
     for key in (
@@ -497,6 +511,7 @@ def _logout(cookie_manager=None) -> None:
         AUTH_SESSION_REFRESH_LAST_ATTEMPT_KEY,
         PUBLIC_AUTH_STORE_KEY,
         PUBLIC_AUTH_STORE_CONFIG_KEY,
+        PUBLIC_REMEMBER_PENDING_KEY,
         SUPABASE_STORES_KEY,
         SUPABASE_STORES_CONFIG_KEY,
         AUTO_LOAD_ATTEMPTED_KEY,
@@ -676,6 +691,8 @@ def _remember_public_auth_session(account: SupabaseAuthAccount, cookie_manager, 
 
 
 def _restore_public_auth_session(storage_config) -> bool:
+    if st.session_state.get(PUBLIC_LOGGED_OUT_KEY) or _query_param_text(PUBLIC_LOGOUT_QUERY_KEY) == "1":
+        return False
     if _is_authenticated():
         return True
     cookie_manager = get_cookie_manager()
@@ -771,13 +788,30 @@ def _render_public_auth_callback_notice() -> None:
 def _handle_public_logout_query() -> None:
     if _query_param_text(PUBLIC_LOGOUT_QUERY_KEY) != "1":
         return
-    _logout(get_cookie_manager())
-    try:
-        st.query_params.clear()
-    except Exception:
-        pass
-    request_app_rerun()
-    st.stop()
+    if not st.session_state.get(PUBLIC_LOGGED_OUT_KEY) or _is_authenticated():
+        _logout(get_cookie_manager(), public_auth_enabled=True)
+
+
+def _complete_public_sign_in(account: SupabaseAuthAccount, *, remember: bool) -> None:
+    # Only an explicit successful sign-in can undo logout intent, including on reload.
+    st.session_state.pop(PUBLIC_LOGGED_OUT_KEY, None)
+    st.query_params.pop(PUBLIC_LOGOUT_QUERY_KEY, None)
+    _authenticate_public_account(account)
+    # The sign-in handler immediately reruns. Mount the cookie command on the
+    # authenticated render so that it can finish before its iframe is removed.
+    st.session_state[PUBLIC_REMEMBER_PENDING_KEY] = remember
+
+
+def _flush_pending_public_auth_cookie() -> None:
+    if not _is_authenticated() or PUBLIC_REMEMBER_PENDING_KEY not in st.session_state:
+        return
+    remember = st.session_state.pop(PUBLIC_REMEMBER_PENDING_KEY)
+    account = SupabaseAuthAccount(
+        account_id=st.session_state[ACCOUNT_ID_KEY], owner_id=st.session_state[OWNER_ID_KEY],
+        access_token=st.session_state[AUTH_ACCESS_TOKEN_KEY],
+        refresh_token=st.session_state[AUTH_REFRESH_TOKEN_KEY],
+    )
+    _remember_public_auth_session(account, get_cookie_manager(), remember=remember)
 
 
 def _apply_pending_portfolio_state() -> None:
@@ -945,8 +979,7 @@ def _render_public_auth_gate(storage_config) -> None:
             except (SupabaseAuthValidationError, SupabaseAuthError) as exc:
                 st.error(str(exc))
             else:
-                _authenticate_public_account(account)
-                _remember_public_auth_session(account, cookie_manager, remember=remember_login)
+                _complete_public_sign_in(account, remember=remember_login)
                 request_app_rerun()
 
     with signup_tab:
@@ -972,11 +1005,14 @@ def _render_public_auth_gate(storage_config) -> None:
                     st.error(str(exc))
                 else:
                     if result.account is not None:
-                        _authenticate_public_account(result.account)
-                        _remember_public_auth_session(result.account, cookie_manager, remember=remember_signup)
+                        _complete_public_sign_in(result.account, remember=remember_signup)
                         request_app_rerun()
                     if result.confirmation_required:
                         st.success("회원가입 요청을 보냈습니다. Supabase Auth 설정에서 이메일 확인이 켜져 있으면 메일 확인 후 로그인하세요.")
+    if st.session_state.get(PUBLIC_LOGGED_OUT_KEY):
+        # Leave the deletion component mounted through a completed login render,
+        # rather than cancelling it with another immediate rerun.
+        delete_remember_cookie(cookie_manager)
     st.stop()
 
 
@@ -987,7 +1023,7 @@ def _render_security_status(config: AppSecurityConfig, *, public_auth_enabled: b
             account_id = st.session_state.get(ACCOUNT_ID_KEY) or "account"
             st.caption(f"상태: 로그인됨 · {account_id}")
             if st.button("로그아웃", icon=":material/logout:"):
-                _logout(get_cookie_manager())
+                _logout(get_cookie_manager(), public_auth_enabled=True)
                 request_app_rerun()
             return
         if not config.has_password:
@@ -2556,6 +2592,8 @@ def run_dashboard(*, public_auth_enabled: bool | None = None) -> None:
         inject_public_cloud_chrome_guard()
     _initialize_session_state(public_auth_enabled=public_auth_enabled)
     security_config = _read_security_config()
+    if public_auth_enabled:
+        _handle_public_logout_query()
     storage_config = _read_storage_config(public_auth_enabled=public_auth_enabled)
     if public_auth_enabled and not _is_authenticated():
         if _restore_public_auth_session(storage_config):
@@ -2567,9 +2605,8 @@ def run_dashboard(*, public_auth_enabled: bool | None = None) -> None:
         _render_public_auth_gate(storage_config)
     if not public_auth_enabled and should_lock_entire_app(security_config, is_authenticated=_is_authenticated()):
         _render_login_form(security_config)
-    if public_auth_enabled:
-        _handle_public_logout_query()
     if public_auth_enabled and _is_authenticated():
+        _flush_pending_public_auth_cookie()
         _load_official_meta_strategy_state()
         _load_alternative_meta_strategy_state()
 

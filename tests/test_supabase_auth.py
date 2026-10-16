@@ -1,4 +1,6 @@
 import pytest
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from portfolio.supabase_auth import (
     SupabaseAuthError,
@@ -108,3 +110,19 @@ def test_supabase_auth_restore_session_uses_saved_tokens():
     assert account.account_id == "user@example.com"
     assert account.access_token == "new-access-token"
     assert account.refresh_token == "new-refresh-token"
+
+
+def test_sign_out_only_ends_current_session():
+    store = SupabaseAuthStore.__new__(SupabaseAuthStore)
+    sign_out = Mock()
+    store._client = SimpleNamespace(auth=SimpleNamespace(sign_out=sign_out))
+    store.sign_out()
+    sign_out.assert_called_once_with({"scope": "local"})
+
+
+def test_sign_out_wraps_network_failure_without_exposing_tokens():
+    store = SupabaseAuthStore.__new__(SupabaseAuthStore)
+    store._client = SimpleNamespace(auth=SimpleNamespace(sign_out=Mock(side_effect=RuntimeError("secret"))))
+    with pytest.raises(SupabaseAuthError) as exc:
+        store.sign_out()
+    assert "secret" not in str(exc.value)
