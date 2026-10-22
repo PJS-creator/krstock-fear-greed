@@ -1,1 +1,1 @@
-{"decision_session":"2026-10-21","details":{"error_type":"MetaStrategyError"},"generated_at_utc":"2026-10-22T00:50:49.777381+00:00","message":"FRED CSV에 날짜 열이 없습니다.","run_slot":"primary-0737-kst","schema_version":"1.0","status":"SOURCE_FAILED"}
+{"decision_session":"2026-10-21","details":{"error_type":"MetaStrategyError"},"generated_at_utc":"2026-10-22T01:04:17.738156+00:00","message":"FRED CSV에 날짜 열이 없습니다.","run_slot":"retry-0757-kst","schema_version":"1.0","status":"SOURCE_FAILED"}
