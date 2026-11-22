@@ -1,0 +1,1 @@
+{"decision_session":"2026-11-20","details":{"error_type":"MetaStrategyError"},"generated_at_utc":"2026-11-22T02:43:57.205395+00:00","message":"공식 원자료 조회 실패: https://api.tiingo.com/tiingo/daily/QQQ/prices?startDate=2005-03-28&endDate=2026-11-20&format=json&resampleFreq=daily (HTTP Error 502: Bad Gateway)","run_slot":"retry-0757-kst","schema_version":"1.0","status":"SOURCE_FAILED"}
